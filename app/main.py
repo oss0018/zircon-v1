@@ -35,17 +35,21 @@ async def create_default_admin():
 
 def start_http_redirect(http_port: int, https_port: int):
     import re
+    from urllib.parse import urlsplit, urlunsplit, quote
     _SAFE_HOST = re.compile(r'^[a-zA-Z0-9._-]{1,253}$')
 
     class RedirectHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             raw_host = self.headers.get("Host", "localhost").split(":")[0]
-            # Sanitize host to prevent HTTP response splitting
             host = raw_host if _SAFE_HOST.match(raw_host) else "localhost"
-            # Strip CR/LF from path to prevent header injection
-            safe_path = self.path.replace("\r", "").replace("\n", "")
+            # Re-encode the path to prevent header injection (encodes CR/LF and other special chars)
+            parsed = urlsplit(self.path)
+            safe_path = quote(parsed.path, safe="/:@!$&'()*+,;=") + (
+                "?" + quote(parsed.query, safe="/:@!$&'()*+,;=") if parsed.query else ""
+            )
+            location = f"https://{host}:{https_port}{safe_path}"
             self.send_response(301)
-            self.send_header("Location", f"https://{host}:{https_port}{safe_path}")
+            self.send_header("Location", location)
             self.end_headers()
 
         def log_message(self, format, *args):
