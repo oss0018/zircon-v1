@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.api.auth import get_current_user
 from app.database import get_db
@@ -93,6 +93,6 @@ async def trigger_job(job_id: int, db: AsyncSession = Depends(get_db), _: User =
         count = await scan_monitored_dir(folder, None)
         run_result["indexed"] = count
 
-    job.last_run = datetime.utcnow()
+    job.last_run = datetime.now(timezone.utc)
     await db.commit()
     return run_result

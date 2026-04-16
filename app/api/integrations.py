@@ -110,8 +110,8 @@ async def test_integration(integration_id: int, db: AsyncSession = Depends(get_d
         result_data = await client.search("test", "general")
         ok = "error" not in result_data or result_data.get("not_found", False)
         return {"ok": ok, "result": result_data}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        return {"ok": False, "error": "Integration test failed"}
 
 
 @router.post("/{integration_id}/query")

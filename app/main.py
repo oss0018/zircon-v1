@@ -34,10 +34,15 @@ async def create_default_admin():
 
 
 def start_http_redirect(http_port: int, https_port: int):
+    import re
+    _SAFE_HOST = re.compile(r'^[a-zA-Z0-9._-]{1,253}$')
+
     class RedirectHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            raw_host = self.headers.get("Host", "localhost").split(":")[0]
+            # Sanitize host to prevent HTTP response splitting
+            host = raw_host if _SAFE_HOST.match(raw_host) else "localhost"
             self.send_response(301)
-            host = self.headers.get("Host", "localhost").split(":")[0]
             self.send_header("Location", f"https://{host}:{https_port}{self.path}")
             self.end_headers()
 

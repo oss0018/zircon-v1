@@ -2,7 +2,7 @@
 Whoosh-based full-text search engine.
 """
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -52,7 +52,7 @@ class SearchEngine:
             file_type=file_type,
             project=project,
             path=path,
-            indexed_at=datetime.utcnow(),
+            indexed_at=datetime.now(timezone.utc),
         )
         writer.commit()
 

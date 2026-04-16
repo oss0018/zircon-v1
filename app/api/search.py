@@ -32,7 +32,7 @@ async def run_search(query: SearchQuery, db: AsyncSession = Depends(get_db),
                     "cached": False,
                 })
         except Exception as e:
-            results.append({"source": "local", "score": 0, "data": {"error": str(e)}, "cached": False})
+            results.append({"source": "local", "score": 0, "data": {"error": "Search error"}, "cached": False})
 
     if query.source in ("osint", "all") and query.integrations:
         from app.models import Integration
@@ -52,8 +52,8 @@ async def run_search(query: SearchQuery, db: AsyncSession = Depends(get_db),
                         "data": osint_result,
                         "cached": osint_result.get("cached", False),
                     })
-                except Exception as e:
-                    results.append({"source": svc, "score": 0, "data": {"error": str(e)}, "cached": False})
+                except Exception:
+                    results.append({"source": svc, "score": 0, "data": {"error": "Integration request failed"}, "cached": False})
 
     duration_ms = int((time.time() - start) * 1000)
     log = SearchLog(

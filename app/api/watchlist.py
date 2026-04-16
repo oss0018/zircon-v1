@@ -65,7 +65,7 @@ async def check_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db),
             try:
                 osint_result = await client.search(item.value, item.type)
                 results.append({"source": svc, "data": osint_result})
-            except Exception as e:
-                results.append({"source": svc, "data": {"error": str(e)}})
+            except Exception:
+                results.append({"source": svc, "data": {"error": "Integration request failed"}})
 
     return {"item_id": item_id, "value": item.value, "type": item.type, "results": results}

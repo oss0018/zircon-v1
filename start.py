@@ -79,12 +79,13 @@ try:
 except Exception:
     pass
 san = x509.SubjectAlternativeName(san_list)
+now = datetime.datetime.now(datetime.timezone.utc)
 cert = (x509.CertificateBuilder()
     .subject_name(subject).issuer_name(issuer)
     .public_key(key.public_key())
     .serial_number(x509.random_serial_number())
-    .not_valid_before(datetime.datetime.utcnow())
-    .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))
+    .not_valid_before(now)
+    .not_valid_after(now + datetime.timedelta(days=3650))
     .add_extension(san, critical=False)
     .sign(key, hashes.SHA256()))
 with open("cert.pem","wb") as f: f.write(cert.public_bytes(serialization.Encoding.PEM))

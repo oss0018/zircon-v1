@@ -1,7 +1,11 @@
 from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, ForeignKey, BigInteger
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import Base
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
 
 
 class User(Base):
@@ -10,7 +14,7 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False)
     password_hash = Column(String(256), nullable=False)
     role = Column(String(20), default="user")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class Project(Base):
@@ -18,7 +22,7 @@ class Project(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     files = relationship("File", back_populates="project")
 
 
@@ -33,7 +37,7 @@ class File(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     indexed = Column(Boolean, default=False)
     checksum = Column(String(64), default="")
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=_utcnow)
     tags = Column(Text, default="")
     project = relationship("Project", back_populates="files")
 
@@ -47,7 +51,7 @@ class Integration(Base):
     is_active = Column(Boolean, default=False)
     rate_limit = Column(Integer, default=60)
     cache_ttl = Column(Integer, default=3600)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class SearchTemplate(Base):
@@ -59,7 +63,7 @@ class SearchTemplate(Base):
     schedule = Column(String(100), default="")
     is_active = Column(Boolean, default=True)
     last_run = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class MonitoringJob(Base):
@@ -72,7 +76,7 @@ class MonitoringJob(Base):
     is_active = Column(Boolean, default=True)
     last_run = Column(DateTime, nullable=True)
     next_run = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class WatchlistItem(Base):
@@ -83,7 +87,7 @@ class WatchlistItem(Base):
     integrations_json = Column(Text, default="[]")
     alert_email = Column(String(256), default="")
     alert_telegram = Column(String(100), default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class SearchLog(Base):
@@ -93,7 +97,7 @@ class SearchLog(Base):
     results_count = Column(Integer, default=0)
     duration_ms = Column(Integer, default=0)
     source = Column(String(50), default="local")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class ApiRequestLog(Base):
@@ -104,7 +108,7 @@ class ApiRequestLog(Base):
     status_code = Column(Integer, default=200)
     duration_ms = Column(Integer, default=0)
     cached = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class Brand(Base):
@@ -116,7 +120,7 @@ class Brand(Base):
     logo_path = Column(String(512), default="")
     similarity_threshold = Column(Float, default=0.8)
     monitoring_enabled = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     alerts = relationship("BrandAlert", back_populates="brand")
 
 
@@ -129,7 +133,7 @@ class BrandAlert(Base):
     source = Column(String(100), default="")
     details_json = Column(Text, default="{}")
     status = Column(String(20), default="new")  # new/reviewed/dismissed
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     brand = relationship("Brand", back_populates="alerts")
 
 
@@ -140,4 +144,4 @@ class Notification(Base):
     title = Column(String(256), nullable=False)
     message = Column(Text, default="")
     read = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
