@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zircon FRT — OSINT Portal</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <!-- CDN Dependencies -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <!-- JS Modules -->
+  <script src="/static/js/i18n.js"></script>
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/dashboard.js"></script>
+  <script src="/static/js/search.js"></script>
+  <script src="/static/js/files.js"></script>
+  <script src="/static/js/integrations.js"></script>
+  <script src="/static/js/monitoring.js"></script>
+  <script src="/static/js/brand_protection.js"></script>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Main App -->
+  <div id="app" x-data="zirconApp" x-cloak>
+
+    <!-- ── LOGIN PAGE ─────────────────────────────────────────────── -->
+    <div x-show="!authenticated" class="login-page" style="width:100%;flex-direction:column;">
+      <div class="login-card">
+        <div class="login-logo">
+          <h1>⬡ ZIRCON</h1>
+          <p>FRT · OSINT Intelligence Portal</p>
+        </div>
+
+        <div x-show="loginError" class="alert alert-error" x-text="loginError"></div>
+
+        <div class="form-group">
+          <label class="form-label" x-text="t('username')"></label>
+          <input class="form-input" type="text" x-model="loginForm.username"
+                 :placeholder="t('username')" @keyup.enter="login()" autocomplete="username" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" x-text="t('password')"></label>
+          <input class="form-input" type="password" x-model="loginForm.password"
+                 :placeholder="t('password')" @keyup.enter="login()" autocomplete="current-password" />
+        </div>
+
+        <button class="btn btn-primary" style="width:100%;justify-content:center;"
+                @click="login()" :disabled="loginLoading">
+          <span x-show="loginLoading" class="spinner" style="width:16px;height:16px;"></span>
+          <span x-text="loginLoading ? t('loading') : t('login_btn')"></span>
+        </button>
+
+        <!-- Language switcher -->
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:20px;">
+          <button class="btn btn-sm btn-secondary" @click="setLang('en')"
+                  :style="lang === 'en' ? 'border-color: var(--accent-green); color: var(--accent-green)' : ''">EN</button>
+          <button class="btn btn-sm btn-secondary" @click="setLang('ru')"
+                  :style="lang === 'ru' ? 'border-color: var(--accent-green); color: var(--accent-green)' : ''">RU</button>
+          <button class="btn btn-sm btn-secondary" @click="setLang('uk')"
+                  :style="lang === 'uk' ? 'border-color: var(--accent-green); color: var(--accent-green)' : ''">UA</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MAIN LAYOUT ───────────────────────────────────────────── -->
+    <template x-if="authenticated">
+      <div style="display:flex;width:100%;height:100vh;">
+
+        <!-- ── SIDEBAR ─────────────────────────────────────────── -->
+        <aside class="sidebar">
+          <div class="sidebar-logo">
+            <h1>⬡ ZIRCON FRT</h1>
+            <p>OSINT Intelligence Portal</p>
+          </div>
+
+          <nav class="sidebar-nav">
+            <div class="nav-section">Intelligence</div>
+
+            <div class="nav-item" :class="page === 'dashboard' ? 'active' : ''" @click="navigate('dashboard'); loadStats()">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+              <span x-text="t('dashboard')"></span>
+            </div>
+
+            <div class="nav-item" :class="page === 'search' ? 'active' : ''" @click="navigate('search')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <span x-text="t('search')"></span>
+            </div>
+
+            <div class="nav-item" :class="page === 'files' ? 'active' : ''" @click="navigate('files')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+              <span x-text="t('files')"></span>
+            </div>
+
+            <div class="nav-section">OSINT</div>
+
+            <div class="nav-item" :class="page === 'integrations' ? 'active' : ''" @click="navigate('integrations')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <span x-text="t('integrations')"></span>
+            </div>
+
+            <div class="nav-item" :class="page === 'watchlist' ? 'active' : ''" @click="navigate('watchlist')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              <span x-text="t('watchlist')"></span>
+            </div>
+
+            <div class="nav-section">Automation</div>
+
+            <div class="nav-item" :class="page === 'monitoring' ? 'active' : ''" @click="navigate('monitoring')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              <span x-text="t('monitoring')"></span>
+            </div>
+
+            <div class="nav-item" :class="page === 'brands' ? 'active' : ''" @click="navigate('brands')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+              <span x-text="t('brand_protection')"></span>
+            </div>
+
+            <div class="nav-section">System</div>
+
+            <div class="nav-item" :class="page === 'notifications' ? 'active' : ''" @click="navigate('notifications'); loadStats()">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+              <span x-text="t('notifications')"></span>
+              <span class="nav-badge" x-show="unreadCount > 0" x-text="unreadCount"></span>
+            </div>
+          </nav>
+
+          <div class="sidebar-footer">
+            <div class="user-info">
+              <div class="user-avatar" x-text="userInitials()"></div>
+              <div style="flex:1;min-width:0;">
+                <div class="user-name" x-text="currentUser?.username"></div>
+                <div class="user-role" x-text="currentUser?.role"></div>
+              </div>
+              <button class="btn btn-sm btn-secondary" @click="logout()" title="Logout" style="padding:4px 8px;">
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+              </button>
+            </div>
+            <!-- Language switcher -->
+            <div style="display:flex;gap:6px;margin-top:10px;">
+              <button class="btn btn-sm btn-secondary" @click="setLang('en')"
+                      :style="lang === 'en' ? 'border-color: var(--accent-green); color: var(--accent-green)' : ''">EN</button>
+              <button class="btn btn-sm btn-secondary" @click="setLang('ru')"
+                      :style="lang === 'ru' ? 'border-color: var(--accent-green); color: var(--accent-green)' : ''">RU</button>
+              <button class="btn btn-sm btn-secondary" @click="setLang('uk')"
+                      :style="lang === 'uk' ? 'border-color: var(--accent-green); color: var(--accent-green)' : ''">UA</button>
+            </div>
+          </div>
+        </aside>
+
+        <!-- ── CONTENT AREA ────────────────────────────────────── -->
+        <main class="main-content">
+          <!-- Topbar -->
+          <div class="topbar">
+            <div class="topbar-title">
+              <span class="pulse" style="margin-right:8px;"></span>
+              <span x-text="t(page === 'brands' ? 'brand_protection' : page)"></span>
+            </div>
+            <div class="topbar-actions">
+              <span class="text-muted text-sm" x-text="new Date().toLocaleDateString()"></span>
+            </div>
+          </div>
+
+          <!-- Page Content -->
+          <div class="page-content">
+
+            <!-- ── DASHBOARD ──────────────────────────────────── -->
+            <div x-show="page === 'dashboard'" x-data="dashboardPage" x-init="init()">
+              <div class="stats-grid">
+                <div class="stat-card">
+                  <div class="stat-label" x-text="t('total_files')"></div>
+                  <div class="stat-value" x-text="stat('total_files')"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label" x-text="t('indexed_files')"></div>
+                  <div class="stat-value text-blue" x-text="stat('indexed_files')"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label" x-text="t('total_searches')"></div>
+                  <div class="stat-value" x-text="stat('total_searches')"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label" x-text="t('active_integrations')"></div>
+                  <div class="stat-value text-blue" x-text="stat('active_integrations')"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label" x-text="t('watchlist_items')"></div>
+                  <div class="stat-value" x-text="stat('watchlist_items')"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label" x-text="t('brand_alerts')"></div>
+                  <div class="stat-value text-red" x-text="stat('brand_alerts_new')"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label" x-text="t('monitoring_jobs')"></div>
+                  <div class="stat-value" x-text="stat('active_monitoring_jobs')"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label" x-text="t('unread_notifications')"></div>
+                  <div class="stat-value text-red" x-text="stat('unread_notifications')"></div>
+                </div>
+              </div>
+
+              <div class="grid-2" style="gap:20px;">
+                <div class="card">
+                  <div class="card-title" x-text="t('recent_searches')"></div>
+                  <template x-if="stats && stats.recent_searches.length === 0">
+                    <p class="text-muted text-sm" x-text="t('no_data')"></p>
+                  </template>
+                  <template x-for="s in (stats ? stats.recent_searches : [])" :key="s.query + s.created_at">
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-color);">
+                      <span class="text-sm truncate" x-text="s.query" style="max-width:200px;"></span>
+                      <span class="badge badge-gray" x-text="s.results_count + ' results'"></span>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="card">
+                  <div class="card-title" x-text="t('file_types')"></div>
+                  <div style="height:200px;display:flex;align-items:center;justify-content:center;">
+                    <template x-if="stats && Object.keys(stats.file_types).length > 0">
+                      <canvas id="fileTypeChart"></canvas>
+                    </template>
+                    <template x-if="!stats || Object.keys(stats.file_types || {}).length === 0">
+                      <p class="text-muted text-sm" x-text="t('no_data')"></p>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── SEARCH ─────────────────────────────────────── -->
+            <div x-show="page === 'search'" x-data="searchPage" x-init="init()">
+              <!-- Search Form -->
+              <div class="card mb-4">
+                <div class="search-bar">
+                  <div class="search-input-wrap" style="flex:2;">
+                    <svg class="search-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <input class="form-input" type="text" x-model="query"
+                           :placeholder="t('search_placeholder')" @keyup.enter="runSearch()" />
+                  </div>
+                  <select class="form-select" x-model="source" style="width:140px;">
+                    <option value="local" x-text="t('search_local')"></option>
+                    <option value="osint" x-text="t('search_osint')"></option>
+                    <option value="all" x-text="t('search_all')"></option>
+                  </select>
+                  <select class="form-select" x-model="queryType" style="width:120px;">
+                    <template x-for="qt in queryTypes" :key="qt">
+                      <option :value="qt" x-text="qt"></option>
+                    </template>
+                  </select>
+                  <button class="btn btn-primary" @click="runSearch()" :disabled="loading">
+                    <span x-show="loading" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="loading ? t('loading') : t('search_btn')"></span>
+                  </button>
+                </div>
+
+                <!-- Integration Selector -->
+                <div x-show="source !== 'local' && integrations.length > 0" style="margin-top:12px;">
+                  <div class="form-label" style="margin-bottom:8px;" x-text="t('integrations_to_use')"></div>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                    <template x-for="i in integrations" :key="i.id">
+                      <button class="btn btn-sm btn-secondary"
+                              :style="selectedIntegrations.includes(i.service_type) ? 'border-color: var(--accent-green); color: var(--accent-green)' : ''"
+                              @click="toggleIntegration(i.service_type)"
+                              x-text="i.name"></button>
+                    </template>
+                  </div>
+                </div>
+
+                <div style="display:flex;gap:8px;margin-top:12px;">
+                  <button class="btn btn-secondary btn-sm" @click="showHistory = !showHistory" x-text="t('search_history')"></button>
+                  <button class="btn btn-secondary btn-sm" @click="loadTemplates()" x-text="t('search_templates')"></button>
+                  <button class="btn btn-secondary btn-sm" x-show="query" @click="showSaveModal = true">+ Save Template</button>
+                </div>
+              </div>
+
+              <!-- History -->
+              <div x-show="showHistory" class="card mb-4">
+                <div class="card-title" x-text="t('search_history')"></div>
+                <template x-if="history.length === 0">
+                  <p class="text-muted text-sm" x-text="t('no_data')"></p>
+                </template>
+                <template x-for="h in history" :key="h.id">
+                  <div class="flex items-center justify-between" style="padding:6px 0;border-bottom:1px solid var(--border-color);">
+                    <span class="text-sm cursor-pointer text-green" @click="useHistoryQuery(h)" x-text="h.query"></span>
+                    <div class="flex gap-2">
+                      <span class="badge badge-gray" x-text="h.results_count + ' res'"></span>
+                      <span class="text-xs text-muted" x-text="formatDate(h.created_at)"></span>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Templates -->
+              <div x-show="showTemplates" class="card mb-4">
+                <div class="card-title flex justify-between">
+                  <span x-text="t('search_templates')"></span>
+                </div>
+                <template x-if="templates.length === 0">
+                  <p class="text-muted text-sm" x-text="t('no_data')"></p>
+                </template>
+                <template x-for="tmpl in templates" :key="tmpl.id">
+                  <div class="flex items-center justify-between" style="padding:6px 0;border-bottom:1px solid var(--border-color);">
+                    <span class="text-sm cursor-pointer text-green" @click="loadTemplate(tmpl)" x-text="tmpl.name"></span>
+                    <div class="flex gap-2">
+                      <span class="text-xs text-muted" x-text="tmpl.query.substring(0, 40)"></span>
+                      <button class="btn btn-sm btn-danger" @click="deleteTemplate(tmpl.id)">✕</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Results -->
+              <div x-show="results.length > 0">
+                <div class="flex justify-between items-center mb-4">
+                  <h3 class="card-title" x-text="results.length + ' ' + t('results')"></h3>
+                </div>
+                <template x-for="(result, i) in results" :key="i">
+                  <div class="result-card">
+                    <div class="flex justify-between items-center">
+                      <div class="result-source" x-text="result.source.toUpperCase()"></div>
+                      <div class="flex gap-2 items-center">
+                        <span class="badge badge-gray" x-show="result.cached">CACHED</span>
+                        <span class="badge badge-red" x-show="hasError(result)">ERROR</span>
+                        <span class="text-xs text-muted" x-show="result.score" x-text="'score: ' + result.score.toFixed(2)"></span>
+                        <button class="btn btn-sm btn-secondary" @click="toggleExpand(i)" x-text="expandedResult === i ? 'Collapse' : 'Expand'"></button>
+                      </div>
+                    </div>
+                    <!-- Local result -->
+                    <template x-if="result.source === 'local'">
+                      <div style="margin-top:8px;">
+                        <span class="text-sm" x-text="result.data.filename"></span>
+                        <span class="badge badge-gray" x-show="result.data.file_type" x-text="result.data.file_type" style="margin-left:8px;"></span>
+                        <span class="text-xs text-muted" x-show="result.data.project" x-text="result.data.project" style="margin-left:8px;"></span>
+                      </div>
+                    </template>
+                    <!-- Expanded JSON -->
+                    <div x-show="expandedResult === i" class="result-data" style="margin-top:10px;" x-text="resultJson(result)"></div>
+                  </div>
+                </template>
+              </div>
+
+              <div x-show="!loading && results.length === 0 && query" class="card text-center" style="color:var(--text-muted);" x-text="t('no_results')"></div>
+
+              <!-- Save Template Modal -->
+              <div x-show="showSaveModal" class="modal-overlay" @click.self="showSaveModal = false">
+                <div class="modal">
+                  <div class="modal-title">Save Search Template</div>
+                  <div class="form-group">
+                    <label class="form-label">Template Name</label>
+                    <input class="form-input" x-model="templateName" placeholder="My Template" />
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showSaveModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="saveTemplate()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── FILES ─────────────────────────────────────────── -->
+            <div x-show="page === 'files'" x-data="filesPage" x-init="init()">
+              <!-- Stats -->
+              <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px;" x-show="stats">
+                <div class="stat-card">
+                  <div class="stat-label">Total Files</div>
+                  <div class="stat-value" x-text="stats ? stats.total : 0"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">Indexed</div>
+                  <div class="stat-value text-blue" x-text="stats ? stats.indexed : 0"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">Total Size</div>
+                  <div class="stat-value" x-text="stats ? formatBytes(stats.total_size) : '0'"></div>
+                </div>
+              </div>
+
+              <!-- Toolbar -->
+              <div class="flex justify-between items-center mb-4">
+                <div class="flex gap-2 items-center">
+                  <select class="form-select" x-model="selectedProject" @change="page=0;loadFiles()" style="width:160px;">
+                    <option value="">All Projects</option>
+                    <template x-for="p in projects" :key="p.id">
+                      <option :value="p.id" x-text="p.name"></option>
+                    </template>
+                  </select>
+                  <button class="btn btn-secondary" @click="projectModal = true">+ Project</button>
+                </div>
+                <label class="btn btn-primary" style="cursor:pointer;">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                  <span x-text="t('upload_file')"></span>
+                  <input type="file" style="display:none;" multiple @change="onFileSelect($event)" />
+                </label>
+              </div>
+
+              <!-- Drop Zone -->
+              <div class="drop-zone mb-4"
+                   @dragover.prevent="dragging = true"
+                   @dragleave="dragging = false"
+                   @drop.prevent="onDrop($event)"
+                   :class="dragging ? 'dragging' : ''">
+                <div class="drop-zone-icon">
+                  <svg width="36" height="36" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                </div>
+                <div class="drop-zone-text">
+                  <span x-text="t('drop_files')"></span>&nbsp;
+                  <label style="color:var(--accent-green);cursor:pointer;">
+                    <span x-text="t('browse')"></span>
+                    <input type="file" style="display:none;" multiple @change="onFileSelect($event)" />
+                  </label>
+                </div>
+                <div x-show="uploading" class="flex items-center gap-2" style="margin-top:12px;justify-content:center;">
+                  <div class="spinner"></div>
+                  <span class="text-sm text-muted">Uploading & indexing...</span>
+                </div>
+              </div>
+
+              <!-- Files Table -->
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th x-text="t('file_name')"></th>
+                      <th x-text="t('file_size')"></th>
+                      <th x-text="t('file_type')"></th>
+                      <th x-text="t('file_project')"></th>
+                      <th x-text="t('file_indexed')"></th>
+                      <th x-text="t('file_uploaded')"></th>
+                      <th x-text="t('actions')"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-if="loading">
+                      <tr><td colspan="7" style="text-align:center;padding:30px;" x-text="t('loading')"></td></tr>
+                    </template>
+                    <template x-if="!loading && files.length === 0">
+                      <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
+                    </template>
+                    <template x-for="f in files" :key="f.id">
+                      <tr>
+                        <td>
+                          <div class="flex items-center gap-2">
+                            <span class="badge badge-gray" x-text="fileExt(f.name)" style="min-width:36px;text-align:center;"></span>
+                            <span class="truncate" style="max-width:200px;" x-text="f.original_name"></span>
+                          </div>
+                        </td>
+                        <td x-text="formatBytes(f.size)"></td>
+                        <td x-text="f.mime_type || '—'"></td>
+                        <td x-text="projectName(f.project_id)"></td>
+                        <td>
+                          <span :class="f.indexed ? 'badge badge-green' : 'badge badge-gray'"
+                                x-text="f.indexed ? '✓' : '—'"></span>
+                        </td>
+                        <td x-text="formatDate(f.uploaded_at)"></td>
+                        <td>
+                          <div class="flex gap-2">
+                            <button class="btn btn-sm btn-secondary" @click="openEdit(f)">Edit</button>
+                            <button class="btn btn-sm btn-secondary" @click="reindex(f.id)" x-text="t('reindex')"></button>
+                            <button class="btn btn-sm btn-secondary" @click="download(f.id)" x-text="t('download')"></button>
+                            <button class="btn btn-sm btn-danger" @click="deleteFile(f.id)">✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Edit Modal -->
+              <div x-show="editModal" class="modal-overlay" @click.self="editModal = false">
+                <div class="modal" x-show="editFile">
+                  <div class="modal-title">Edit File</div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('file_name')"></label>
+                    <input class="form-input" x-model="editFile.name" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('tags')"></label>
+                    <input class="form-input" x-model="editFile.tags" placeholder="tag1, tag2" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('project')"></label>
+                    <select class="form-select" x-model="editFile.project_id">
+                      <option value="">No project</option>
+                      <template x-for="p in projects" :key="p.id">
+                        <option :value="p.id" x-text="p.name"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="editModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="saveEdit()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Project Modal -->
+              <div x-show="projectModal" class="modal-overlay" @click.self="projectModal = false">
+                <div class="modal">
+                  <div class="modal-title">Create Project</div>
+                  <div class="form-group">
+                    <label class="form-label">Name</label>
+                    <input class="form-input" x-model="newProjectName" placeholder="Project name" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('description')"></label>
+                    <input class="form-input" x-model="newProjectDesc" placeholder="Description" />
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="projectModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="createProject()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── INTEGRATIONS ───────────────────────────────────── -->
+            <div x-show="page === 'integrations'" x-data="integrationsPage" x-init="init()">
+              <div class="flex justify-between items-center mb-4">
+                <div></div>
+                <button class="btn btn-primary" @click="showModal = true" x-text="t('add_integration')"></button>
+              </div>
+
+              <!-- Services overview -->
+              <div class="card mb-4">
+                <div class="card-title">Available Services</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;">
+                  <template x-for="svc in services" :key="svc.type">
+                    <div style="border:1px solid var(--border-color);border-radius:6px;padding:12px;cursor:pointer;transition:all 0.2s;"
+                         :style="!notConfigured(svc) ? 'border-color:var(--accent-green);' : ''"
+                         @click="showModal = true; selectService(svc)">
+                      <div class="text-sm font-mono" style="font-weight:600;" x-text="svc.name"></div>
+                      <div class="text-xs text-muted" x-text="svc.type"></div>
+                      <div style="margin-top:6px;">
+                        <span :class="notConfigured(svc) ? 'badge badge-gray' : 'badge badge-green'"
+                              x-text="notConfigured(svc) ? 'Not configured' : 'Configured'"></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Configured integrations table -->
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th x-text="t('service')"></th>
+                      <th x-text="t('status')"></th>
+                      <th>Rate Limit</th>
+                      <th x-text="t('created_at')"></th>
+                      <th x-text="t('actions')"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-if="integrations.length === 0">
+                      <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
+                    </template>
+                    <template x-for="i in integrations" :key="i.id">
+                      <tr>
+                        <td x-text="i.name"></td>
+                        <td><span class="badge badge-blue" x-text="i.service_type"></span></td>
+                        <td>
+                          <span :class="i.is_active ? 'badge badge-green' : 'badge badge-gray'"
+                                x-text="i.is_active ? t('active') : t('inactive')"></span>
+                        </td>
+                        <td x-text="i.rate_limit + '/min'"></td>
+                        <td x-text="formatDate(i.created_at)"></td>
+                        <td>
+                          <div class="flex gap-2">
+                            <button class="btn btn-sm btn-secondary" @click="openEdit(i)">Edit</button>
+                            <button class="btn btn-sm btn-secondary" @click="testIntegration(i.id)" x-text="t('test')"></button>
+                            <button class="btn btn-sm btn-secondary" @click="openQuery(i.id)" x-text="t('query')"></button>
+                            <button class="btn btn-sm btn-danger" @click="deleteIntegration(i.id)">✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Test result -->
+              <div x-show="testResult" class="card mt-4">
+                <div class="card-title">Test Result</div>
+                <div :class="testResult && testResult.ok ? 'alert alert-success' : 'alert alert-error'"
+                     x-text="testResult && testResult.ok ? 'API key valid ✓' : 'API key invalid or error'"></div>
+                <div class="json-viewer" x-text="formatJSON(testResult)"></div>
+              </div>
+
+              <!-- Add Modal -->
+              <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">
+                <div class="modal">
+                  <div class="modal-title" x-text="t('add_integration')"></div>
+                  <div class="form-group">
+                    <label class="form-label">Service</label>
+                    <select class="form-select" x-model="newIntegration.service_type" @change="selectService(services.find(s=>s.type===newIntegration.service_type)||{})">
+                      <option value="">Select service...</option>
+                      <template x-for="svc in services" :key="svc.type">
+                        <option :value="svc.type" x-text="svc.name"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Display Name</label>
+                    <input class="form-input" x-model="newIntegration.name" placeholder="My HIBP" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('api_key')"></label>
+                    <input class="form-input" type="password" x-model="newIntegration.api_key" placeholder="Enter API key" />
+                  </div>
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label class="form-label">Rate Limit (req/min)</label>
+                      <input class="form-input" type="number" x-model="newIntegration.rate_limit" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Cache TTL (seconds)</label>
+                      <input class="form-input" type="number" x-model="newIntegration.cache_ttl" />
+                    </div>
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="createIntegration()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Edit Modal -->
+              <div x-show="editModal" class="modal-overlay" @click.self="editModal = false">
+                <div class="modal" x-show="editIntegration">
+                  <div class="modal-title">Edit Integration</div>
+                  <div class="form-group">
+                    <label class="form-label">Name</label>
+                    <input class="form-input" x-model="editIntegration.name" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('api_key') + ' (leave empty to keep current)'"></label>
+                    <input class="form-input" type="password" x-model="editIntegration.api_key" placeholder="Enter new API key or leave empty" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Active</label>
+                    <input type="checkbox" x-model="editIntegration.is_active" />
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="editModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="saveEdit()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Query Modal -->
+              <div x-show="showQueryModal" class="modal-overlay" @click.self="showQueryModal = false">
+                <div class="modal">
+                  <div class="modal-title">Query Integration</div>
+                  <div class="form-group">
+                    <label class="form-label">Query</label>
+                    <input class="form-input" x-model="queryForm.query" placeholder="Enter query..." @keyup.enter="runQuery()" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('query_type')"></label>
+                    <select class="form-select" x-model="queryForm.query_type">
+                      <template x-for="qt in queryTypes" :key="qt">
+                        <option :value="qt" x-text="qt"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <button class="btn btn-primary" @click="runQuery()" :disabled="queryLoading">
+                    <span x-show="queryLoading" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="queryLoading ? t('loading') : t('search_btn')"></span>
+                  </button>
+                  <div x-show="queryResult" class="json-viewer" style="margin-top:12px;" x-text="queryResultJson()"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── MONITORING ─────────────────────────────────────── -->
+            <div x-show="page === 'monitoring'" x-data="monitoringPage" x-init="init()">
+              <div class="flex justify-between items-center mb-4">
+                <div></div>
+                <button class="btn btn-primary" @click="showModal = true" x-text="t('add_job')"></button>
+              </div>
+
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th x-text="t('job_name')"></th>
+                      <th x-text="t('job_type')"></th>
+                      <th x-text="t('schedule')"></th>
+                      <th x-text="t('status')"></th>
+                      <th x-text="t('last_run')"></th>
+                      <th x-text="t('actions')"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-if="jobs.length === 0">
+                      <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
+                    </template>
+                    <template x-for="job in jobs" :key="job.id">
+                      <tr>
+                        <td x-text="job.name"></td>
+                        <td><span class="badge badge-blue" x-text="jobTypeLabel(job.type)"></span></td>
+                        <td><code class="text-xs" x-text="job.schedule"></code></td>
+                        <td>
+                          <span :class="job.is_active ? 'badge badge-green' : 'badge badge-gray'"
+                                x-text="job.is_active ? t('active') : t('inactive')"></span>
+                        </td>
+                        <td x-text="job.last_run ? formatDate(job.last_run) : '—'"></td>
+                        <td>
+                          <div class="flex gap-2">
+                            <button class="btn btn-sm btn-secondary" @click="toggleJob(job)"
+                                    x-text="job.is_active ? 'Disable' : 'Enable'"></button>
+                            <button class="btn btn-sm btn-primary" @click="triggerJob(job.id)" x-text="t('trigger')"></button>
+                            <button class="btn btn-sm btn-danger" @click="deleteJob(job.id)">✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Trigger Result -->
+              <div x-show="triggerResult" class="card mt-4">
+                <div class="card-title">Trigger Result</div>
+                <div class="json-viewer" x-text="JSON.stringify(triggerResult, null, 2)"></div>
+              </div>
+
+              <!-- Add Modal -->
+              <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">
+                <div class="modal">
+                  <div class="modal-title" x-text="t('add_job')"></div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('job_name')"></label>
+                    <input class="form-input" x-model="newJob.name" placeholder="My Monitoring Job" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('job_type')"></label>
+                    <select class="form-select" x-model="newJob.type">
+                      <template x-for="jt in jobTypes" :key="jt.value">
+                        <option :value="jt.value" x-text="jt.label"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('schedule')"></label>
+                    <div class="flex gap-2">
+                      <input class="form-input" x-model="newJob.schedule" placeholder="*/15 * * * *" />
+                    </div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+                      <template x-for="s in commonSchedules" :key="s.value">
+                        <button class="btn btn-sm btn-secondary" @click="newJob.schedule = s.value" x-text="s.label"></button>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('config')"></label>
+                    <textarea class="form-input" x-model="newJob.config_json" rows="3"
+                              placeholder='{"folder": "./data/monitored"}'></textarea>
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="createJob()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── BRAND PROTECTION ───────────────────────────────── -->
+            <div x-show="page === 'brands'" x-data="brandPage" x-init="init()">
+              <div class="flex justify-between items-center mb-4">
+                <div class="flex gap-2">
+                  <button class="btn btn-secondary" @click="showAlerts = false" x-show="showAlerts">← Brands</button>
+                </div>
+                <div class="flex gap-2">
+                  <button class="btn btn-secondary" @click="loadAllAlerts(); showAlerts = true; activeBrand = null"
+                          x-show="!showAlerts">
+                    View All Alerts <span class="nav-badge" style="position:relative;top:0;right:0;margin-left:4px;" x-show="newAlerts() > 0" x-text="newAlerts()"></span>
+                  </button>
+                  <button class="btn btn-primary" @click="showModal = true" x-text="t('add_brand')"></button>
+                </div>
+              </div>
+
+              <!-- Brands List -->
+              <div x-show="!showAlerts">
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+                  <template x-for="brand in brands" :key="brand.id">
+                    <div class="card">
+                      <div class="flex justify-between items-center mb-4">
+                        <div>
+                          <div style="font-weight:600;" x-text="brand.name"></div>
+                          <div class="text-sm text-muted" x-text="brand.url"></div>
+                        </div>
+                        <span :class="brand.monitoring_enabled ? 'badge badge-green' : 'badge badge-gray'"
+                              x-text="brand.monitoring_enabled ? 'Monitoring' : 'Paused'"></span>
+                      </div>
+                      <div class="text-xs text-muted mb-4" x-show="brand.keywords">
+                        <span>Keywords: </span><span x-text="brand.keywords"></span>
+                      </div>
+                      <div class="text-xs text-muted mb-4">
+                        Threshold: <span class="text-green" x-text="(brand.similarity_threshold * 100).toFixed(0) + '%'"></span>
+                      </div>
+                      <div class="flex gap-2 flex-wrap">
+                        <button class="btn btn-sm btn-primary" @click="scanBrand(brand.id)" :disabled="scanning" x-text="t('scan')"></button>
+                        <button class="btn btn-sm btn-secondary" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
+                        <button class="btn btn-sm btn-danger" @click="deleteBrand(brand.id)">✕</button>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="brands.length === 0">
+                    <div class="card text-muted text-sm" x-text="t('no_data')"></div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Alerts View -->
+              <div x-show="showAlerts">
+                <div class="card-title" style="margin-bottom:16px;">
+                  <span x-show="activeBrand" x-text="activeBrand && activeBrand.name + ' — Alerts'"></span>
+                  <span x-show="!activeBrand">All Brand Alerts</span>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Similar Domain</th>
+                        <th x-text="t('similarity')"></th>
+                        <th>Source</th>
+                        <th x-text="t('status')"></th>
+                        <th x-text="t('created_at')"></th>
+                        <th x-text="t('actions')"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="alerts.length === 0">
+                        <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
+                      </template>
+                      <template x-for="alert in alerts" :key="alert.id">
+                        <tr>
+                          <td class="font-mono" x-text="alert.similar_domain"></td>
+                          <td>
+                            <span :class="similarityColor(alert.similarity_score)"
+                                  x-text="(alert.similarity_score * 100).toFixed(1) + '%'" class="badge"></span>
+                          </td>
+                          <td x-text="alert.source"></td>
+                          <td>
+                            <span :class="statusColor(alert.status)" class="badge" x-text="t(alert.status)"></span>
+                          </td>
+                          <td x-text="formatDate(alert.created_at)"></td>
+                          <td>
+                            <div class="flex gap-2">
+                              <button class="btn btn-sm btn-secondary" x-show="alert.status !== 'reviewed'"
+                                      @click="updateAlertStatus(alert.id, 'reviewed')" x-text="t('reviewed')"></button>
+                              <button class="btn btn-sm btn-danger" x-show="alert.status !== 'dismissed'"
+                                      @click="updateAlertStatus(alert.id, 'dismissed')" x-text="t('dismissed')"></button>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Add Brand Modal -->
+              <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">
+                <div class="modal">
+                  <div class="modal-title" x-text="t('add_brand')"></div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('brand_name')"></label>
+                    <input class="form-input" x-model="newBrand.name" placeholder="Acme Corp" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('brand_url')"></label>
+                    <input class="form-input" x-model="newBrand.url" placeholder="https://acme.com" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('keywords')"></label>
+                    <input class="form-input" x-model="newBrand.keywords" placeholder="acme, acmecorp" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('threshold') + ' (' + (newBrand.similarity_threshold * 100).toFixed(0) + '%)'"></label>
+                    <input class="form-input" type="range" min="0.5" max="1" step="0.05" x-model="newBrand.similarity_threshold" />
+                  </div>
+                  <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" x-model="newBrand.monitoring_enabled" />
+                      <span class="form-label" style="margin-bottom:0;" x-text="t('monitoring_enabled')"></span>
+                    </label>
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="createBrand()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── WATCHLIST ───────────────────────────────────────── -->
+            <div x-show="page === 'watchlist'" x-data="{
+              items: [], integrations: [], loading: false, showModal: false,
+              checkResult: null, checkLoading: false,
+              newItem: { type: 'email', value: '', integrations_json: '[]', alert_email: '', alert_telegram: '' },
+              itemTypes: ['email', 'domain', 'ip', 'keyword', 'brand'],
+              async init() {
+                await this.load();
+                try { const i = await api.get('/integrations/'); this.integrations = i.filter(x=>x.is_active); } catch {}
+              },
+              async load() {
+                this.loading = true;
+                try { this.items = await api.get('/watchlist/'); } catch(e){ showToast(e.message,'error'); } finally { this.loading = false; }
+              },
+              async create() {
+                try {
+                  this.newItem.integrations_json = JSON.stringify(this.selectedIntegrations || []);
+                  await api.post('/watchlist/', this.newItem);
+                  await this.load(); this.showModal = false;
+                  this.newItem = { type: 'email', value: '', integrations_json: '[]', alert_email: '', alert_telegram: '' };
+                  showToast('Added', 'success');
+                } catch(e) { showToast(e.message,'error'); }
+              },
+              async checkItem(id) {
+                this.checkLoading = true; this.checkResult = null;
+                try { this.checkResult = await api.post('/watchlist/' + id + '/check'); showToast('Check complete','success'); }
+                catch(e) { showToast(e.message,'error'); } finally { this.checkLoading = false; }
+              },
+              async deleteItem(id) {
+                if(!confirm(t('confirm_delete'))) return;
+                try { await api.delete('/watchlist/' + id); this.items = this.items.filter(i=>i.id!==id); showToast('Deleted','success'); }
+                catch(e) { showToast(e.message,'error'); }
+              },
+              selectedIntegrations: [],
+              toggleInteg(t) { const i=this.selectedIntegrations.indexOf(t); if(i>=0) this.selectedIntegrations.splice(i,1); else this.selectedIntegrations.push(t); },
+            }">
+              <div class="flex justify-between items-center mb-4">
+                <div></div>
+                <button class="btn btn-primary" @click="showModal = true" x-text="t('add_item')"></button>
+              </div>
+
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th x-text="t('item_type')"></th>
+                      <th x-text="t('item_value')"></th>
+                      <th>Integrations</th>
+                      <th>Alert Email</th>
+                      <th x-text="t('created_at')"></th>
+                      <th x-text="t('actions')"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-if="items.length === 0">
+                      <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
+                    </template>
+                    <template x-for="item in items" :key="item.id">
+                      <tr>
+                        <td><span class="badge badge-blue" x-text="item.type"></span></td>
+                        <td class="font-mono" x-text="item.value"></td>
+                        <td class="text-xs text-muted" x-text="item.integrations_json"></td>
+                        <td x-text="item.alert_email || '—'"></td>
+                        <td x-text="formatDate(item.created_at)"></td>
+                        <td>
+                          <div class="flex gap-2">
+                            <button class="btn btn-sm btn-primary" @click="checkItem(item.id)" :disabled="checkLoading" x-text="t('check_now')"></button>
+                            <button class="btn btn-sm btn-danger" @click="deleteItem(item.id)">✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Check Result -->
+              <div x-show="checkResult" class="card mt-4">
+                <div class="card-title">Check Results for <span x-text="checkResult && checkResult.value"></span></div>
+                <template x-for="r in (checkResult ? checkResult.results : [])" :key="r.source">
+                  <div class="result-card">
+                    <div class="result-source" x-text="r.source"></div>
+                    <div class="json-viewer" x-text="formatJSON(r.data)"></div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Add Modal -->
+              <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">
+                <div class="modal">
+                  <div class="modal-title" x-text="t('add_item')"></div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('item_type')"></label>
+                    <select class="form-select" x-model="newItem.type">
+                      <template x-for="it in itemTypes" :key="it">
+                        <option :value="it" x-text="it"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('item_value')"></label>
+                    <input class="form-input" x-model="newItem.value" placeholder="email@example.com / domain.com / 1.2.3.4" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('integrations_to_use')"></label>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                      <template x-for="i in integrations" :key="i.id">
+                        <button class="btn btn-sm btn-secondary"
+                                :style="selectedIntegrations.includes(i.service_type) ? 'border-color:var(--accent-green);color:var(--accent-green)' : ''"
+                                @click="toggleInteg(i.service_type)" x-text="i.name"></button>
+                      </template>
+                      <template x-if="integrations.length === 0">
+                        <span class="text-muted text-sm">No active integrations</span>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('alert_email')"></label>
+                    <input class="form-input" type="email" x-model="newItem.alert_email" placeholder="alert@example.com" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('alert_telegram')"></label>
+                    <input class="form-input" x-model="newItem.alert_telegram" placeholder="@username or chat_id" />
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="create()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── NOTIFICATIONS ──────────────────────────────────── -->
+            <div x-show="page === 'notifications'" x-data="{
+              notifications: [], loading: false,
+              async init() { await this.load(); },
+              async load() {
+                this.loading = true;
+                try { this.notifications = await api.get('/dashboard/notifications?limit=100'); }
+                catch(e) { showToast(e.message,'error'); } finally { this.loading = false; }
+              },
+              async markRead(id) {
+                try { await api.post('/dashboard/notifications/' + id + '/read'); await this.load(); }
+                catch(e) {}
+              },
+              async markAllRead() {
+                try { await api.post('/dashboard/notifications/read-all'); await this.load(); showToast('All marked as read','success'); }
+                catch(e) { showToast(e.message,'error'); }
+              },
+              typeClass(type) { const m={info:'badge-blue',success:'badge-green',error:'badge-red',warning:'badge-yellow'}; return m[type]||'badge-gray'; },
+            }">
+              <div class="flex justify-between items-center mb-4">
+                <div></div>
+                <button class="btn btn-secondary" @click="markAllRead()" x-text="t('mark_all_read')"></button>
+              </div>
+
+              <template x-if="notifications.length === 0">
+                <div class="card text-center" style="color:var(--text-muted);" x-text="t('no_data')"></div>
+              </template>
+
+              <template x-for="n in notifications" :key="n.id">
+                <div class="card mb-4" :style="!n.read ? 'border-color: rgba(0,180,216,0.3)' : ''">
+                  <div class="flex justify-between items-center mb-4">
+                    <div class="flex items-center gap-2">
+                      <span :class="'badge ' + typeClass(n.type)" x-text="n.type.toUpperCase()"></span>
+                      <span style="font-weight:600;" x-text="n.title"></span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-muted" x-text="formatDate(n.created_at)"></span>
+                      <button x-show="!n.read" class="btn btn-sm btn-secondary" @click="markRead(n.id)" x-text="t('mark_read')"></button>
+                    </div>
+                  </div>
+                  <div class="text-sm text-muted" x-text="n.message" x-show="n.message"></div>
+                </div>
+              </template>
+            </div>
+
+          </div><!-- /page-content -->
+        </main>
+      </div>
+    </template>
+  </div><!-- /app -->
+
+  <script>
+    // Initialize Lucide icons after page load
+    window.addEventListener('load', () => {
+      if (window.lucide) lucide.createIcons();
+    });
+  </script>
+</body>
+</html>
