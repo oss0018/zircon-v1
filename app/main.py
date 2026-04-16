@@ -42,8 +42,10 @@ def start_http_redirect(http_port: int, https_port: int):
             raw_host = self.headers.get("Host", "localhost").split(":")[0]
             # Sanitize host to prevent HTTP response splitting
             host = raw_host if _SAFE_HOST.match(raw_host) else "localhost"
+            # Strip CR/LF from path to prevent header injection
+            safe_path = self.path.replace("\r", "").replace("\n", "")
             self.send_response(301)
-            self.send_header("Location", f"https://{host}:{https_port}{self.path}")
+            self.send_header("Location", f"https://{host}:{https_port}{safe_path}")
             self.end_headers()
 
         def log_message(self, format, *args):
