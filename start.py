@@ -48,6 +48,7 @@ def install_requirements(venv_python):
     pip = VENV_DIR / ("Scripts/pip.exe" if sys.platform == "win32" else "bin/pip")
     print("📦 Checking/installing dependencies...")
     subprocess.run([str(pip), "install", "-q", "-r", str(REQUIREMENTS)], check=True)
+    subprocess.run([str(pip), "install", "-q", "--force-reinstall", "bcrypt==4.0.1"], check=True)
     print("✅ All dependencies installed")
 
 def generate_ssl_cert():
