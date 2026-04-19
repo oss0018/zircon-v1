@@ -220,6 +220,22 @@ class NotificationOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Watched Folders ───────────────────────────────────────────────────────────
+class WatchedFolderCreate(BaseModel):
+    path: str
+
+
+class WatchedFolderOut(BaseModel):
+    id: int
+    path: str
+    is_active: bool
+    files_count: int
+    last_scan: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 class DashboardStats(BaseModel):
     total_files: int

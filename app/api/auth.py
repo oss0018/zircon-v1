@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -92,3 +92,58 @@ async def register(data: UserCreate, db: AsyncSession = Depends(get_db),
     await db.commit()
     await db.refresh(user)
     return user
+
+
+@router.get("/users", response_model=List[UserOut])
+async def list_users(db: AsyncSession = Depends(get_db),
+                     current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    result = await db.execute(select(User).order_by(User.id))
+    return result.scalars().all()
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_db),
+                      current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Not found")
+    await db.delete(user)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_user_password(user_id: int, data: dict, db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Not found")
+    new_pwd = data.get("new_password", "")
+    if not new_pwd:
+        raise HTTPException(status_code=400, detail="Password required")
+    user.password_hash = hash_password(new_pwd)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/change-password")
+async def change_own_password(data: dict, db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    if not verify_password(data.get("current_password", ""), current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password incorrect")
+    new_pwd = data.get("new_password", "")
+    if not new_pwd:
+        raise HTTPException(status_code=400, detail="New password required")
+    current_user.password_hash = hash_password(new_pwd)
+    await db.commit()
+    return {"ok": True}
