@@ -58,7 +58,7 @@ document.addEventListener('alpine:init', () => {
     // ── Profile ───────────────────────────────────────────────────────────
     async changePassword() {
       if (this.profileForm.new_password !== this.profileForm.confirm_password) {
-        showToast(t('confirm_password') + ' mismatch', 'error');
+        showToast(t('passwords_no_match'), 'error');
         return;
       }
       this.profileLoading = true;
@@ -111,7 +111,7 @@ document.addEventListener('alpine:init', () => {
 
     async doResetPassword() {
       if (!this.resetPassword) {
-        showToast(t('new_password') + ' required', 'error');
+        showToast(t('field_required'), 'error');
         return;
       }
       this.resetLoading = true;
@@ -153,7 +153,7 @@ document.addEventListener('alpine:init', () => {
 
     async addFolder() {
       if (!this.newFolderPath.trim()) {
-        showToast(t('folder_path') + ' required', 'error');
+        showToast(t('field_required'), 'error');
         return;
       }
       this.addFolderLoading = true;

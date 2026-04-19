@@ -219,6 +219,7 @@ async def _scan_watched_folder(folder: WatchedFolder, db: AsyncSession) -> int:
         return 0
 
     indexed_count = 0
+    new_files = []
     for file_path in folder_path.rglob("*"):
         if not file_path.is_file():
             continue
@@ -230,34 +231,63 @@ async def _scan_watched_folder(folder: WatchedFolder, db: AsyncSession) -> int:
         db_file = existing.scalar_one_or_none()
 
         if db_file is None:
-            content = file_path.read_bytes()
-            checksum = hashlib.sha256(content).hexdigest()
+            # Compute checksum in chunks to avoid loading large files into memory
+            h = hashlib.sha256()
+            file_size = 0
+            with open(file_path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(65536), b""):
+                    h.update(chunk)
+                    file_size += len(chunk)
+            checksum = h.hexdigest()
             db_file = FileModel(
                 name=file_path.name,
                 original_name=file_path.name,
                 path=path_str,
-                size=len(content),
+                size=file_size,
                 mime_type="",
                 checksum=checksum,
             )
             db.add(db_file)
-            await db.commit()
+            new_files.append((db_file, file_path))
+
+    # Batch commit new file records
+    if new_files:
+        await db.commit()
+        for db_file, _ in new_files:
             await db.refresh(db_file)
 
-        if not db_file.indexed:
+    # Index files not yet indexed
+    for file_path in folder_path.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+        path_str = str(file_path)
+        existing = await db.execute(select(FileModel).where(FileModel.path == path_str))
+        db_file = existing.scalar_one_or_none()
+        if db_file and not db_file.indexed:
             ok = await index_file(db_file.id, path_str, file_path.name,
                                   file_path.suffix.lstrip("."))
             if ok:
                 db_file.indexed = True
-                await db.commit()
                 indexed_count += 1
 
+    # Batch commit indexed flags
+    if indexed_count > 0:
+        await db.commit()
+
+    # Count files under this folder path safely (no LIKE wildcards in user data)
+    folder_prefix = str(folder_path)
+    if not folder_prefix.endswith("/"):
+        folder_prefix += "/"
+    all_files_result = await db.execute(select(FileModel.path))
+    files_count = sum(
+        1 for (p,) in all_files_result.all()
+        if p == str(folder_path) or p.startswith(folder_prefix)
+    )
+
     folder.last_scan = datetime.now(timezone.utc)
-    folder.files_count = await db.scalar(
-        select(func.count(FileModel.id)).where(
-            FileModel.path.like(str(folder_path) + "%")
-        )
-    ) or 0
+    folder.files_count = files_count
     await db.commit()
     return indexed_count
 
