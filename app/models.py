@@ -145,3 +145,13 @@ class Notification(Base):
     message = Column(Text, default="")
     read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=_utcnow)
+
+
+class WatchedFolder(Base):
+    __tablename__ = "watched_folders"
+    id = Column(Integer, primary_key=True)
+    path = Column(String(512), unique=True, nullable=False)
+    is_active = Column(Boolean, default=True)
+    files_count = Column(Integer, default=0)
+    last_scan = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)

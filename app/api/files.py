@@ -9,8 +9,8 @@ import aiofiles
 
 from app.api.auth import get_current_user
 from app.database import get_db
-from app.models import User, File as FileModel, Project
-from app.schemas import FileOut, FileUpdate, ProjectCreate, ProjectOut
+from app.models import User, File as FileModel, Project, WatchedFolder
+from app.schemas import FileOut, FileUpdate, ProjectCreate, ProjectOut, WatchedFolderCreate, WatchedFolderOut
 from app.config import settings
 from app.services.indexer import index_file, remove_from_index, compute_checksum
 
@@ -202,3 +202,148 @@ async def download_file(file_id: int, db: AsyncSession = Depends(get_db), _: Use
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
     return FileResponse(str(path), filename=f.original_name, media_type=f.mime_type or "application/octet-stream")
+
+
+# ── Watched Folders ───────────────────────────────────────────────────────────
+
+SUPPORTED_EXTENSIONS = {
+    ".txt", ".csv", ".sql", ".json", ".xml", ".xlsx",
+    ".pdf", ".docx", ".log", ".md",
+}
+
+
+async def _scan_watched_folder(folder: WatchedFolder, db: AsyncSession) -> int:
+    from datetime import datetime, timezone
+    folder_path = Path(folder.path)
+    if not folder_path.exists() or not folder_path.is_dir():
+        return 0
+
+    indexed_count = 0
+    new_files = []
+    for file_path in folder_path.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+
+        path_str = str(file_path)
+        existing = await db.execute(select(FileModel).where(FileModel.path == path_str))
+        db_file = existing.scalar_one_or_none()
+
+        if db_file is None:
+            # Compute checksum in chunks to avoid loading large files into memory
+            h = hashlib.sha256()
+            file_size = 0
+            with open(file_path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(65536), b""):
+                    h.update(chunk)
+                    file_size += len(chunk)
+            checksum = h.hexdigest()
+            db_file = FileModel(
+                name=file_path.name,
+                original_name=file_path.name,
+                path=path_str,
+                size=file_size,
+                mime_type="",
+                checksum=checksum,
+            )
+            db.add(db_file)
+            new_files.append((db_file, file_path))
+
+    # Batch commit new file records
+    if new_files:
+        await db.commit()
+        for db_file, _ in new_files:
+            await db.refresh(db_file)
+
+    # Index files not yet indexed
+    for file_path in folder_path.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+        path_str = str(file_path)
+        existing = await db.execute(select(FileModel).where(FileModel.path == path_str))
+        db_file = existing.scalar_one_or_none()
+        if db_file and not db_file.indexed:
+            ok = await index_file(db_file.id, path_str, file_path.name,
+                                  file_path.suffix.lstrip("."))
+            if ok:
+                db_file.indexed = True
+                indexed_count += 1
+
+    # Batch commit indexed flags
+    if indexed_count > 0:
+        await db.commit()
+
+    # Count files under this folder path safely (no LIKE wildcards in user data)
+    folder_prefix = str(folder_path)
+    if not folder_prefix.endswith("/"):
+        folder_prefix += "/"
+    all_files_result = await db.execute(select(FileModel.path))
+    files_count = sum(
+        1 for (p,) in all_files_result.all()
+        if p == str(folder_path) or p.startswith(folder_prefix)
+    )
+
+    folder.last_scan = datetime.now(timezone.utc)
+    folder.files_count = files_count
+    await db.commit()
+    return indexed_count
+
+
+@router.get("/watched-folders", response_model=List[WatchedFolderOut])
+async def list_watched_folders(db: AsyncSession = Depends(get_db),
+                                _: User = Depends(get_current_user)):
+    result = await db.execute(select(WatchedFolder).order_by(WatchedFolder.id))
+    return result.scalars().all()
+
+
+@router.post("/watched-folders", response_model=WatchedFolderOut)
+async def add_watched_folder(data: WatchedFolderCreate, db: AsyncSession = Depends(get_db),
+                              _: User = Depends(get_current_user)):
+    existing = await db.execute(select(WatchedFolder).where(WatchedFolder.path == data.path))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Folder already watched")
+    folder = WatchedFolder(path=data.path)
+    db.add(folder)
+    await db.commit()
+    await db.refresh(folder)
+    return folder
+
+
+@router.delete("/watched-folders/{folder_id}")
+async def remove_watched_folder(folder_id: int, db: AsyncSession = Depends(get_db),
+                                 _: User = Depends(get_current_user)):
+    result = await db.execute(select(WatchedFolder).where(WatchedFolder.id == folder_id))
+    folder = result.scalar_one_or_none()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Not found")
+    await db.delete(folder)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/watched-folders/{folder_id}/scan")
+async def scan_watched_folder(folder_id: int, db: AsyncSession = Depends(get_db),
+                               _: User = Depends(get_current_user)):
+    result = await db.execute(select(WatchedFolder).where(WatchedFolder.id == folder_id))
+    folder = result.scalar_one_or_none()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Not found")
+    count = await _scan_watched_folder(folder, db)
+    return {"ok": True, "indexed": count}
+
+
+@router.post("/reindex-all")
+async def reindex_all(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    result = await db.execute(select(FileModel))
+    files = result.scalars().all()
+    count = 0
+    for f in files:
+        ok = await index_file(f.id, f.path, f.name, Path(f.name).suffix.lstrip("."))
+        if ok:
+            f.indexed = True
+            count += 1
+    await db.commit()
+    return {"ok": True, "indexed": count}

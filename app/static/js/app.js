@@ -104,6 +104,7 @@ document.addEventListener('alpine:init', () => {
       if (token) {
         try {
           this.currentUser = await api.get('/auth/me');
+          window._currentUser = this.currentUser;
           this.authenticated = true;
           this.loadStats();
         } catch {
@@ -125,6 +126,7 @@ document.addEventListener('alpine:init', () => {
         const data = await api.post('/auth/login', this.loginForm);
         localStorage.setItem('zircon_token', data.access_token);
         this.currentUser = await api.get('/auth/me');
+        window._currentUser = this.currentUser;
         this.authenticated = true;
         this.loadStats();
       } catch (e) {

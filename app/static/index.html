@@ -20,6 +20,7 @@
   <script src="/static/js/integrations.js"></script>
   <script src="/static/js/monitoring.js"></script>
   <script src="/static/js/brand_protection.js"></script>
+  <script src="/static/js/settings.js"></script>
 
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container"></div>
@@ -126,6 +127,13 @@
               <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
               <span x-text="t('notifications')"></span>
               <span class="nav-badge" x-show="unreadCount > 0" x-text="unreadCount"></span>
+            </div>
+
+            <div class="nav-item" :class="page === 'settings' ? 'active' : ''" @click="navigate('settings')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+              <span x-text="t('settings')"></span>
             </div>
           </nav>
 
@@ -1081,7 +1089,268 @@
               </template>
             </div>
 
-          </div><!-- /page-content -->
+            <!-- ── SETTINGS ──────────────────────────────────────── -->
+            <div x-show="page === 'settings'" x-data="settingsPage" x-init="init()">
+
+              <!-- Tabs -->
+              <div class="flex gap-2 mb-4" style="flex-wrap:wrap;">
+                <button class="btn btn-sm" :class="activeTab==='profile'?'btn-primary':'btn-secondary'"
+                        @click="switchTab('profile')" x-text="t('profile')"></button>
+                <button x-show="isAdmin()" class="btn btn-sm" :class="activeTab==='users'?'btn-primary':'btn-secondary'"
+                        @click="switchTab('users')" x-text="t('users')"></button>
+                <button class="btn btn-sm" :class="activeTab==='watched_folders'?'btn-primary':'btn-secondary'"
+                        @click="switchTab('watched_folders')" x-text="t('watched_folders')"></button>
+                <button class="btn btn-sm" :class="activeTab==='notifications'?'btn-primary':'btn-secondary'"
+                        @click="switchTab('notifications')" x-text="t('notification_settings')"></button>
+                <button class="btn btn-sm" :class="activeTab==='system'?'btn-primary':'btn-secondary'"
+                        @click="switchTab('system')" x-text="t('system')"></button>
+              </div>
+
+              <!-- ── Profile Tab ── -->
+              <div x-show="activeTab==='profile'" class="card" style="max-width:480px;">
+                <div class="card-title" x-text="t('change_password')"></div>
+                <div class="form-group">
+                  <label class="form-label" x-text="t('current_password')"></label>
+                  <input class="form-input" type="password" x-model="profileForm.current_password" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" x-text="t('new_password')"></label>
+                  <input class="form-input" type="password" x-model="profileForm.new_password" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" x-text="t('confirm_password')"></label>
+                  <input class="form-input" type="password" x-model="profileForm.confirm_password" />
+                </div>
+                <button class="btn btn-primary" @click="changePassword()" :disabled="profileLoading">
+                  <span x-show="profileLoading" class="spinner" style="width:14px;height:14px;"></span>
+                  <span x-text="profileLoading ? t('loading') : t('save')"></span>
+                </button>
+              </div>
+
+              <!-- ── Users Tab ── -->
+              <div x-show="activeTab==='users' && isAdmin()">
+                <div class="flex justify-between items-center mb-4">
+                  <h3 class="card-title" x-text="t('user_management')"></h3>
+                  <button class="btn btn-primary" @click="showCreateUserModal=true" x-text="t('create_user')"></button>
+                </div>
+                <div x-show="usersLoading" class="text-muted text-sm" x-text="t('loading')"></div>
+                <div x-show="!usersLoading">
+                  <template x-if="users.length===0">
+                    <div class="card text-center text-muted" x-text="t('no_data')"></div>
+                  </template>
+                  <template x-if="users.length>0">
+                    <div class="card" style="overflow-x:auto;">
+                      <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                          <tr style="border-bottom:1px solid var(--border-color);">
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);">ID</th>
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('username')"></th>
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('role')"></th>
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('created_at')"></th>
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('actions')"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="u in users" :key="u.id">
+                            <tr style="border-bottom:1px solid var(--border-color);">
+                              <td style="padding:8px;font-size:13px;" x-text="u.id"></td>
+                              <td style="padding:8px;font-size:13px;" x-text="u.username"></td>
+                              <td style="padding:8px;">
+                                <span :class="'badge ' + (u.role==='admin'?'badge-red':'badge-blue')" x-text="u.role"></span>
+                              </td>
+                              <td style="padding:8px;font-size:12px;color:var(--text-muted);" x-text="formatDate(u.created_at)"></td>
+                              <td style="padding:8px;">
+                                <div class="flex gap-2">
+                                  <button class="btn btn-sm btn-secondary" @click="openResetModal(u)" x-text="t('reset_password')"></button>
+                                  <button class="btn btn-sm btn-danger" @click="deleteUser(u.id)" x-text="t('delete')"></button>
+                                </div>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Create User Modal -->
+                <div x-show="showCreateUserModal" class="modal-overlay" @click.self="showCreateUserModal=false">
+                  <div class="modal">
+                    <div class="modal-title" x-text="t('create_user')"></div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('username')"></label>
+                      <input class="form-input" type="text" x-model="newUser.username" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('password')"></label>
+                      <input class="form-input" type="password" x-model="newUser.password" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('role')"></label>
+                      <select class="form-select" x-model="newUser.role">
+                        <option value="user">user</option>
+                        <option value="admin">admin</option>
+                      </select>
+                    </div>
+                    <div class="modal-footer">
+                      <button class="btn btn-secondary" @click="showCreateUserModal=false" x-text="t('cancel')"></button>
+                      <button class="btn btn-primary" @click="createUser()" :disabled="createUserLoading">
+                        <span x-show="createUserLoading" class="spinner" style="width:14px;height:14px;"></span>
+                        <span x-text="createUserLoading ? t('loading') : t('create_user')"></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Reset Password Modal -->
+                <div x-show="showResetModal" class="modal-overlay" @click.self="showResetModal=false">
+                  <div class="modal">
+                    <div class="modal-title" x-text="t('reset_password') + ': ' + (resetTarget ? resetTarget.username : '')"></div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('new_password')"></label>
+                      <input class="form-input" type="password" x-model="resetPassword" />
+                    </div>
+                    <div class="modal-footer">
+                      <button class="btn btn-secondary" @click="showResetModal=false" x-text="t('cancel')"></button>
+                      <button class="btn btn-primary" @click="doResetPassword()" :disabled="resetLoading">
+                        <span x-show="resetLoading" class="spinner" style="width:14px;height:14px;"></span>
+                        <span x-text="resetLoading ? t('loading') : t('save')"></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ── Watched Folders Tab ── -->
+              <div x-show="activeTab==='watched_folders'">
+                <div class="card mb-4">
+                  <div class="card-title" x-text="t('add_watched_folder')"></div>
+                  <p class="text-sm text-muted mb-4" x-text="t('watched_folders_hint')"></p>
+                  <div class="flex gap-2">
+                    <input class="form-input" type="text" x-model="newFolderPath"
+                           :placeholder="t('folder_path_placeholder')"
+                           @keyup.enter="addFolder()" style="flex:1;" />
+                    <button class="btn btn-primary" @click="addFolder()" :disabled="addFolderLoading">
+                      <span x-show="addFolderLoading" class="spinner" style="width:14px;height:14px;"></span>
+                      <span x-text="addFolderLoading ? t('loading') : t('add')"></span>
+                    </button>
+                  </div>
+                </div>
+
+                <div x-show="foldersLoading" class="text-muted text-sm" x-text="t('loading')"></div>
+                <div x-show="!foldersLoading">
+                  <template x-if="folders.length===0">
+                    <div class="card text-center text-muted" x-text="t('no_data')"></div>
+                  </template>
+                  <template x-if="folders.length>0">
+                    <div class="card" style="overflow-x:auto;">
+                      <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                          <tr style="border-bottom:1px solid var(--border-color);">
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('folder_path')"></th>
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('files_count')"></th>
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('last_scan')"></th>
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('status')"></th>
+                            <th style="text-align:left;padding:8px;font-size:12px;color:var(--text-muted);" x-text="t('actions')"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="f in folders" :key="f.id">
+                            <tr style="border-bottom:1px solid var(--border-color);">
+                              <td style="padding:8px;font-size:13px;word-break:break-all;" x-text="f.path"></td>
+                              <td style="padding:8px;font-size:13px;" x-text="f.files_count"></td>
+                              <td style="padding:8px;font-size:12px;color:var(--text-muted);" x-text="f.last_scan ? formatDate(f.last_scan) : '—'"></td>
+                              <td style="padding:8px;">
+                                <span :class="'badge ' + (f.is_active?'badge-green':'badge-gray')"
+                                      x-text="f.is_active ? t('active') : t('inactive')"></span>
+                              </td>
+                              <td style="padding:8px;">
+                                <div class="flex gap-2">
+                                  <button class="btn btn-sm btn-secondary" @click="scanFolder(f.id)" x-text="t('scan_now')"></button>
+                                  <button class="btn btn-sm btn-danger" @click="removeFolder(f.id)" x-text="t('delete')"></button>
+                                </div>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- ── Notifications Tab ── -->
+              <div x-show="activeTab==='notifications'" class="card" style="max-width:540px;">
+                <div class="card-title" x-text="t('notification_settings')"></div>
+
+                <div style="font-weight:600;margin-bottom:8px;margin-top:8px;">SMTP</div>
+                <div class="form-group">
+                  <label class="form-label">Host</label>
+                  <input class="form-input" type="text" x-model="notifSettings.smtp_host" placeholder="smtp.example.com" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Port</label>
+                  <input class="form-input" type="number" x-model="notifSettings.smtp_port" placeholder="587" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" x-text="t('username')"></label>
+                  <input class="form-input" type="text" x-model="notifSettings.smtp_user" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" x-text="t('password')"></label>
+                  <input class="form-input" type="password" x-model="notifSettings.smtp_password" />
+                </div>
+
+                <div style="font-weight:600;margin-bottom:8px;margin-top:16px;">Telegram</div>
+                <div class="form-group">
+                  <label class="form-label">Bot Token</label>
+                  <input class="form-input" type="text" x-model="notifSettings.telegram_token" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Chat ID</label>
+                  <input class="form-input" type="text" x-model="notifSettings.telegram_chat_id" />
+                </div>
+
+                <button class="btn btn-primary" @click="saveNotifSettings()" :disabled="notifSaveLoading">
+                  <span x-show="notifSaveLoading" class="spinner" style="width:14px;height:14px;"></span>
+                  <span x-text="notifSaveLoading ? t('loading') : t('save')"></span>
+                </button>
+              </div>
+
+              <!-- ── System Tab ── -->
+              <div x-show="activeTab==='system'">
+                <div x-show="systemLoading" class="text-muted text-sm" x-text="t('loading')"></div>
+                <div x-show="!systemLoading && systemInfo">
+                  <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
+                    <div class="stat-card">
+                      <div class="stat-label">Python Version</div>
+                      <div class="stat-value text-sm" x-text="systemInfo ? systemInfo.python_version : '—'"></div>
+                    </div>
+                    <div class="stat-card">
+                      <div class="stat-label">Database Size</div>
+                      <div class="stat-value text-sm" x-text="systemInfo ? formatBytes(systemInfo.db_size) : '—'"></div>
+                    </div>
+                    <div class="stat-card">
+                      <div class="stat-label">Index Size</div>
+                      <div class="stat-value text-sm" x-text="systemInfo ? formatBytes(systemInfo.index_size) : '—'"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex gap-2">
+                  <button class="btn btn-secondary" @click="reindexAll()" :disabled="reindexLoading">
+                    <span x-show="reindexLoading" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="reindexLoading ? t('loading') : t('reindex_all')"></span>
+                  </button>
+                  <button class="btn btn-secondary" @click="clearCache()" :disabled="clearCacheLoading">
+                    <span x-show="clearCacheLoading" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="clearCacheLoading ? t('loading') : t('clear_cache')"></span>
+                  </button>
+                </div>
+              </div>
+
+            </div><!-- /settings -->
+
+          </div><!-- /page-content (moved closing tag) -->
         </main>
       </div>
     </template>

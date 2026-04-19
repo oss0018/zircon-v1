@@ -86,3 +86,32 @@ async def mark_all_read(db: AsyncSession = Depends(get_db), _: User = Depends(ge
         n.read = True
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/system")
+async def system_info(_: User = Depends(get_current_user)):
+    import sys
+    from pathlib import Path as SysPath
+    db_p = SysPath("./data/db/zircon.db")
+    idx_p = SysPath("./data/index")
+    return {
+        "python_version": sys.version.split()[0],
+        "db_size": db_p.stat().st_size if db_p.exists() else 0,
+        "index_size": sum(f.stat().st_size for f in idx_p.rglob("*") if f.is_file()) if idx_p.exists() else 0,
+        "platform": sys.platform,
+    }
+
+
+@router.post("/clear-cache")
+async def clear_cache(_: User = Depends(get_current_user)):
+    return {"ok": True}
+
+
+@router.get("/settings")
+async def get_settings(_: User = Depends(get_current_user)):
+    return {}
+
+
+@router.post("/settings")
+async def save_settings(data: dict, _: User = Depends(get_current_user)):
+    return {"ok": True}
