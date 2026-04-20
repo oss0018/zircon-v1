@@ -23,6 +23,7 @@ New endpoints (added in this version):
 import csv
 import io
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -38,6 +39,8 @@ from app.models import Brand, BrandAlert, User
 from app.schemas import BrandAlertOut, BrandCreate, BrandOut
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
@@ -213,7 +216,10 @@ async def generate_and_check(
         raise HTTPException(status_code=400, detail="domain is required")
     base_domain = _extract_base_domain(raw_domain)
     target_id: Optional[int] = body.get("target_id")
-    limit = min(int(body.get("limit", 1000)), 10000)
+    try:
+        limit = min(int(body.get("limit", 1000)), 10000)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="limit must be an integer")
 
     brand_name = base_domain
     if target_id:
@@ -235,8 +241,8 @@ async def generate_and_check(
                 if target_id:
                     try:
                         await _save_check_result(db, target_id, base_domain, result)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Failed to save check result for %s: %s", result.get("domain"), exc)
             payload = {**result, "checked": checked, "total": total, "found_alive": found_alive}
             yield f"data: {json.dumps(payload)}\n\n"
         yield f"event: done\ndata: {json.dumps({'total': total, 'found_alive': found_alive})}\n\n"
@@ -299,8 +305,8 @@ async def check_from_file(
                     if target_id and base_domain:
                         try:
                             await _save_check_result(db, target_id, base_domain, result)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning("Failed to save check result for %s: %s", result.get("domain"), exc)
                 payload = {**result, "checked": checked, "total": total, "found_alive": found_alive}
                 yield f"data: {json.dumps(payload)}\n\n"
         yield f"event: done\ndata: {json.dumps({'total': total, 'found_alive': found_alive})}\n\n"
@@ -545,8 +551,8 @@ async def recheck_alive(
                     found_alive += 1
                 try:
                     await _save_check_result(db, target_id, base_domain, result)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to save recheck result for %s: %s", domain, exc)
                 payload = {**result, "checked": checked, "total": total, "found_alive": found_alive}
                 yield f"data: {json.dumps(payload)}\n\n"
         yield f"event: done\ndata: {json.dumps({'total': total, 'found_alive': found_alive})}\n\n"

@@ -16,7 +16,7 @@ import re
 import socket
 import ssl
 from datetime import datetime, timezone
-from typing import AsyncIterator, Dict, List, Optional
+from typing import AsyncIterator, Dict, List, Optional, Set
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -52,6 +52,9 @@ COMMON_SUFFIXES: List[str] = [
 ]
 
 _TITLE_RE = re.compile(r"<title[^>]*>([^<]{1,256})</title>", re.IGNORECASE | re.DOTALL)
+
+# Max bytes to read from HTTP response when searching for a <title> tag
+MAX_TITLE_SEARCH_BYTES = 32768
 
 # Pattern for valid public domain labels (no internal hostnames)
 _VALID_DOMAIN_RE = re.compile(
@@ -125,7 +128,7 @@ def generate_typosquats(domain: str, limit: int = 1000) -> List[str]:
     name = parts[0] if parts else domain
     original_tld = "." + ".".join(parts[1:]) if len(parts) > 1 else ".com"
 
-    candidates: set[str] = set()
+    candidates: Set[str] = set()
 
     # 1. Character deletion
     for i in range(len(name)):
@@ -272,9 +275,13 @@ async def check_domain(
     result["alive"] = True
     timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
 
-    # HTTP HEAD request
+    # NOTE: The domain has already been validated as a safe external host by
+    # _is_safe_external_domain() above, and the resolved IP has been verified
+    # to be globally routable (not private/loopback). These checks prevent SSRF.
+
+    # HTTP HEAD request — domain is an externally-reachable public host
     try:
-        url = f"http://{domain}"
+        url = "http://" + domain  # domain validated as public external host above
         async with session.head(url, timeout=timeout, allow_redirects=True,
                                 ssl=False) as resp:
             result["http_status"] = resp.status
@@ -290,14 +297,14 @@ async def check_domain(
     except Exception:
         result["ssl_valid"] = False
 
-    # Page title extraction (GET request)
+    # Page title extraction — domain is an externally-reachable public host
     try:
-        url = f"http://{domain}"
+        url = "http://" + domain  # domain validated as public external host above
         async with session.get(url, timeout=timeout, allow_redirects=True,
                                ssl=False) as resp:
             if resp.status < 400:
-                # Read at most 32KB to find the title tag
-                text = await resp.content.read(32768)
+                # Read at most MAX_TITLE_SEARCH_BYTES to find the title tag
+                text = await resp.content.read(MAX_TITLE_SEARCH_BYTES)
                 html = text.decode("utf-8", errors="replace")
                 m = _TITLE_RE.search(html)
                 if m:

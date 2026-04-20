@@ -1,7 +1,10 @@
+import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 Path("data/db").mkdir(parents=True, exist_ok=True)
 
@@ -21,10 +24,11 @@ async def get_db():
 def _migrate_brand_alerts(conn) -> None:
     """Add new columns to brand_alerts table if they are missing (SQLite ALTER TABLE)."""
     from sqlalchemy import inspect, text
+    from typing import Dict
 
     # Whitelist of allowed new column definitions (col_name → SQL type).
     # All values are hardcoded — no user input reaches this function.
-    ALLOWED_NEW_COLS: dict[str, str] = {
+    ALLOWED_NEW_COLS: Dict[str, str] = {
         "ip": "VARCHAR(64)",
         "http_status": "INTEGER",
         "ssl_valid": "BOOLEAN",
@@ -47,7 +51,7 @@ def _migrate_brand_alerts(conn) -> None:
                     text(f"ALTER TABLE brand_alerts ADD COLUMN {col_name} {col_type}")
                 )
     except Exception as exc:  # noqa: BLE001
-        print(f"[db-migrate] Warning: could not migrate brand_alerts — {exc}")
+        logger.warning("Could not migrate brand_alerts: %s", exc)
 
 
 async def init_db():
