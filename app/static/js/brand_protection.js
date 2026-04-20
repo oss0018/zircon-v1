@@ -158,7 +158,7 @@ document.addEventListener('alpine:init', () => {
                 if (data.alive) {
                   this.checkProgress.results.unshift(data);
                 }
-              } catch (_) {}
+              } catch (parseErr) { console.warn('SSE parse error:', parseErr); }
             } else if (line.startsWith('event: done')) {
               this.checkProgress.running = false;
             }
@@ -234,7 +234,7 @@ document.addEventListener('alpine:init', () => {
                 if (data.alive) {
                   this.checkProgress.results.unshift(data);
                 }
-              } catch (_) {}
+              } catch (parseErr) { console.warn('SSE parse error:', parseErr); }
             } else if (line.startsWith('event: done')) {
               this.checkProgress.running = false;
             }
@@ -289,7 +289,7 @@ document.addEventListener('alpine:init', () => {
                 this.checkProgress.checked = data.checked || 0;
                 this.checkProgress.total = data.total || 0;
                 this.checkProgress.foundAlive = data.found_alive || 0;
-              } catch (_) {}
+              } catch (parseErr) { console.warn('SSE parse error:', parseErr); }
             } else if (line.startsWith('event: done')) {
               this.checkProgress.running = false;
             }

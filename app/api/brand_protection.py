@@ -398,7 +398,7 @@ async def scan_brand_from_file(
     Upload a .txt file with one domain per line.
     For each domain: compute similarity to brand, resolve IP, save as BrandAlert.
     """
-    import socket as _socket
+    import socket
     result = await db.execute(select(Brand).where(Brand.id == brand_id))
     brand = result.scalar_one_or_none()
     if not brand:
@@ -431,7 +431,7 @@ async def scan_brand_from_file(
 
         ip_address = None
         try:
-            ip_address = _socket.gethostbyname(domain)
+            ip_address = socket.gethostbyname(domain)
         except Exception:
             ip_address = None
 

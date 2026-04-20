@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
-import json
+import ipaddress
 import re
 import socket
 import ssl
@@ -52,6 +52,48 @@ COMMON_SUFFIXES: List[str] = [
 ]
 
 _TITLE_RE = re.compile(r"<title[^>]*>([^<]{1,256})</title>", re.IGNORECASE | re.DOTALL)
+
+# Pattern for valid public domain labels (no internal hostnames)
+_VALID_DOMAIN_RE = re.compile(
+    r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+)
+
+
+# ── Domain Validation ─────────────────────────────────────────────────────────
+
+def _is_safe_external_domain(domain: str) -> bool:
+    """
+    Return True only if *domain* refers to a publicly-routable external host.
+
+    Rejects:
+    - Localhost and loopback names (localhost, *.local, *.localdomain)
+    - Malformed domain labels
+    - Internal / private IP literals (RFC 1918, RFC 4193, loopback, link-local)
+    """
+    domain = domain.lower().strip()
+
+    # Reject empty or overly long domains
+    if not domain or len(domain) > 253:
+        return False
+
+    # Reject known internal hostnames
+    if domain in ("localhost", "broadcasthost") or domain.endswith(
+        (".local", ".localdomain", ".internal", ".corp", ".home", ".lan")
+    ):
+        return False
+
+    # If it looks like an IP address, reject private/reserved ranges
+    try:
+        addr = ipaddress.ip_address(domain)
+        return addr.is_global and not addr.is_private and not addr.is_loopback
+    except ValueError:
+        pass  # not an IP literal — continue with domain validation
+
+    # Must match a valid domain pattern
+    if not _VALID_DOMAIN_RE.match(domain):
+        return False
+
+    return True
 
 
 # ── Typosquat Generator ───────────────────────────────────────────────────────
@@ -145,9 +187,14 @@ def _resolve_ip(domain: str) -> Optional[str]:
 
 
 def _check_ssl(domain: str) -> bool:
-    """Synchronously check if a domain has a valid SSL certificate."""
+    """
+    Check SSL certificate validity for *domain* using TLS 1.2+ only.
+
+    Returns True if a valid certificate is presented, False otherwise.
+    """
     try:
         ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         with ctx.wrap_socket(
             socket.create_connection((domain, 443), timeout=HTTP_TIMEOUT),
             server_hostname=domain,
@@ -160,13 +207,17 @@ def _check_ssl(domain: str) -> bool:
 
 async def check_domain(
     domain: str,
-    session: "aiohttp.ClientSession",  # type: ignore[name-defined]
+    session: object,
     brand_name: str = "",
 ) -> Dict:
     """
     Asynchronously check a single domain for liveness.
 
+    Only publicly-routable external domains are checked; internal/private
+    addresses are rejected and returned as ``alive=False``.
+
     Checks performed:
+    - Domain safety validation (reject localhost, private IPs, etc.)
     - DNS resolution → IP address
     - HTTP HEAD request → status code
     - SSL certificate validity
@@ -183,6 +234,8 @@ async def check_domain(
         ``domain``, ``alive``, ``ip``, ``http_status``,
         ``ssl_valid``, ``page_title``, ``similarity_pct``, ``checked_at``.
     """
+    import aiohttp
+
     loop = asyncio.get_event_loop()
     result: Dict = {
         "domain": domain,
@@ -195,26 +248,38 @@ async def check_domain(
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    # Reject non-public domains before making any network request (SSRF prevention)
+    if not _is_safe_external_domain(domain):
+        return result
+
     # DNS resolution (thread executor to avoid blocking)
     try:
         ip = await loop.run_in_executor(None, _resolve_ip, domain)
         result["ip"] = ip
         if not ip:
             return result
+        # Double-check resolved IP is public (SSRF prevention)
+        try:
+            addr = ipaddress.ip_address(ip)
+            if not addr.is_global or addr.is_private or addr.is_loopback:
+                result["ip"] = None
+                return result
+        except ValueError:
+            pass
     except Exception:
         return result
 
     result["alive"] = True
+    timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
 
     # HTTP HEAD request
-    timeout = None
     try:
-        import aiohttp  # lazy import
-        timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
         url = f"http://{domain}"
         async with session.head(url, timeout=timeout, allow_redirects=True,
                                 ssl=False) as resp:
             result["http_status"] = resp.status
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        pass
     except Exception:
         pass
 
@@ -227,9 +292,6 @@ async def check_domain(
 
     # Page title extraction (GET request)
     try:
-        import aiohttp  # lazy import
-        if timeout is None:
-            timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
         url = f"http://{domain}"
         async with session.get(url, timeout=timeout, allow_redirects=True,
                                ssl=False) as resp:
@@ -240,6 +302,8 @@ async def check_domain(
                 m = _TITLE_RE.search(html)
                 if m:
                     result["page_title"] = m.group(1).strip()[:256]
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        pass
     except Exception:
         pass
 
@@ -269,7 +333,7 @@ async def check_domains_async(
         Domain check result dictionaries.
     """
     try:
-        import aiohttp  # lazy import
+        import aiohttp
     except ImportError:
         # Fallback: return minimal results without HTTP checks
         for domain in domains:
@@ -286,17 +350,16 @@ async def check_domains_async(
     semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
     result_queue: asyncio.Queue = asyncio.Queue()
 
-    async def _worker(domain: str, session: "aiohttp.ClientSession") -> None:
+    async def _worker(domain: str, sess: aiohttp.ClientSession) -> None:
         async with semaphore:
             try:
-                r = await check_domain(domain, session, brand_name)
-            except Exception as exc:  # noqa: BLE001
+                r = await check_domain(domain, sess, brand_name)
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
                 r = {
                     "domain": domain, "alive": False, "ip": None,
                     "http_status": None, "ssl_valid": None,
                     "page_title": None, "similarity_pct": None,
                     "checked_at": datetime.now(timezone.utc).isoformat(),
-                    "error": str(exc),
                 }
             await result_queue.put(r)
 
