@@ -134,74 +134,18 @@ async def file_stats(db: AsyncSession = Depends(get_db), _: User = Depends(get_c
     return {"total": total or 0, "indexed": indexed or 0, "total_size": total_size or 0}
 
 
-@router.get("/{file_id}", response_model=FileOut)
-async def get_file(file_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
-    f = result.scalar_one_or_none()
-    if not f:
-        raise HTTPException(status_code=404, detail="File not found")
-    return f
-
-
-@router.patch("/{file_id}", response_model=FileOut)
-async def update_file(file_id: int, data: FileUpdate, db: AsyncSession = Depends(get_db),
-                      _: User = Depends(get_current_user)):
-    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
-    f = result.scalar_one_or_none()
-    if not f:
-        raise HTTPException(status_code=404, detail="File not found")
-    if data.name is not None:
-        f.name = data.name
-    if data.tags is not None:
-        f.tags = data.tags
-    if data.project_id is not None:
-        f.project_id = data.project_id
+@router.post("/reindex-all")
+async def reindex_all(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    result = await db.execute(select(FileModel))
+    files = result.scalars().all()
+    count = 0
+    for f in files:
+        ok = await index_file(f.id, f.path, f.name, Path(f.name).suffix.lstrip("."))
+        if ok:
+            f.indexed = True
+            count += 1
     await db.commit()
-    await db.refresh(f)
-    return f
-
-
-@router.delete("/{file_id}")
-async def delete_file(file_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
-    f = result.scalar_one_or_none()
-    if not f:
-        raise HTTPException(status_code=404, detail="File not found")
-    # Remove from disk
-    try:
-        Path(f.path).unlink(missing_ok=True)
-    except Exception:
-        pass
-    await remove_from_index(file_id)
-    await db.delete(f)
-    await db.commit()
-    return {"ok": True}
-
-
-@router.post("/{file_id}/reindex")
-async def reindex_file(file_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
-    f = result.scalar_one_or_none()
-    if not f:
-        raise HTTPException(status_code=404, detail="File not found")
-    ok = await index_file(f.id, f.path, f.name, Path(f.name).suffix.lstrip("."))
-    if ok:
-        f.indexed = True
-        await db.commit()
-    return {"ok": ok}
-
-
-@router.get("/{file_id}/download")
-async def download_file(file_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    from fastapi.responses import FileResponse
-    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
-    f = result.scalar_one_or_none()
-    if not f:
-        raise HTTPException(status_code=404, detail="File not found")
-    path = Path(f.path)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found on disk")
-    return FileResponse(str(path), filename=f.original_name, media_type=f.mime_type or "application/octet-stream")
+    return {"ok": True, "indexed": count}
 
 
 # ── Watched Folders ───────────────────────────────────────────────────────────
@@ -335,15 +279,73 @@ async def scan_watched_folder(folder_id: int, db: AsyncSession = Depends(get_db)
     return {"ok": True, "indexed": count}
 
 
-@router.post("/reindex-all")
-async def reindex_all(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    result = await db.execute(select(FileModel))
-    files = result.scalars().all()
-    count = 0
-    for f in files:
-        ok = await index_file(f.id, f.path, f.name, Path(f.name).suffix.lstrip("."))
-        if ok:
-            f.indexed = True
-            count += 1
+@router.get("/{file_id}", response_model=FileOut)
+async def get_file(file_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
+    f = result.scalar_one_or_none()
+    if not f:
+        raise HTTPException(status_code=404, detail="File not found")
+    return f
+
+
+@router.patch("/{file_id}", response_model=FileOut)
+async def update_file(file_id: int, data: FileUpdate, db: AsyncSession = Depends(get_db),
+                      _: User = Depends(get_current_user)):
+    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
+    f = result.scalar_one_or_none()
+    if not f:
+        raise HTTPException(status_code=404, detail="File not found")
+    if data.name is not None:
+        f.name = data.name
+    if data.tags is not None:
+        f.tags = data.tags
+    if data.project_id is not None:
+        f.project_id = data.project_id
     await db.commit()
-    return {"ok": True, "indexed": count}
+    await db.refresh(f)
+    return f
+
+
+@router.delete("/{file_id}")
+async def delete_file(file_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
+    f = result.scalar_one_or_none()
+    if not f:
+        raise HTTPException(status_code=404, detail="File not found")
+    # Remove from disk
+    try:
+        Path(f.path).unlink(missing_ok=True)
+    except Exception:
+        pass
+    await remove_from_index(file_id)
+    await db.delete(f)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/{file_id}/reindex")
+async def reindex_file(file_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
+    f = result.scalar_one_or_none()
+    if not f:
+        raise HTTPException(status_code=404, detail="File not found")
+    ok = await index_file(f.id, f.path, f.name, Path(f.name).suffix.lstrip("."))
+    if ok:
+        f.indexed = True
+        await db.commit()
+    return {"ok": ok}
+
+
+@router.get("/{file_id}/download")
+async def download_file(file_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    from fastapi.responses import FileResponse
+    result = await db.execute(select(FileModel).where(FileModel.id == file_id))
+    f = result.scalar_one_or_none()
+    if not f:
+        raise HTTPException(status_code=404, detail="File not found")
+    path = Path(f.path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(str(path), filename=f.original_name, media_type=f.mime_type or "application/octet-stream")
+
+

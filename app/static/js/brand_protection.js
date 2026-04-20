@@ -10,6 +10,8 @@ document.addEventListener('alpine:init', () => {
     showAlerts: false,
     activeBrand: null,
     scanning: false,
+    fileScanResults: [],
+    showFileScanResults: false,
     newBrand: {
       name: '',
       url: '',
@@ -113,6 +115,31 @@ document.addEventListener('alpine:init', () => {
 
     newAlerts() {
       return this.alerts.filter(a => a.status === 'new').length;
+    },
+
+    async scanFromFile(brandId, event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        showToast('Scanning domains from file...', 'info');
+        const r = await api.upload(`/brands/${brandId}/scan-from-file`, fd);
+        showToast(`Done: ${r.total_domains} domains, ${r.alerts_created} new alerts`, 'success');
+        this.fileScanResults = r.results;
+        this.showFileScanResults = true;
+        await this.loadBrands();
+      } catch(e) {
+        showToast(e.message, 'error');
+      }
+      event.target.value = '';
+    },
+
+    getAlertIp(alert) {
+      try {
+        const d = JSON.parse(alert.details_json || '{}');
+        return d.ip || '—';
+      } catch { return '—'; }
     },
   }));
 });

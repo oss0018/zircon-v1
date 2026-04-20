@@ -79,6 +79,23 @@ async def lifespan(app: FastAPI):
     start_scheduler()
 
     start_http_redirect(settings.http_port, settings.https_port)
+
+    # Auto-register leaked_accounts as watched folder
+    from app.models import WatchedFolder
+    from pathlib import Path
+    leaked_dir = Path("leaked_accounts").resolve()
+    if leaked_dir.exists():
+        from app.database import AsyncSessionLocal
+        from sqlalchemy import select
+        async with AsyncSessionLocal() as session:
+            existing = await session.execute(
+                select(WatchedFolder).where(WatchedFolder.path == str(leaked_dir))
+            )
+            if not existing.scalar_one_or_none():
+                folder = WatchedFolder(path=str(leaked_dir))
+                session.add(folder)
+                await session.commit()
+
     yield
 
     from app.services.scheduler import stop_scheduler
