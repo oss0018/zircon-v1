@@ -979,9 +979,9 @@
             <div x-show="page === 'brands'" x-data="brandPage" x-init="init()">
               <div class="flex justify-between items-center mb-4">
                 <div class="flex gap-2">
-                  <button class="btn btn-secondary" @click="showAlerts = false" x-show="showAlerts">← Brands</button>
+                  <button class="btn btn-secondary" @click="showAlerts = false; activeBrand = null" x-show="showAlerts">← Brands</button>
                 </div>
-                <div class="flex gap-2">
+                <div class="flex gap-2 flex-wrap">
                   <button class="btn btn-secondary" @click="loadAllAlerts(); showAlerts = true; activeBrand = null"
                           x-show="!showAlerts">
                     View All Alerts <span class="nav-badge" style="position:relative;top:0;right:0;margin-left:4px;" x-show="newAlerts() > 0" x-text="newAlerts()"></span>
@@ -992,7 +992,7 @@
 
               <!-- Brands List -->
               <div x-show="!showAlerts">
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
                   <template x-for="brand in brands" :key="brand.id">
                     <div class="card">
                       <div class="flex justify-between items-center mb-4">
@@ -1009,18 +1009,53 @@
                       <div class="text-xs text-muted mb-4">
                         Threshold: <span class="text-green" x-text="(brand.similarity_threshold * 100).toFixed(0) + '%'"></span>
                       </div>
-                      <div class="flex gap-2 flex-wrap">
+                      <!-- Primary actions -->
+                      <div class="flex gap-2 flex-wrap mb-2">
                         <button class="btn btn-sm btn-primary" @click="scanBrand(brand.id)" :disabled="scanning" x-text="t('scan')"></button>
                         <button class="btn btn-sm btn-secondary" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
                         <button class="btn btn-sm btn-danger" @click="deleteBrand(brand.id)">✕</button>
                       </div>
-                      <!-- File scan section for each brand -->
-                      <div style="margin-top:12px;border-top:1px solid var(--border-color);padding-top:10px;">
-                        <div class="text-xs text-muted" style="margin-bottom:6px;">Scan domains from .txt file (one per line):</div>
-                        <label class="btn btn-sm btn-secondary" style="cursor:pointer;">
-                          📄 Import .txt
-                          <input type="file" accept=".txt" style="display:none;" @change="scanFromFile(brand.id, $event)" />
-                        </label>
+                      <!-- Advanced check actions -->
+                      <div style="margin-top:10px;border-top:1px solid var(--border-color);padding-top:10px;">
+                        <div class="text-xs text-muted" style="margin-bottom:8px;font-weight:600;">Advanced Domain Checks</div>
+                        <!-- Generate & Check with limit selector -->
+                        <div class="flex gap-2 flex-wrap mb-2">
+                          <select class="form-input" style="width:80px;padding:4px 6px;font-size:12px;" x-model="generateLimit">
+                            <option value="1000">1k</option>
+                            <option value="2000">2k</option>
+                            <option value="5000">5k</option>
+                            <option value="10000">10k</option>
+                          </select>
+                          <button class="btn btn-sm btn-primary"
+                                  @click="generateAndCheck(brand.id, brand.url, generateLimit)"
+                                  :disabled="checkProgress.running">
+                            🔍 Generate &amp; Check
+                          </button>
+                        </div>
+                        <div class="flex gap-2 flex-wrap">
+                          <!-- Check from File (async SSE) -->
+                          <label class="btn btn-sm btn-secondary" style="cursor:pointer;">
+                            📄 Check from File
+                            <input :id="`file-input-check-${brand.id}`" type="file" accept=".txt"
+                                   style="display:none;" @change="checkFromFile(brand.id, $event)" />
+                          </label>
+                          <!-- Import .txt (legacy sync) -->
+                          <label class="btn btn-sm btn-secondary" style="cursor:pointer;">
+                            📥 Import .txt
+                            <input type="file" accept=".txt" style="display:none;" @change="scanFromFile(brand.id, $event)" />
+                          </label>
+                          <!-- Re-check alive -->
+                          <button class="btn btn-sm btn-secondary"
+                                  @click="recheckAlive(brand.id)"
+                                  :disabled="checkProgress.running">
+                            🔄 Re-check
+                          </button>
+                          <!-- Export -->
+                          <button class="btn btn-sm btn-secondary"
+                                  @click="activeBrand = brand; exportResults('csv')">
+                            ⬇ CSV
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </template>
@@ -1030,38 +1065,107 @@
                 </div>
               </div>
 
+              <!-- Progress Bar (shown during async check) -->
+              <div x-show="checkProgress.running || (checkProgress.total > 0 && !showAlerts)" class="card mt-4" style="padding:16px;">
+                <div class="text-sm" style="margin-bottom:8px;font-weight:600;">
+                  Checking <span x-text="checkProgress.total"></span> domains…
+                </div>
+                <div style="font-family:monospace;font-size:13px;color:var(--color-green);">
+                  [<span x-text="progressBar()"></span>]
+                  <span x-text="progressPct()"></span>%
+                  (<span x-text="checkProgress.checked"></span>/<span x-text="checkProgress.total"></span>)
+                  | Found alive: <span x-text="checkProgress.foundAlive" style="color:var(--color-red);"></span>
+                </div>
+                <!-- Live results from async check -->
+                <div x-show="checkProgress.results.length > 0" style="margin-top:12px;max-height:200px;overflow-y:auto;">
+                  <div class="text-xs text-muted mb-1">🟢 Alive domains found:</div>
+                  <template x-for="r in checkProgress.results" :key="r.domain">
+                    <div style="font-family:monospace;font-size:12px;padding:2px 0;border-bottom:1px solid var(--border-color);">
+                      <span class="text-green" x-text="r.domain"></span>
+                      <span class="text-muted" x-show="r.ip"> → <span x-text="r.ip"></span></span>
+                      <span x-show="r.http_status" class="badge badge-blue" style="margin-left:6px;" x-text="r.http_status"></span>
+                      <span x-show="r.ssl_valid === true" style="margin-left:4px;">✅</span>
+                      <span x-show="r.ssl_valid === false" style="margin-left:4px;">❌</span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
               <!-- Alerts View -->
               <div x-show="showAlerts">
-                <div class="card-title" style="margin-bottom:16px;">
-                  <span x-show="activeBrand" x-text="activeBrand && activeBrand.name + ' — Alerts'"></span>
-                  <span x-show="!activeBrand">All Brand Alerts</span>
+                <div class="flex justify-between items-center mb-3">
+                  <div class="card-title" style="margin-bottom:0;">
+                    <span x-show="activeBrand" x-text="activeBrand && activeBrand.name + ' — Alerts'"></span>
+                    <span x-show="!activeBrand">All Brand Alerts</span>
+                  </div>
+                  <div class="flex gap-2" x-show="activeBrand">
+                    <button class="btn btn-sm btn-secondary" @click="exportResults('csv')">⬇ Export CSV</button>
+                    <button class="btn btn-sm btn-secondary" @click="exportResults('json')">⬇ Export JSON</button>
+                  </div>
                 </div>
+
+                <!-- Filter Bar -->
+                <div class="flex gap-2 flex-wrap mb-3" style="align-items:center;">
+                  <select class="form-input" style="width:140px;padding:4px 8px;font-size:12px;" x-model="filterStatus">
+                    <option value="all">All statuses</option>
+                    <option value="new">New</option>
+                    <option value="reviewed">Reviewed</option>
+                    <option value="dismissed">Dismissed</option>
+                  </select>
+                  <select class="form-input" style="width:150px;padding:4px 8px;font-size:12px;" x-model.number="filterSimilarity">
+                    <option value="0">Any similarity</option>
+                    <option value="50">≥ 50%</option>
+                    <option value="70">≥ 70%</option>
+                    <option value="80">≥ 80%</option>
+                    <option value="90">≥ 90%</option>
+                  </select>
+                  <input class="form-input" style="width:200px;padding:4px 8px;font-size:12px;"
+                         placeholder="Search domain or IP…" x-model="filterQuery" />
+                  <span class="text-xs text-muted" x-text="`${filteredAlerts.length} of ${alerts.length}`"></span>
+                </div>
+
                 <div class="table-wrapper">
                   <table>
                     <thead>
                       <tr>
-                        <th>Similar Domain</th>
-                        <th>IP Address</th>
-                        <th x-text="t('similarity')"></th>
-                        <th>Source</th>
+                        <th>Domain</th>
+                        <th>Status</th>
+                        <th>IP</th>
+                        <th>HTTP</th>
+                        <th>SSL</th>
+                        <th>Page Title</th>
+                        <th>Similarity %</th>
                         <th x-text="t('status')"></th>
                         <th x-text="t('created_at')"></th>
                         <th x-text="t('actions')"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      <template x-if="alerts.length === 0">
-                        <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
+                      <template x-if="filteredAlerts.length === 0">
+                        <tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
                       </template>
-                      <template x-for="alert in alerts" :key="alert.id">
+                      <template x-for="alert in filteredAlerts" :key="alert.id">
                         <tr>
-                          <td class="font-mono" x-text="alert.similar_domain"></td>
+                          <td class="font-mono text-sm" x-text="alert.similar_domain"></td>
+                          <td x-text="getAlertAlive(alert)"></td>
                           <td class="font-mono text-xs" x-text="getAlertIp(alert)"></td>
                           <td>
-                            <span :class="similarityColor(alert.similarity_score)"
-                                  x-text="(alert.similarity_score * 100).toFixed(1) + '%'" class="badge"></span>
+                            <span x-show="alert.http_status" :class="alert.http_status < 400 ? 'badge badge-green' : 'badge badge-red'"
+                                  x-text="alert.http_status" class="badge"></span>
+                            <span x-show="!alert.http_status" class="text-muted text-xs">—</span>
                           </td>
-                          <td x-text="alert.source"></td>
+                          <td x-text="getAlertSsl(alert)"></td>
+                          <td class="text-xs" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                              :title="alert.page_title || ''"
+                              x-text="alert.page_title || '—'"></td>
+                          <td>
+                            <span x-show="alert.similarity_pct != null"
+                                  :class="'badge ' + simPctColor(alert.similarity_pct)"
+                                  x-text="(alert.similarity_pct || 0).toFixed(1) + '%'"></span>
+                            <span x-show="alert.similarity_pct == null"
+                                  :class="'badge ' + similarityColor(alert.similarity_score)"
+                                  x-text="(alert.similarity_score * 100).toFixed(1) + '%'"></span>
+                          </td>
                           <td>
                             <span :class="statusColor(alert.status)" class="badge" x-text="t(alert.status)"></span>
                           </td>
@@ -1081,10 +1185,10 @@
                 </div>
               </div>
 
-              <!-- File Scan Results Panel -->
+              <!-- File Scan Results Panel (legacy sync import) -->
               <div x-show="showFileScanResults" class="card mt-4">
                 <div class="flex justify-between items-center mb-2">
-                  <div class="card-title">File Scan Results</div>
+                  <div class="card-title">File Import Results</div>
                   <button class="btn btn-sm btn-secondary" @click="showFileScanResults = false">✕</button>
                 </div>
                 <div class="table-wrapper">

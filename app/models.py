@@ -133,6 +133,14 @@ class BrandAlert(Base):
     source = Column(String(100), default="")
     details_json = Column(Text, default="{}")
     status = Column(String(20), default="new")  # new/reviewed/dismissed
+    # Extended domain check results
+    ip = Column(String(64), nullable=True)
+    http_status = Column(Integer, nullable=True)
+    ssl_valid = Column(Boolean, nullable=True)
+    page_title = Column(String(512), nullable=True)
+    similarity_pct = Column(Float, nullable=True)
+    alive = Column(Boolean, nullable=True)
+    checked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
     brand = relationship("Brand", back_populates="alerts")
 
