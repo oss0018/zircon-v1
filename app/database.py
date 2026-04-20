@@ -1,7 +1,10 @@
+import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 Path("data/db").mkdir(parents=True, exist_ok=True)
 
@@ -18,7 +21,42 @@ async def get_db():
         yield session
 
 
+def _migrate_brand_alerts(conn) -> None:
+    """Add new columns to brand_alerts table if they are missing (SQLite ALTER TABLE)."""
+    from sqlalchemy import inspect, text
+    from typing import Dict
+
+    # Whitelist of allowed new column definitions (col_name → SQL type).
+    # All values are hardcoded — no user input reaches this function.
+    ALLOWED_NEW_COLS: Dict[str, str] = {
+        "ip": "VARCHAR(64)",
+        "http_status": "INTEGER",
+        "ssl_valid": "BOOLEAN",
+        "page_title": "VARCHAR(512)",
+        "similarity_pct": "FLOAT",
+        "alive": "BOOLEAN",
+        "checked_at": "DATETIME",
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+        if "brand_alerts" not in tables:
+            return
+        existing_cols = {c["name"] for c in inspector.get_columns("brand_alerts")}
+        for col_name, col_type in ALLOWED_NEW_COLS.items():
+            if col_name not in existing_cols:
+                # Both col_name and col_type are from a hardcoded whitelist above
+                conn.execute(
+                    text(f"ALTER TABLE brand_alerts ADD COLUMN {col_name} {col_type}")
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate brand_alerts: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Add new columns to existing brand_alerts tables (non-destructive migration)
+        await conn.run_sync(_migrate_brand_alerts)

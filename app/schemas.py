@@ -203,6 +203,13 @@ class BrandAlertOut(BaseModel):
     source: str
     details_json: str
     status: str
+    ip: Optional[str] = None
+    http_status: Optional[int] = None
+    ssl_valid: Optional[bool] = None
+    page_title: Optional[str] = None
+    similarity_pct: Optional[float] = None
+    alive: Optional[bool] = None
+    checked_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
