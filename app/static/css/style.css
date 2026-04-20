@@ -753,3 +753,41 @@ tr:hover td {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
+
+/* ── Grep result lines ───────────────────────────────────────── */
+.grep-line:hover {
+  background: rgba(0, 255, 157, 0.04);
+}
+
+/* Search highlight */
+mark.highlight {
+  background: rgba(0, 255, 157, 0.3);
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Icon button */
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: opacity 0.15s;
+  font-size: 11px;
+}
+.btn-icon:hover {
+  opacity: 1 !important;
+  background: rgba(255,255,255,0.08);
+}
+
+/* Stat card hover */
+.stat-card {
+  transition: border-color 0.2s, transform 0.12s;
+}
+.stat-card:hover {
+  border-color: var(--accent-green);
+  transform: translateY(-2px);
+  cursor: pointer;
+}

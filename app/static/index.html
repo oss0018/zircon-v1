@@ -286,6 +286,22 @@
                   </button>
                 </div>
 
+                <!-- Case-sensitive & limit options -->
+                <div class="flex items-center gap-3 mt-2">
+                  <label class="flex items-center gap-2 text-sm text-muted" style="cursor:pointer;">
+                    <input type="checkbox" x-model="caseSensitive" />
+                    Case sensitive
+                  </label>
+                  <label class="text-sm text-muted">Max results:</label>
+                  <select class="form-select" x-model="grepLimit" style="width:100px;">
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                    <option value="2000">2000</option>
+                  </select>
+                </div>
+
                 <!-- Integration Selector -->
                 <div x-show="source !== 'local' && integrations.length > 0" style="margin-top:12px;">
                   <div class="form-label" style="margin-bottom:8px;" x-text="t('integrations_to_use')"></div>
@@ -342,37 +358,101 @@
                 </template>
               </div>
 
-              <!-- Results -->
-              <div x-show="results.length > 0">
-                <div class="flex justify-between items-center mb-4">
-                  <h3 class="card-title" x-text="results.length + ' ' + t('results')"></h3>
+              <!-- Results tabs -->
+              <div x-show="grepMatches.length > 0 || results.length > 0" style="margin-top:16px;">
+
+                <!-- Tab switcher -->
+                <div class="flex gap-2 mb-3" style="border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+                  <button class="btn btn-sm" :class="resultTab === 'grep' ? 'btn-primary' : 'btn-secondary'"
+                          @click="resultTab = 'grep'" x-show="grepMatches.length > 0">
+                    📄 Local Files (<span x-text="grepTotal"></span>)
+                  </button>
+                  <button class="btn btn-sm" :class="resultTab === 'osint' ? 'btn-primary' : 'btn-secondary'"
+                          @click="resultTab = 'osint'" x-show="results.length > 0">
+                    🌐 OSINT (<span x-text="results.length"></span>)
+                  </button>
+
+                  <!-- Actions -->
+                  <div style="margin-left:auto;display:flex;gap:8px;" x-show="resultTab === 'grep' && grepMatches.length > 0">
+                    <span class="text-xs text-muted" style="align-self:center;">
+                      <span x-text="grepFilesScanned"></span> files scanned
+                    </span>
+                    <button class="btn btn-sm btn-secondary" @click="copyAllResults()">📋 Copy All</button>
+                    <button class="btn btn-sm btn-secondary" @click="exportResults()">⬇ Export .txt</button>
+                  </div>
                 </div>
-                <template x-for="(result, i) in results" :key="i">
-                  <div class="result-card">
-                    <div class="flex justify-between items-center">
-                      <div class="result-source" x-text="result.source.toUpperCase()"></div>
-                      <div class="flex gap-2 items-center">
-                        <span class="badge badge-gray" x-show="result.cached">CACHED</span>
-                        <span class="badge badge-red" x-show="hasError(result)">ERROR</span>
-                        <span class="text-xs text-muted" x-show="result.score" x-text="'score: ' + result.score.toFixed(2)"></span>
-                        <button class="btn btn-sm btn-secondary" @click="toggleExpand(i)" x-text="expandedResult === i ? 'Collapse' : 'Expand'"></button>
+
+                <!-- LOCAL GREP RESULTS -->
+                <div x-show="resultTab === 'grep'">
+
+                  <!-- Group by file -->
+                  <template x-for="group in fileGroups()" :key="group.path">
+                    <div class="card mb-2" style="padding:0;overflow:hidden;">
+
+                      <!-- File header -->
+                      <div style="background:var(--bg-secondary);padding:8px 14px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;">
+                        <div class="flex items-center gap-2">
+                          <span style="color:var(--accent-green);font-size:13px;">📄</span>
+                          <span class="font-mono text-sm" style="color:var(--text-primary);" x-text="group.name"></span>
+                          <span class="badge badge-gray text-xs" x-text="group.lines.length + ' matches'"></span>
+                        </div>
+                        <span class="text-xs text-muted" x-text="group.path"></span>
+                      </div>
+
+                      <!-- Matching lines -->
+                      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;">
+                        <template x-for="match in group.lines" :key="match.line">
+                          <div class="grep-line" style="display:flex;align-items:baseline;padding:4px 14px;border-bottom:1px solid rgba(255,255,255,0.03);">
+
+                            <!-- Line number -->
+                            <span style="color:var(--text-muted);min-width:50px;user-select:none;" x-text="match.line + ':'"></span>
+
+                            <!-- Line content with highlight -->
+                            <span style="flex:1;word-break:break-all;line-height:1.5;" x-html="highlight(match.text)"></span>
+
+                            <!-- Copy button -->
+                            <button class="btn-icon" style="margin-left:8px;opacity:0.6;" @click="copyLine(match.text)" title="Copy line">
+                              📋
+                            </button>
+                          </div>
+                        </template>
                       </div>
                     </div>
-                    <!-- Local result -->
-                    <template x-if="result.source === 'local'">
-                      <div style="margin-top:8px;">
-                        <span class="text-sm" x-text="result.data.filename"></span>
-                        <span class="badge badge-gray" x-show="result.data.file_type" x-text="result.data.file_type" style="margin-left:8px;"></span>
-                        <span class="text-xs text-muted" x-show="result.data.project" x-text="result.data.project" style="margin-left:8px;"></span>
-                      </div>
-                    </template>
-                    <!-- Expanded JSON -->
-                    <div x-show="expandedResult === i" class="result-data" style="margin-top:10px;" x-text="resultJson(result)"></div>
+                  </template>
+
+                  <!-- Truncation notice -->
+                  <div x-show="grepTotal >= grepLimit" class="card text-center text-muted text-sm">
+                    ⚠️ Results limited to <span x-text="grepLimit"></span>. Increase the limit or use a more specific query.
                   </div>
-                </template>
+                </div>
+
+                <!-- OSINT RESULTS -->
+                <div x-show="resultTab === 'osint'">
+                  <template x-for="(result, i) in results" :key="i">
+                    <div class="card mb-2">
+                      <div class="flex justify-between items-center" @click="toggleExpand(i)" style="cursor:pointer;">
+                        <div class="flex items-center gap-2">
+                          <span class="badge" :class="result.source === 'local' ? 'badge-green' : 'badge-blue'" x-text="result.source"></span>
+                          <span x-show="result.cached" class="badge badge-gray">cached</span>
+                          <span class="text-sm" x-text="result.data?.query || result.data?.domain || result.data?.ip || ''"></span>
+                        </div>
+                        <span style="color:var(--text-muted);" x-text="expandedResult === i ? '▲' : '▼'"></span>
+                      </div>
+                      <div x-show="expandedResult === i" style="margin-top:12px;">
+                        <div x-show="hasError(result)" class="alert alert-error" x-text="result.data.error"></div>
+                        <pre x-show="!hasError(result)" class="code-block" x-text="resultJson(result)"></pre>
+                      </div>
+                    </div>
+                  </template>
+                </div>
               </div>
 
-              <div x-show="!loading && results.length === 0 && query" class="card text-center" style="color:var(--text-muted);" x-text="t('no_results')"></div>
+              <!-- Empty state -->
+              <div x-show="!loading && grepMatches.length === 0 && results.length === 0 && query" class="card text-center" style="color:var(--text-muted);padding:40px;">
+                <div style="font-size:32px;margin-bottom:12px;">🔍</div>
+                <div>No results found for "<span x-text="query"></span>"</div>
+                <div class="text-xs" style="margin-top:8px;">Try a shorter keyword or check if files are in Watched Folders</div>
+              </div>
 
               <!-- Save Template Modal -->
               <div x-show="showSaveModal" class="modal-overlay" @click.self="showSaveModal = false">

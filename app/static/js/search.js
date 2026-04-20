@@ -1,14 +1,16 @@
 /**
- * Zircon FRT — Search page
+ * Zircon FRT — Search page (v2 with grep results)
  */
 document.addEventListener('alpine:init', () => {
   Alpine.data('searchPage', () => ({
     query: '',
     source: 'local',
     queryType: 'general',
+    caseSensitive: false,
     selectedIntegrations: [],
     integrations: [],
-    results: [],
+    results: [],      // OSINT results
+    grepMatches: [],  // local grep matches
     loading: false,
     history: [],
     historyLoading: false,
@@ -18,6 +20,10 @@ document.addEventListener('alpine:init', () => {
     showSaveModal: false,
     templateName: '',
     expandedResult: null,
+    grepTotal: 0,
+    grepFilesScanned: 0,
+    grepLimit: 200,
+    resultTab: 'grep',  // 'grep' or 'osint'
 
     queryTypes: ['general', 'email', 'domain', 'ip', 'url', 'hash'],
 
@@ -54,24 +60,72 @@ document.addEventListener('alpine:init', () => {
     async runSearch() {
       if (!this.query.trim()) return;
       this.loading = true;
+      this.grepMatches = [];
       this.results = [];
+
       try {
-        const payload = {
-          query: this.query,
-          source: this.source,
-          integrations: this.selectedIntegrations,
-          query_type: this.queryType,
-          limit: 50,
-        };
-        const data = await api.post('/search/', payload);
-        this.results = data.results || [];
+        // Always run local grep
+        if (this.source === 'local' || this.source === 'all') {
+          showToast('Scanning files...', 'info');
+          const grepData = await api.post('/search/grep', {
+            query: this.query,
+            limit: this.grepLimit,
+            case_sensitive: this.caseSensitive,
+          });
+          this.grepMatches = grepData.matches || [];
+          this.grepTotal = grepData.total || 0;
+          this.grepFilesScanned = grepData.files_scanned || 0;
+          this.resultTab = 'grep';
+          showToast(`Found ${this.grepTotal} matches in ${this.grepFilesScanned} files`, 'success');
+        }
+
+        // OSINT if selected
+        if ((this.source === 'osint' || this.source === 'all') && this.selectedIntegrations.length > 0) {
+          const data = await api.post('/search/', {
+            query: this.query,
+            source: 'osint',
+            integrations: this.selectedIntegrations,
+            query_type: this.queryType,
+            limit: 50,
+          });
+          this.results = data.results || [];
+          if (this.source === 'osint') this.resultTab = 'osint';
+        }
+
         await this.loadHistory();
-        showToast(`Found ${data.total} results in ${data.duration_ms}ms`, 'success');
       } catch (e) {
         showToast(e.message, 'error');
       } finally {
         this.loading = false;
       }
+    },
+
+    highlight(text) {
+      if (!text || !this.query) return text;
+      const escaped = this.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const flags = this.caseSensitive ? 'g' : 'gi';
+      return text.replace(new RegExp(escaped, flags), m => `<mark class="highlight">${m}</mark>`);
+    },
+
+    copyLine(text) {
+      navigator.clipboard.writeText(text).then(() => showToast('Copied!', 'success'));
+    },
+
+    exportResults() {
+      const lines = this.grepMatches.map(m => `${m.file}:${m.line}: ${m.text}`);
+      const content = lines.join('\n');
+      const blob = new Blob([content], {type: 'text/plain'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `zircon_search_${this.query.replace(/[^a-z0-9]/gi,'_')}.txt`;
+      a.click();
+    },
+
+    copyAllResults() {
+      const lines = this.grepMatches.map(m => m.text);
+      navigator.clipboard.writeText(lines.join('\n')).then(() =>
+        showToast(`Copied ${lines.length} lines`, 'success')
+      );
     },
 
     async saveTemplate() {
@@ -135,6 +189,16 @@ document.addEventListener('alpine:init', () => {
 
     hasError(result) {
       return result.data && result.data.error;
+    },
+
+    fileGroups() {
+      // Group grep matches by file for display
+      const groups = {};
+      for (const m of this.grepMatches) {
+        if (!groups[m.file]) groups[m.file] = { name: m.file, path: m.path, lines: [] };
+        groups[m.file].lines.push(m);
+      }
+      return Object.values(groups);
     },
   }));
 });
