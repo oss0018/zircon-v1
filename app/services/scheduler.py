@@ -20,9 +20,31 @@ def start_scheduler():
         except Exception as e:
             print(f"[scheduler] Monitored scan error: {e}")
 
+    async def _scan_all_watched_folders():
+        """Scan all active watched folders for new files."""
+        try:
+            from app.database import AsyncSessionLocal
+            from app.models import WatchedFolder
+            from sqlalchemy import select
+            from app.api.files import _scan_watched_folder
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(WatchedFolder).where(WatchedFolder.is_active == True)
+                )
+                folders = result.scalars().all()
+                for folder in folders:
+                    try:
+                        await _scan_watched_folder(folder, db)
+                    except Exception as e:
+                        print(f"[scheduler] Error scanning {folder.path}: {e}")
+        except Exception as e:
+            print(f"[scheduler] Watched folder scan error: {e}")
+
     _scheduler.add_job(_scan_monitored, IntervalTrigger(minutes=15), id="scan_monitored", replace_existing=True)
+    _scheduler.add_job(_scan_all_watched_folders, IntervalTrigger(minutes=5), id="scan_watched_folders", replace_existing=True)
     _scheduler.start()
-    print("[scheduler] Started")
+    print("[scheduler] Started. Watched folder scan every 5 minutes.")
 
 
 def stop_scheduler():

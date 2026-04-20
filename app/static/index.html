@@ -17,6 +17,7 @@
   <script src="/static/js/dashboard.js"></script>
   <script src="/static/js/search.js"></script>
   <script src="/static/js/files.js"></script>
+  <script src="/static/js/cve.js"></script>
   <script src="/static/js/integrations.js"></script>
   <script src="/static/js/monitoring.js"></script>
   <script src="/static/js/brand_protection.js"></script>
@@ -92,9 +93,12 @@
               <span x-text="t('search')"></span>
             </div>
 
-            <div class="nav-item" :class="page === 'files' ? 'active' : ''" @click="navigate('files')">
-              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-              <span x-text="t('files')"></span>
+            <div class="nav-item" :class="page === 'cve' ? 'active' : ''" @click="navigate('cve')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <span>CVE Search</span>
             </div>
 
             <div class="nav-section">OSINT</div>
@@ -179,35 +183,35 @@
             <!-- ── DASHBOARD ──────────────────────────────────── -->
             <div x-show="page === 'dashboard'" x-data="dashboardPage" x-init="init()">
               <div class="stats-grid">
-                <div class="stat-card">
+                <div class="stat-card" @click="navigate('files')" title="View files">
                   <div class="stat-label" x-text="t('total_files')"></div>
                   <div class="stat-value" x-text="stat('total_files')"></div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" @click="navigate('files')" title="View indexed files">
                   <div class="stat-label" x-text="t('indexed_files')"></div>
                   <div class="stat-value text-blue" x-text="stat('indexed_files')"></div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" @click="navigate('search')" title="Go to search">
                   <div class="stat-label" x-text="t('total_searches')"></div>
                   <div class="stat-value" x-text="stat('total_searches')"></div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" @click="navigate('integrations')" title="View integrations">
                   <div class="stat-label" x-text="t('active_integrations')"></div>
                   <div class="stat-value text-blue" x-text="stat('active_integrations')"></div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" @click="navigate('watchlist')" title="View watchlist">
                   <div class="stat-label" x-text="t('watchlist_items')"></div>
                   <div class="stat-value" x-text="stat('watchlist_items')"></div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" @click="navigate('brands')" title="View brand alerts">
                   <div class="stat-label" x-text="t('brand_alerts')"></div>
                   <div class="stat-value text-red" x-text="stat('brand_alerts_new')"></div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" @click="navigate('monitoring')" title="View monitoring jobs">
                   <div class="stat-label" x-text="t('monitoring_jobs')"></div>
                   <div class="stat-value" x-text="stat('active_monitoring_jobs')"></div>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card" @click="navigate('notifications'); $dispatch('load-stats')" title="View notifications">
                   <div class="stat-label" x-text="t('unread_notifications')"></div>
                   <div class="stat-value text-red" x-text="stat('unread_notifications')"></div>
                 </div>
@@ -220,8 +224,9 @@
                     <p class="text-muted text-sm" x-text="t('no_data')"></p>
                   </template>
                   <template x-for="s in (stats ? stats.recent_searches : [])" :key="s.query + s.created_at">
-                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-color);">
-                      <span class="text-sm truncate" x-text="s.query" style="max-width:200px;"></span>
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-color);cursor:pointer;"
+                         @click="navigate('search')" title="Click to search again">
+                      <span class="text-sm truncate text-green" x-text="s.query" style="max-width:200px;"></span>
                       <span class="badge badge-gray" x-text="s.results_count + ' results'"></span>
                     </div>
                   </template>
@@ -238,6 +243,20 @@
                     </template>
                   </div>
                 </div>
+              </div>
+
+              <!-- Quick Actions -->
+              <div class="card" style="margin-top:20px;">
+                <div class="card-title">Quick Actions</div>
+                <div class="flex gap-2" style="flex-wrap:wrap;">
+                  <button class="btn btn-secondary" @click="reindexAll()" :disabled="reindexing">
+                    <span x-show="reindexing" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="reindexing ? 'Reindexing...' : 'Reindex All'"></span>
+                  </button>
+                  <button class="btn btn-secondary" @click="navigate('brands')">Scan All Brands</button>
+                  <button class="btn btn-secondary" @click="navigate('search')">View All Searches</button>
+                </div>
+                <div x-show="reindexMsg" class="alert alert-success" style="margin-top:12px;" x-text="reindexMsg"></div>
               </div>
             </div>
 
@@ -526,6 +545,100 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+
+            <!-- ── CVE SEARCH ─────────────────────────────────────── -->
+            <div x-show="page === 'cve'" x-data="cvePage" x-init="init()">
+
+              <div class="card mb-4">
+                <div class="card-title">CVE / Vulnerability Search</div>
+                <p class="text-sm text-muted" style="margin-bottom:16px;">
+                  Search NIST NVD CVE database. Results are fetched via backend proxy.
+                </p>
+
+                <div class="search-bar">
+                  <div class="search-input-wrap" style="flex:1;">
+                    <svg class="search-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <input class="form-input" type="text" x-model="query"
+                           placeholder="CVE-2024-1234 or keyword: log4j, apache, openssl..."
+                           @keyup.enter="search()" />
+                  </div>
+                  <select class="form-select" x-model="searchType" style="width:160px;">
+                    <option value="cve_id">CVE ID</option>
+                    <option value="keyword">Keyword</option>
+                    <option value="product">Product/Vendor</option>
+                  </select>
+                  <select class="form-select" x-model="severity" style="width:140px;">
+                    <option value="">All Severity</option>
+                    <option value="CRITICAL">Critical</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="LOW">Low</option>
+                  </select>
+                  <button class="btn btn-primary" @click="search()" :disabled="loading">
+                    <span x-show="loading" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="loading ? 'Searching...' : 'Search CVE'"></span>
+                  </button>
+                </div>
+
+                <!-- Quick searches -->
+                <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                  <span class="text-xs text-muted">Quick:</span>
+                  <template x-for="q in quickSearches" :key="q">
+                    <button class="btn btn-sm btn-secondary" @click="query=q; searchType='keyword'; search()" x-text="q"></button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Stats bar -->
+              <div x-show="totalResults > 0" class="flex items-center gap-4 mb-4" style="color:var(--text-muted);font-size:13px;">
+                <span>Found: <span class="text-green" x-text="totalResults"></span> CVEs</span>
+                <span x-show="searchTime">Search time: <span x-text="searchTime + 'ms'"></span></span>
+              </div>
+
+              <!-- Results -->
+              <div x-show="results.length > 0">
+                <template x-for="cve in results" :key="cve.id">
+                  <div class="card mb-2" style="border-left:3px solid var(--border-color);"
+                       :style="severityBorder(cve.severity)">
+                    <div class="flex justify-between items-start mb-2">
+                      <div>
+                        <span class="font-mono" style="font-size:15px;font-weight:600;color:var(--accent-green);" x-text="cve.id"></span>
+                        <span class="badge" :class="severityClass(cve.severity)" x-text="cve.severity || 'N/A'" style="margin-left:8px;"></span>
+                        <span class="badge badge-gray" x-show="cve.cvss_score" x-text="'CVSS: ' + cve.cvss_score" style="margin-left:4px;"></span>
+                      </div>
+                      <div class="flex gap-2">
+                        <span class="text-xs text-muted" x-text="cve.published ? new Date(cve.published).toLocaleDateString() : ''"></span>
+                        <a :href="'https://nvd.nist.gov/vuln/detail/' + cve.id" target="_blank" class="btn btn-sm btn-secondary">NVD ↗</a>
+                      </div>
+                    </div>
+                    <div class="text-sm" style="line-height:1.6;margin-bottom:8px;" x-text="cve.description"></div>
+                    <div x-show="cve.products && cve.products.length > 0" style="margin-top:8px;">
+                      <span class="text-xs text-muted">Affected: </span>
+                      <template x-for="p in (cve.products || []).slice(0,5)" :key="p">
+                        <span class="badge badge-gray" style="margin-right:4px;" x-text="p"></span>
+                      </template>
+                    </div>
+                    <div x-show="cve.references && cve.references.length > 0" style="margin-top:8px;">
+                      <span class="text-xs text-muted">References: </span>
+                      <template x-for="ref in (cve.references || []).slice(0,3)" :key="ref">
+                        <a :href="ref" target="_blank" class="text-xs" style="color:var(--accent-blue);margin-right:8px;word-break:break-all;" x-text="ref.length > 60 ? ref.substring(0,60) + '...' : ref"></a>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- No results -->
+              <div x-show="!loading && searched && results.length === 0" class="card text-center" style="color:var(--text-muted);">
+                No CVEs found for "<span x-text="query"></span>"
+              </div>
+
+              <!-- Error -->
+              <div x-show="error" class="alert alert-error" x-text="error"></div>
             </div>
 
             <!-- ── INTEGRATIONS ───────────────────────────────────── -->
