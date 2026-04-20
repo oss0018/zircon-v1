@@ -1,0 +1,16 @@
+# Sample format for credential files
+# One entry per line, various formats supported:
+
+# Format 1: email:password
+user@example.com:password123
+
+# Format 2: email:hash
+user@example.com:5f4dcc3b5aa765d61d8327deb882cf99
+
+# Format 3: email only  
+user@example.com
+
+# Format 4: domain:email:password
+example.com:user@example.com:password123
+
+# Lines starting with # are ignored during search indexing

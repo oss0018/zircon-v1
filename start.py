@@ -100,7 +100,7 @@ print("SSL cert generated (10 years)")
     print("✅ SSL certificate generated")
 
 def init_dirs():
-    for d in ["data/uploads", "data/monitored", "data/index", "data/db"]:
+    for d in ["data/uploads", "data/monitored", "data/index", "data/db", "leaked_accounts"]:
         Path(d).mkdir(parents=True, exist_ok=True)
 
 def start_server():
@@ -111,6 +111,8 @@ def start_server():
     print(f"   HTTPS → https://localhost:{HTTPS_PORT}")
     print(f"   HTTPS → https://{local_ip}:{HTTPS_PORT}")
     print(f"   HTTP  → http://localhost:{HTTP_PORT}  (redirects to HTTPS)")
+    print(f"   📂 Drop leaked account files → ./leaked_accounts/")
+    print(f"   Then add the folder in Settings → Watched Folders")
     print(f"\n⚠️  Browser may warn about self-signed cert — click 'Advanced → Proceed'\n")
 
     env = os.environ.copy()

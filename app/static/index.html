@@ -821,6 +821,14 @@
                         <button class="btn btn-sm btn-secondary" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
                         <button class="btn btn-sm btn-danger" @click="deleteBrand(brand.id)">✕</button>
                       </div>
+                      <!-- File scan section for each brand -->
+                      <div style="margin-top:12px;border-top:1px solid var(--border-color);padding-top:10px;">
+                        <div class="text-xs text-muted" style="margin-bottom:6px;">Scan domains from .txt file (one per line):</div>
+                        <label class="btn btn-sm btn-secondary" style="cursor:pointer;">
+                          📄 Import .txt
+                          <input type="file" accept=".txt" style="display:none;" @change="scanFromFile(brand.id, $event)" />
+                        </label>
+                      </div>
                     </div>
                   </template>
                   <template x-if="brands.length === 0">
@@ -840,6 +848,7 @@
                     <thead>
                       <tr>
                         <th>Similar Domain</th>
+                        <th>IP Address</th>
                         <th x-text="t('similarity')"></th>
                         <th>Source</th>
                         <th x-text="t('status')"></th>
@@ -849,11 +858,12 @@
                     </thead>
                     <tbody>
                       <template x-if="alerts.length === 0">
-                        <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
+                        <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
                       </template>
                       <template x-for="alert in alerts" :key="alert.id">
                         <tr>
                           <td class="font-mono" x-text="alert.similar_domain"></td>
+                          <td class="font-mono text-xs" x-text="getAlertIp(alert)"></td>
                           <td>
                             <span :class="similarityColor(alert.similarity_score)"
                                   x-text="(alert.similarity_score * 100).toFixed(1) + '%'" class="badge"></span>
@@ -871,6 +881,29 @@
                                       @click="updateAlertStatus(alert.id, 'dismissed')" x-text="t('dismissed')"></button>
                             </div>
                           </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- File Scan Results Panel -->
+              <div x-show="showFileScanResults" class="card mt-4">
+                <div class="flex justify-between items-center mb-2">
+                  <div class="card-title">File Scan Results</div>
+                  <button class="btn btn-sm btn-secondary" @click="showFileScanResults = false">✕</button>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead><tr><th>Domain</th><th>IP</th><th>Similarity</th><th>Status</th></tr></thead>
+                    <tbody>
+                      <template x-for="r in fileScanResults" :key="r.domain">
+                        <tr>
+                          <td class="font-mono text-sm" x-text="r.domain"></td>
+                          <td class="font-mono text-xs" x-text="r.ip || '—'"></td>
+                          <td><span :class="r.similarity > 0.8 ? 'badge badge-red' : r.similarity > 0.5 ? 'badge badge-yellow' : 'badge badge-gray'" x-text="(r.similarity * 100).toFixed(1) + '%'"></span></td>
+                          <td><span :class="r.new ? 'badge badge-green' : 'badge badge-gray'" x-text="r.new ? 'New alert' : 'Existing'"></span></td>
                         </tr>
                       </template>
                     </tbody>

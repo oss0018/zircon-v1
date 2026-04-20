@@ -1,6 +1,6 @@
 import json
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -49,6 +49,21 @@ async def create_brand(data: BrandCreate, db: AsyncSession = Depends(get_db),
     await db.commit()
     await db.refresh(brand)
     return brand
+
+
+@router.post("/resolve-domains")
+async def resolve_domains(body: dict, _: User = Depends(get_current_user)):
+    """Resolve IPs for a list of domains. Body: {"domains": ["example.com", ...]}"""
+    import socket
+    domains = body.get("domains", [])
+    results = []
+    for domain in domains[:100]:  # limit to 100
+        try:
+            ip = socket.gethostbyname(domain.strip())
+        except Exception:
+            ip = None
+        results.append({"domain": domain, "ip": ip})
+    return {"results": results}
 
 
 @router.get("/{brand_id}", response_model=BrandOut)
@@ -113,6 +128,112 @@ async def scan_brand(brand_id: int, body: dict = {}, db: AsyncSession = Depends(
 
     await db.commit()
     return {"ok": True, "candidates_checked": len(candidates), "alerts_created": alerts_created}
+
+
+@router.post("/{brand_id}/scan-from-file")
+async def scan_brand_from_file(
+    brand_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Upload a .txt file with one domain per line.
+    For each domain: compute similarity to brand, resolve IP, save as BrandAlert.
+    """
+    import socket, re
+    result = await db.execute(select(Brand).where(Brand.id == brand_id))
+    brand = result.scalar_one_or_none()
+    if not brand:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8", errors="replace")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cannot read file")
+
+    # Extract base domain from brand URL
+    base_domain = brand.url
+    if "://" in base_domain:
+        base_domain = base_domain.split("://", 1)[1].split("/")[0]
+    base_domain = re.sub(r"^www\.", "", base_domain).strip()
+
+    domains = []
+    for line in text.splitlines():
+        line = line.strip().strip(",").strip(";")
+        if not line or line.startswith("#"):
+            continue
+        # Strip protocol if present
+        if "://" in line:
+            line = line.split("://", 1)[1].split("/")[0]
+        line = line.strip()
+        if line:
+            domains.append(line)
+
+    alerts_created = 0
+    results = []
+
+    for domain in domains:
+        score = _similarity(base_domain, domain)
+
+        # Resolve IP
+        ip_address = None
+        try:
+            ip_address = socket.gethostbyname(domain)
+        except Exception:
+            ip_address = None
+
+        details = {
+            "base": base_domain,
+            "candidate": domain,
+            "ip": ip_address,
+            "source_file": file.filename,
+        }
+
+        # Check if alert already exists
+        existing = await db.execute(
+            select(BrandAlert).where(
+                BrandAlert.brand_id == brand_id,
+                BrandAlert.similar_domain == domain,
+            )
+        )
+        existing_alert = existing.scalar_one_or_none()
+
+        if existing_alert:
+            # Update IP info if resolved
+            if ip_address:
+                try:
+                    d = json.loads(existing_alert.details_json or "{}")
+                    d["ip"] = ip_address
+                    existing_alert.details_json = json.dumps(d)
+                except Exception:
+                    pass
+        else:
+            alert = BrandAlert(
+                brand_id=brand_id,
+                similar_domain=domain,
+                similarity_score=score,
+                source="file_import",
+                details_json=json.dumps(details),
+            )
+            db.add(alert)
+            alerts_created += 1
+
+        results.append({
+            "domain": domain,
+            "similarity": round(score, 3),
+            "ip": ip_address,
+            "new": existing_alert is None,
+        })
+
+    await db.commit()
+    return {
+        "ok": True,
+        "total_domains": len(domains),
+        "alerts_created": alerts_created,
+        "results": results,
+    }
 
 
 def _generate_typosquats(domain: str) -> List[str]:
