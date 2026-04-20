@@ -2,10 +2,12 @@
 Whoosh-based full-text search engine.
 """
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any
 
+import whoosh.qparser
 from whoosh import index as whoosh_index
 from whoosh.fields import Schema, TEXT, ID, DATETIME, STORED
 from whoosh.qparser import MultifieldParser, QueryParser
@@ -19,9 +21,12 @@ SCHEMA = Schema(
     content=TEXT(stored=False),
     file_type=ID(stored=True),
     project=TEXT(stored=True),
-    path=STORED(),
+    path=TEXT(stored=True),
     indexed_at=DATETIME(stored=True),
 )
+
+# Operators that indicate a structured query (skip auto-wildcard wrapping)
+_QUERY_OPERATORS = frozenset(["AND", "OR", "NOT", '"', "*", "?"])
 
 
 class SearchEngine:
@@ -32,7 +37,22 @@ class SearchEngine:
         idx_dir = Path(settings.whoosh_index_dir)
         idx_dir.mkdir(parents=True, exist_ok=True)
         if whoosh_index.exists_in(str(idx_dir)):
-            self._ix = whoosh_index.open_dir(str(idx_dir))
+            try:
+                ix = whoosh_index.open_dir(str(idx_dir))
+                # Migrate index if path field is not TEXT (searchable)
+                existing_path_field = ix.schema.fields().get("path")
+                if not isinstance(existing_path_field, TEXT):
+                    ix.close()
+                    print("[search_engine] WARNING: Schema changed (path field migrated to TEXT). "
+                          "Recreating index — all documents will need to be reindexed.")
+                    shutil.rmtree(str(idx_dir))
+                    idx_dir.mkdir(parents=True, exist_ok=True)
+                    self._ix = whoosh_index.create_in(str(idx_dir), SCHEMA)
+                    print("[search_engine] Schema migrated: path field is now searchable")
+                else:
+                    self._ix = ix
+            except Exception:
+                self._ix = whoosh_index.create_in(str(idx_dir), SCHEMA)
         else:
             self._ix = whoosh_index.create_in(str(idx_dir), SCHEMA)
 
@@ -64,11 +84,19 @@ class SearchEngine:
     def search(self, query_str: str, limit: int = 50) -> List[Dict[str, Any]]:
         results = []
         with self.ix.searcher() as searcher:
-            parser = MultifieldParser(["filename", "content"], self.ix.schema)
+            parser = MultifieldParser(["filename", "content", "path"], self.ix.schema)
+            parser.add_plugin(whoosh.qparser.WildcardPlugin())
+            # Auto-wrap simple queries with wildcards for substring search
+            q_str = query_str.strip()
+            if q_str and not any(op in q_str for op in _QUERY_OPERATORS):
+                q_str = f"*{q_str}*"
             try:
-                query = parser.parse(query_str)
+                query = parser.parse(q_str)
             except Exception:
-                query = parser.parse(query_str.replace(":", " "))
+                try:
+                    query = parser.parse(query_str.replace(":", " "))
+                except Exception:
+                    return results
             hits = searcher.search(query, limit=limit)
             for hit in hits:
                 results.append({

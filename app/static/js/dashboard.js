@@ -6,6 +6,8 @@ document.addEventListener('alpine:init', () => {
     stats: null,
     loading: false,
     chart: null,
+    reindexing: false,
+    reindexMsg: '',
 
     async init() {
       await this.load();
@@ -20,6 +22,20 @@ document.addEventListener('alpine:init', () => {
         showToast(e.message, 'error');
       } finally {
         this.loading = false;
+      }
+    },
+
+    async reindexAll() {
+      this.reindexing = true;
+      this.reindexMsg = '';
+      try {
+        const res = await api.post('/files/reindex-all');
+        this.reindexMsg = `Reindexed ${res.indexed} files successfully.`;
+        await this.load();
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.reindexing = false;
       }
     },
 

@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 from typing import Optional
 
-from app.services.file_parsers import extract_text
+from app.services.file_parsers import extract_text, extract_text_streaming, MAX_INDEX_BYTES
 from app.services.search_engine import search_engine
 
 
@@ -30,7 +30,11 @@ async def index_file(file_id: int, file_path: str, filename: str,
                      file_type: str = "", project: str = "") -> bool:
     loop = asyncio.get_event_loop()
     try:
-        content = await loop.run_in_executor(None, extract_text, file_path)
+        file_size = Path(file_path).stat().st_size if Path(file_path).exists() else 0
+        if file_size > MAX_INDEX_BYTES:
+            content = await loop.run_in_executor(None, extract_text_streaming, file_path)
+        else:
+            content = await loop.run_in_executor(None, extract_text, file_path)
         if content is None:
             content = ""
         search_engine.index_document(
@@ -61,9 +65,15 @@ async def scan_monitored_dir(monitored_dir: str, db_session_factory) -> int:
     for f in monitored.rglob("*"):
         if f.is_file() and not f.name.startswith("."):
             checksum = await compute_checksum(str(f))
-            content = await asyncio.get_event_loop().run_in_executor(
-                None, extract_text, str(f)
-            )
+            file_size = f.stat().st_size if f.exists() else 0
+            if file_size > MAX_INDEX_BYTES:
+                content = await asyncio.get_event_loop().run_in_executor(
+                    None, extract_text_streaming, str(f)
+                )
+            else:
+                content = await asyncio.get_event_loop().run_in_executor(
+                    None, extract_text, str(f)
+                )
             search_engine.index_document(
                 doc_id=f"monitored_{checksum}",
                 filename=f.name,

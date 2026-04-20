@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve
 
 
 async def create_default_admin():
@@ -125,6 +125,7 @@ app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monito
 app.include_router(brand_protection.router, prefix="/api/v1/brands", tags=["brands"])
 app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["watchlist"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
+app.include_router(cve.router, prefix="/api/v1/cve", tags=["cve"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)

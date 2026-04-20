@@ -255,12 +255,13 @@ body::before {
   flex-direction: column;
   gap: 8px;
   transition: all 0.2s;
-  cursor: default;
+  cursor: pointer;
 }
 
 .stat-card:hover {
-  border-color: var(--border-hover);
-  transform: translateY(-1px);
+  border-color: var(--accent-green);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 255, 157, 0.08);
 }
 
 .stat-label {
