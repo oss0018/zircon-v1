@@ -25,6 +25,9 @@ SCHEMA = Schema(
     indexed_at=DATETIME(stored=True),
 )
 
+# Operators that indicate a structured query (skip auto-wildcard wrapping)
+_QUERY_OPERATORS = frozenset(["AND", "OR", "NOT", '"', "*", "?"])
+
 
 class SearchEngine:
     def __init__(self):
@@ -40,6 +43,8 @@ class SearchEngine:
                 existing_path_field = ix.schema.fields().get("path")
                 if not isinstance(existing_path_field, TEXT):
                     ix.close()
+                    print("[search_engine] WARNING: Schema changed (path field migrated to TEXT). "
+                          "Recreating index — all documents will need to be reindexed.")
                     shutil.rmtree(str(idx_dir))
                     idx_dir.mkdir(parents=True, exist_ok=True)
                     self._ix = whoosh_index.create_in(str(idx_dir), SCHEMA)
@@ -83,7 +88,7 @@ class SearchEngine:
             parser.add_plugin(whoosh.qparser.WildcardPlugin())
             # Auto-wrap simple queries with wildcards for substring search
             q_str = query_str.strip()
-            if q_str and not any(op in q_str for op in ["AND", "OR", "NOT", '"', "*", "?"]):
+            if q_str and not any(op in q_str for op in _QUERY_OPERATORS):
                 q_str = f"*{q_str}*"
             try:
                 query = parser.parse(q_str)

@@ -9,6 +9,8 @@ router = APIRouter()
 NVD_BASE = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 _ALLOWED_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW"}
 
+_http_client = httpx.AsyncClient(timeout=30)
+
 
 @router.get("/search")
 async def search_cve(
@@ -26,10 +28,13 @@ async def search_cve(
     if severity and severity in _ALLOWED_SEVERITIES:
         params["cvssV3Severity"] = severity
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            resp = await client.get(NVD_BASE, params=params)
-            resp.raise_for_status()
-            return resp.json()
-        except Exception as e:
-            return {"error": str(e), "vulnerabilities": [], "totalResults": 0}
+    try:
+        resp = await _http_client.get(NVD_BASE, params=params)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as e:
+        return {"error": f"NVD API returned {e.response.status_code}", "vulnerabilities": [], "totalResults": 0}
+    except httpx.RequestError:
+        return {"error": "Failed to connect to NVD API", "vulnerabilities": [], "totalResults": 0}
+    except Exception:
+        return {"error": "CVE search failed", "vulnerabilities": [], "totalResults": 0}

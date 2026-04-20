@@ -136,8 +136,6 @@ def extract_text(file_path: str) -> Optional[str]:
 
     # Detect credential log files and use specialized parser
     if _is_credential_log(p):
-        if file_size > MAX_INDEX_BYTES:
-            return extract_credential_log(file_path)
         return extract_credential_log(file_path)
 
     # For large plain-text files, use streaming extraction

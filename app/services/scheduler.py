@@ -30,7 +30,7 @@ def start_scheduler():
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(WatchedFolder).where(WatchedFolder.is_active == True)
+                    select(WatchedFolder).where(WatchedFolder.is_active)
                 )
                 folders = result.scalars().all()
                 for folder in folders:
