@@ -11,6 +11,7 @@ from app.schemas import SearchQuery, SearchTemplateCreate, SearchTemplateOut
 from app.services.search_engine import search_engine
 from app.services.osint import get_client
 from app.services.crypto import decrypt
+from app.utils.sanitize import sanitize_search_query
 
 router = APIRouter()
 
@@ -110,7 +111,7 @@ async def grep_search(
     import asyncio
     from pathlib import Path
 
-    q = query.get("query", "").strip()
+    q = sanitize_search_query(query.get("query", "").strip())
     limit = min(int(query.get("limit", 200)), 2000)
     case_sensitive = query.get("case_sensitive", False)
 

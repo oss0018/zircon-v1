@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from app.config import settings
 from app.database import init_db
 from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 
 async def create_default_admin():
@@ -104,6 +105,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Zircon FRT", version="1.0.0", lifespan=lifespan)
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8181", "https://localhost:8443",

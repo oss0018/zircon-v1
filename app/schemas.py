@@ -1,6 +1,13 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any
 from datetime import datetime
+import html as _html
+
+
+def _sanitize(v: str, max_length: int = 2048) -> str:
+    """Strip HTML tags and escape special chars. Applied in schema validators."""
+    from app.utils.sanitize import sanitize_string
+    return sanitize_string(v, max_length=max_length)
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────
@@ -8,6 +15,11 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6)
     role: str = "user"
+
+    @field_validator("username")
+    @classmethod
+    def sanitize_username(cls, v: str) -> str:
+        return v.strip()[:50]
 
 
 class UserOut(BaseModel):
@@ -28,11 +40,21 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
+    @field_validator("username")
+    @classmethod
+    def sanitize_username(cls, v: str) -> str:
+        return v.strip()[:50]
+
 
 # ── Projects ─────────────────────────────────────────────────────────────────
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str = ""
+
+    @field_validator("name", "description")
+    @classmethod
+    def sanitize_fields(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=500)
 
 
 class ProjectOut(BaseModel):
@@ -65,6 +87,13 @@ class FileUpdate(BaseModel):
     tags: Optional[str] = None
     project_id: Optional[int] = None
 
+    @field_validator("name", "tags")
+    @classmethod
+    def sanitize_fields(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _sanitize(v.strip(), max_length=255)
+
 
 # ── Integrations ──────────────────────────────────────────────────────────────
 class IntegrationCreate(BaseModel):
@@ -73,6 +102,11 @@ class IntegrationCreate(BaseModel):
     api_key: str = ""
     rate_limit: int = 60
     cache_ttl: int = 3600
+
+    @field_validator("name", "service_type")
+    @classmethod
+    def sanitize_fields(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=200)
 
 
 class IntegrationOut(BaseModel):
@@ -103,6 +137,12 @@ class SearchQuery(BaseModel):
     query_type: str = "general"  # email/domain/ip/url/hash/general
     limit: int = 50
 
+    @field_validator("query")
+    @classmethod
+    def sanitize_query(cls, v: str) -> str:
+        from app.utils.sanitize import sanitize_search_query
+        return sanitize_search_query(v.strip())
+
 
 class SearchResult(BaseModel):
     source: str
@@ -116,6 +156,11 @@ class SearchTemplateCreate(BaseModel):
     query: str
     filters_json: str = "{}"
     schedule: str = ""
+
+    @field_validator("name", "query")
+    @classmethod
+    def sanitize_fields(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=512)
 
 
 class SearchTemplateOut(BaseModel):
@@ -137,6 +182,11 @@ class MonitoringJobCreate(BaseModel):
     type: str
     config_json: str = "{}"
     schedule: str = "*/15 * * * *"
+
+    @field_validator("name", "type")
+    @classmethod
+    def sanitize_fields(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=200)
 
 
 class MonitoringJobOut(BaseModel):
@@ -161,6 +211,17 @@ class WatchlistItemCreate(BaseModel):
     alert_email: str = ""
     alert_telegram: str = ""
 
+    @field_validator("value")
+    @classmethod
+    def sanitize_value(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=512)
+
+    @field_validator("alert_email")
+    @classmethod
+    def sanitize_email(cls, v: str) -> str:
+        v = v.strip()[:254]
+        return _html.escape(v, quote=True)
+
 
 class WatchlistItemOut(BaseModel):
     id: int
@@ -181,6 +242,32 @@ class BrandCreate(BaseModel):
     keywords: str = ""
     similarity_threshold: float = 0.8
     monitoring_enabled: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def sanitize_name(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=200)
+
+    @field_validator("url")
+    @classmethod
+    def sanitize_url(cls, v: str) -> str:
+        from pydantic import field_validator as _fv  # noqa: F401 – used below
+        from pydantic_core import PydanticCustomError
+        v = v.strip()[:2048]
+        if not v:
+            return v
+        # Only allow http(s) URLs
+        if not v.startswith(("http://", "https://")):
+            raise PydanticCustomError(
+                "invalid_url_scheme",
+                "URL must start with http:// or https://",
+            )
+        return _html.escape(v, quote=True)
+
+    @field_validator("keywords")
+    @classmethod
+    def sanitize_keywords(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=1000)
 
 
 class BrandOut(BaseModel):

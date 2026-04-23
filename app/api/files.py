@@ -13,11 +13,21 @@ from app.models import User, File as FileModel, Project, WatchedFolder
 from app.schemas import FileOut, FileUpdate, ProjectCreate, ProjectOut, WatchedFolderCreate, WatchedFolderOut
 from app.config import settings
 from app.services.indexer import index_file, remove_from_index, compute_checksum
+from app.utils.sanitize import sanitize_filename
 
 router = APIRouter()
 
 UPLOADS_DIR = Path(settings.uploads_dir)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Allowlist of permitted upload extensions
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".txt", ".csv", ".json", ".xml", ".xlsx", ".pdf", ".docx", ".sql",
+    ".log", ".md",
+}
+
+# Maximum upload size: 100 MB
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024
 
 
 # ── Projects ─────────────────────────────────────────────────────────────────
@@ -62,25 +72,60 @@ async def upload_file(
 ):
     try:
         UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-        dest = UPLOADS_DIR / file.filename
-        # Avoid name collision
+
+        # Sanitize the original filename
+        safe_name = sanitize_filename(file.filename or "upload")
+        suffix = Path(safe_name).suffix.lower()
+
+        # Check extension against allowlist
+        if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type '{suffix}' is not allowed. Allowed: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}",
+            )
+
+        # Enforce size limit using chunked reads to avoid memory exhaustion
+        chunks = []
+        total_size = 0
+        async for chunk in file:
+            total_size += len(chunk)
+            if total_size > MAX_UPLOAD_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_SIZE // (1024 * 1024)} MB.",
+                )
+            chunks.append(chunk)
+        content = b"".join(chunks)
+
+        # Determine safe destination path (path-traversal guard)
+        dest = UPLOADS_DIR / safe_name
         counter = 1
-        stem = Path(file.filename).stem
-        suffix = Path(file.filename).suffix
+        stem = Path(safe_name).stem
         while dest.exists():
             dest = UPLOADS_DIR / f"{stem}_{counter}{suffix}"
             counter += 1
 
-        content = await file.read()
+        # Final path-traversal check: destination must be inside UPLOADS_DIR
+        if not str(dest.resolve()).startswith(str(UPLOADS_DIR.resolve())):
+            raise HTTPException(status_code=400, detail="Invalid file path.")
+
         async with aiofiles.open(dest, "wb") as f:
             await f.write(content)
 
         checksum = hashlib.sha256(content).hexdigest()
+
+        # Verify MIME type via python-magic if available
         mime = file.content_type or ""
+        try:
+            import magic as _magic  # type: ignore
+            detected_mime = _magic.from_buffer(content, mime=True)
+            mime = detected_mime or mime
+        except Exception:
+            pass
 
         db_file = FileModel(
             name=dest.name,
-            original_name=file.filename,
+            original_name=safe_name,
             path=str(dest),
             size=len(content),
             mime_type=mime,
@@ -107,6 +152,8 @@ async def upload_file(
 
         await db.refresh(db_file)
         return db_file
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
