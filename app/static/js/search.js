@@ -101,10 +101,14 @@ document.addEventListener('alpine:init', () => {
     },
 
     highlight(text) {
-      if (!text || !this.query) return text;
-      const escaped = this.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (!text || !this.query) return escapeHtml(text || '');
       const flags = this.caseSensitive ? 'g' : 'gi';
-      return text.replace(new RegExp(escaped, flags), m => `<mark class="highlight">${m}</mark>`);
+      // Escape the raw text first to prevent XSS, then search using the
+      // original query (not HTML-escaped) against the escaped text so that
+      // the matched portion `m` is already safe HTML and can be wrapped in <mark>.
+      const safeText = escapeHtml(text);
+      const safeQueryEscaped = this.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return safeText.replace(new RegExp(safeQueryEscaped, flags), m => `<mark class="highlight">${m}</mark>`);
     },
 
     copyLine(text) {

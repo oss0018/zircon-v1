@@ -37,6 +37,7 @@ from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import Brand, BrandAlert, User
 from app.schemas import BrandAlertOut, BrandCreate, BrandOut
+from app.utils.sanitize import sanitize_string
 
 router = APIRouter()
 
@@ -187,11 +188,12 @@ async def resolve_domains(body: dict, _: User = Depends(get_current_user)):
     domains = body.get("domains", [])
     results = []
     for domain in domains[:100]:
+        safe_domain = sanitize_string(str(domain).strip(), max_length=253)
         try:
-            ip = socket.gethostbyname(domain.strip())
+            ip = socket.gethostbyname(safe_domain)
         except Exception:
             ip = None
-        results.append({"domain": domain, "ip": ip})
+        results.append({"domain": safe_domain, "ip": ip})
     return {"results": results}
 
 
@@ -211,7 +213,7 @@ async def generate_and_check(
     """
     from app.services.domain_checker import check_domains_async, generate_typosquats
 
-    raw_domain = body.get("domain", "").strip()
+    raw_domain = sanitize_string(body.get("domain", "").strip(), max_length=253)
     if not raw_domain:
         raise HTTPException(status_code=400, detail="domain is required")
     base_domain = _extract_base_domain(raw_domain)

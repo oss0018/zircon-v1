@@ -4,6 +4,23 @@
 
 const API_BASE = '/api/v1';
 
+// ── XSS Helpers ───────────────────────────────────────────────────────────
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(String(str)));
+  return div.innerHTML;
+}
+
+function createSafeElement(tag, text, attrs = {}) {
+  const el = document.createElement(tag);
+  el.textContent = text;
+  Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, escapeHtml(String(v))));
+  return el;
+}
+
+window.escapeHtml = escapeHtml;
+window.createSafeElement = createSafeElement;
+
 // ── API Client ────────────────────────────────────────────────────────────
 const api = {
   _token() { return localStorage.getItem('zircon_token'); },
@@ -47,7 +64,12 @@ function showToast(message, type = 'info') {
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
   const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️';
-  toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+  const iconSpan = document.createElement('span');
+  iconSpan.textContent = icon;
+  const msgSpan = document.createElement('span');
+  msgSpan.textContent = message;
+  toast.appendChild(iconSpan);
+  toast.appendChild(msgSpan);
   container.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
 }
