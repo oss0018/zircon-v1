@@ -58,6 +58,20 @@ async def run_search(query: SearchQuery, db: AsyncSession = Depends(get_db),
                 except Exception:
                     results.append({"source": svc, "score": 0, "data": {"error": "Integration request failed"}, "cached": False})
 
+    if query.source in ("deep_search", "all"):
+        try:
+            from app.services.deep_search_service import search_deep_data
+            ds_hits = await search_deep_data(query.query, limit=200)
+            for hit in ds_hits:
+                results.append({
+                    "source": "deep_search",
+                    "score": hit.get("match_count", 0),
+                    "data": hit,
+                    "cached": False,
+                })
+        except Exception:
+            results.append({"source": "deep_search", "score": 0, "data": {"error": "Deep search error"}, "cached": False})
+
     duration_ms = int((time.time() - start) * 1000)
     log = SearchLog(
         query=query.query,

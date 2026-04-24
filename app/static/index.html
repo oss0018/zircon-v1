@@ -22,6 +22,7 @@
   <script src="/static/js/monitoring.js"></script>
   <script src="/static/js/brand_protection.js"></script>
   <script src="/static/js/settings.js"></script>
+  <script src="/static/js/deep_search.js"></script>
 
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container"></div>
@@ -123,6 +124,13 @@
             <div class="nav-item" :class="page === 'brands' ? 'active' : ''" @click="navigate('brands')">
               <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
               <span x-text="t('brand_protection')"></span>
+            </div>
+
+            <div class="nav-item" :class="page === 'deep-search' ? 'active' : ''" @click="navigate('deep-search')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
+              </svg>
+              <span>Deep Search</span>
             </div>
 
             <div class="nav-section">System</div>
@@ -1679,6 +1687,289 @@
               </div>
 
             </div><!-- /settings -->
+
+            <!-- ── DEEP SEARCH ────────────────────────────────── -->
+            <div x-show="page === 'deep-search'" x-data="deepSearchPage" x-init="init()">
+
+              <!-- Tab switcher -->
+              <div class="flex gap-2 mb-4" style="border-bottom:1px solid var(--border-color);padding-bottom:10px;">
+                <button class="btn btn-sm" :class="activeTab==='tree' ? 'btn-primary' : 'btn-secondary'"
+                        @click="activeTab='tree'">📁 File Tree</button>
+                <button class="btn btn-sm" :class="activeTab==='search' ? 'btn-primary' : 'btn-secondary'"
+                        @click="activeTab='search'">🔍 Deep Search</button>
+                <button class="btn btn-sm" :class="activeTab==='viewer' ? 'btn-primary' : 'btn-secondary'"
+                        @click="activeTab='viewer'">📄 File Viewer</button>
+              </div>
+
+              <!-- ── TAB: File Tree ── -->
+              <div x-show="activeTab==='tree'">
+
+                <!-- Upload toolbar -->
+                <div class="card mb-4">
+                  <div class="card-title">Upload Folder</div>
+                  <div class="flex gap-2 items-center flex-wrap">
+                    <input class="form-input" type="text" x-model="uploadFolderName"
+                           placeholder="folder_name (e.g. domain_com_logs)" style="width:220px;" maxlength="200" />
+                    <button class="btn btn-secondary" @click="triggerFolderUpload()" :disabled="uploadLoading">
+                      <span x-show="uploadLoading" class="spinner" style="width:14px;height:14px;"></span>
+                      <span>📂 Select Folder</span>
+                    </button>
+                    <button class="btn btn-primary" @click="uploadFolder()" :disabled="uploadLoading || !uploadFolderName.trim()">
+                      <span x-show="uploadLoading" class="spinner" style="width:14px;height:14px;"></span>
+                      <span x-text="uploadLoading ? 'Uploading...' : 'Upload'"></span>
+                    </button>
+                    <button class="btn btn-secondary" @click="loadTree(); loadFolders()">🔄 Refresh</button>
+                  </div>
+                  <!-- Hidden folder input -->
+                  <input type="file" id="ds-folder-input" webkitdirectory multiple style="display:none;"
+                         @change="uploadFolder()" />
+                </div>
+
+                <!-- Folder list with delete -->
+                <template x-if="folders.length > 0">
+                  <div class="card mb-4">
+                    <div class="card-title">Folders</div>
+                    <table class="table">
+                      <thead><tr>
+                        <th>Name</th><th>Files</th><th>Size</th><th>Created</th><th></th>
+                      </tr></thead>
+                      <tbody>
+                        <template x-for="f in folders" :key="f.name">
+                          <tr>
+                            <td class="text-green cursor-pointer" @click="loadTree()" x-text="f.name"></td>
+                            <td x-text="f.files_count"></td>
+                            <td x-text="formatSize(f.size_bytes)"></td>
+                            <td x-text="f.created_at ? f.created_at.substring(0,10) : '—'"></td>
+                            <td>
+                              <button class="btn btn-sm btn-danger" @click="deleteFolder(f.name)">🗑 Delete</button>
+                            </td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+
+                <!-- Tree view -->
+                <div class="card">
+                  <div class="card-title flex justify-between">
+                    <span>File Tree</span>
+                    <span x-show="treeLoading" class="spinner" style="width:14px;height:14px;"></span>
+                  </div>
+                  <template x-if="!treeLoading && treeData">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:13px;">
+                      <template x-for="child in (treeData.children || [])" :key="child.name">
+                        <div x-data="{ node: child }">
+                          <template x-if="node.type==='directory'">
+                            <div>
+                              <div class="flex items-center gap-1 cursor-pointer" style="padding:3px 0;"
+                                   @click="toggleNode(node.name)">
+                                <span x-text="isCollapsed(node.name) ? '▶' : '▼'" style="color:var(--text-muted);font-size:10px;"></span>
+                                <span>📁</span>
+                                <span class="text-green" x-text="node.name"></span>
+                                <span class="badge badge-gray text-xs" x-text="(node.children||[]).length + ' items'"></span>
+                                <button class="btn btn-sm btn-danger" style="margin-left:auto;padding:1px 6px;"
+                                        @click.stop="deleteFolder(node.name)">🗑</button>
+                              </div>
+                              <div x-show="!isCollapsed(node.name)" style="padding-left:20px;">
+                                <template x-for="sub in (node.children||[])" :key="sub.name + sub.path">
+                                  <div>
+                                    <template x-if="sub.type==='file'">
+                                      <div class="flex items-center gap-1 cursor-pointer grep-line"
+                                           style="padding:2px 0;" @click="openFile(sub.path)">
+                                        <span x-text="fileIcon(sub)"></span>
+                                        <span x-text="sub.name" style="color:var(--text-primary);"></span>
+                                        <span class="text-xs text-muted" x-text="formatSize(sub.size)"></span>
+                                      </div>
+                                    </template>
+                                    <template x-if="sub.type==='directory'">
+                                      <div>
+                                        <div class="flex items-center gap-1 cursor-pointer" style="padding:2px 0;"
+                                             @click="toggleNode(node.name+'/'+sub.name)">
+                                          <span x-text="isCollapsed(node.name+'/'+sub.name) ? '▶' : '▼'" style="color:var(--text-muted);font-size:10px;"></span>
+                                          <span>📁</span>
+                                          <span class="text-green" x-text="sub.name"></span>
+                                        </div>
+                                        <div x-show="!isCollapsed(node.name+'/'+sub.name)" style="padding-left:20px;">
+                                          <template x-for="leaf in (sub.children||[])" :key="leaf.name + (leaf.path||leaf.name)">
+                                            <div class="flex items-center gap-1 cursor-pointer grep-line"
+                                                 style="padding:2px 0;" @click="leaf.type==='file' && openFile(leaf.path)">
+                                              <span x-text="fileIcon(leaf)"></span>
+                                              <span x-text="leaf.name"></span>
+                                              <span x-show="leaf.type==='file'" class="text-xs text-muted" x-text="formatSize(leaf.size)"></span>
+                                            </div>
+                                          </template>
+                                        </div>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
+                            </div>
+                          </template>
+                          <template x-if="node.type==='file'">
+                            <div class="flex items-center gap-1 cursor-pointer grep-line" style="padding:3px 0;"
+                                 @click="openFile(node.path)">
+                              <span x-text="fileIcon(node)"></span>
+                              <span x-text="node.name"></span>
+                              <span class="text-xs text-muted" x-text="formatSize(node.size)"></span>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="!treeData.children || treeData.children.length === 0">
+                        <p class="text-muted text-sm">No folders yet. Upload a folder to get started.</p>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="treeLoading">
+                    <p class="text-muted text-sm">Loading...</p>
+                  </template>
+                </div>
+              </div><!-- /tree tab -->
+
+              <!-- ── TAB: Deep Search ── -->
+              <div x-show="activeTab==='search'">
+                <div class="card mb-4">
+                  <div class="card-title">Search in Files</div>
+                  <div class="flex gap-2 flex-wrap">
+                    <input class="form-input" type="text" x-model="searchQuery"
+                           placeholder="domain, email, IP, keyword..." style="flex:2;min-width:200px;"
+                           @keyup.enter="runSearch()" maxlength="512" />
+                    <select class="form-select" x-model="searchFolder" style="width:180px;">
+                      <option value="">All folders</option>
+                      <template x-for="f in folders" :key="f.name">
+                        <option :value="f.name" x-text="f.name"></option>
+                      </template>
+                    </select>
+                    <button class="btn btn-primary" @click="runSearch()" :disabled="searchLoading">
+                      <span x-show="searchLoading" class="spinner" style="width:14px;height:14px;"></span>
+                      <span x-text="searchLoading ? 'Searching...' : 'Search'"></span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Stats -->
+                <template x-if="searchStats">
+                  <div class="flex gap-3 mb-3">
+                    <span class="badge badge-green" x-text="searchStats.total_matches + ' matches'"></span>
+                    <span class="badge badge-gray" x-text="searchStats.total_files + ' files'"></span>
+                  </div>
+                </template>
+
+                <!-- Results -->
+                <template x-for="result in searchResults" :key="result.file_path">
+                  <div class="card mb-2" style="padding:0;overflow:hidden;">
+                    <div style="background:var(--bg-secondary);padding:8px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-color);">
+                      <div class="flex items-center gap-2 cursor-pointer" @click="toggleResultExpand(result.file_path)">
+                        <span style="color:var(--text-muted);font-size:10px;" x-text="isResultExpanded(result.file_path) ? '▼' : '▶'"></span>
+                        <span>📄</span>
+                        <span class="font-mono text-sm text-green" x-text="result.file_name"></span>
+                        <span class="badge badge-gray text-xs" x-text="result.match_count + ' matches'"></span>
+                      </div>
+                      <div class="flex gap-2 items-center">
+                        <span class="text-xs text-muted truncate" x-text="result.file_path" style="max-width:200px;"></span>
+                        <button class="btn btn-sm btn-secondary" @click="openFileFromSearch(result.file_path)">Open</button>
+                      </div>
+                    </div>
+                    <div x-show="isResultExpanded(result.file_path)" style="font-family:'JetBrains Mono',monospace;font-size:12px;">
+                      <template x-for="m in result.matches" :key="m.line + m.text">
+                        <div class="grep-line" style="display:flex;gap:8px;padding:4px 14px;border-bottom:1px solid rgba(255,255,255,0.03);">
+                          <span style="color:var(--text-muted);min-width:50px;" x-text="m.line > 0 ? m.line + ':' : '[name]'"></span>
+                          <span style="flex:1;word-break:break-all;" x-html="highlightMatch(m.text)"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+
+                <template x-if="searchResults.length === 0 && searchStats !== null">
+                  <div class="card text-center" style="color:var(--text-muted);padding:40px;">
+                    <div style="font-size:32px;margin-bottom:12px;">🔍</div>
+                    <div>No results found for "<span x-text="searchQuery"></span>"</div>
+                  </div>
+                </template>
+              </div><!-- /search tab -->
+
+              <!-- ── TAB: File Viewer ── -->
+              <div x-show="activeTab==='viewer'">
+                <template x-if="viewerLoading">
+                  <div class="card text-muted text-sm text-center" style="padding:40px;">Loading file...</div>
+                </template>
+                <template x-if="!viewerLoading && !viewerFile">
+                  <div class="card text-muted text-sm text-center" style="padding:40px;">
+                    <div style="font-size:32px;margin-bottom:12px;">📄</div>
+                    <div>Click a file in the tree to view its contents</div>
+                  </div>
+                </template>
+                <template x-if="!viewerLoading && viewerFile">
+                  <div>
+                    <!-- Breadcrumbs -->
+                    <div class="flex items-center gap-1 mb-3 text-sm" style="flex-wrap:wrap;">
+                      <template x-for="(crumb, i) in viewerBreadcrumbs()" :key="crumb + i">
+                        <span>
+                          <span x-show="i > 0" style="color:var(--text-muted);"> › </span>
+                          <span :style="i === viewerBreadcrumbs().length - 1 ? 'color:var(--accent-green)' : 'color:var(--text-muted)'"
+                                x-text="crumb"></span>
+                        </span>
+                      </template>
+                    </div>
+
+                    <!-- File meta -->
+                    <div class="card mb-3" style="padding:10px 14px;">
+                      <div class="flex gap-4 flex-wrap text-sm">
+                        <span><span class="text-muted">Name:</span> <span class="text-green" x-text="viewerFile.path.split('/').pop()"></span></span>
+                        <span><span class="text-muted">Size:</span> <span x-text="formatSize(viewerFile.size)"></span></span>
+                        <span x-show="viewerFile.ext"><span class="text-muted">Ext:</span> <span x-text="viewerFile.ext"></span></span>
+                        <span x-show="!viewerFile.binary && viewerFile.lines_total"><span class="text-muted">Lines:</span> <span x-text="viewerFile.lines_total"></span></span>
+                        <span x-show="viewerFile.truncated" class="badge badge-gray">Truncated (500 lines)</span>
+                      </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex gap-2 mb-3">
+                      <button class="btn btn-secondary btn-sm" @click="copyViewerContent()" x-show="!viewerFile.binary">
+                        <span x-text="viewerCopied ? '✅ Copied' : '📋 Copy'"></span>
+                      </button>
+                      <button class="btn btn-secondary btn-sm" @click="searchInThisFile()">🔍 Search in this file</button>
+                    </div>
+
+                    <!-- Binary notice -->
+                    <template x-if="viewerFile.binary">
+                      <div class="card text-muted text-sm text-center" style="padding:30px;">
+                        [Binary file — preview not available] Size: <span x-text="formatSize(viewerFile.size)"></span>
+                      </div>
+                    </template>
+
+                    <!-- CSV table -->
+                    <template x-if="!viewerFile.binary && isCSV()">
+                      <div class="card" style="overflow-x:auto;max-height:500px;">
+                        <table class="table" style="font-size:12px;">
+                          <tbody>
+                            <template x-for="(row, ri) in csvRows()" :key="ri">
+                              <tr>
+                                <template x-for="(cell, ci) in row" :key="ci">
+                                  <td x-text="cell"></td>
+                                </template>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+
+                    <!-- Text/JSON content -->
+                    <template x-if="!viewerFile.binary && !isCSV()">
+                      <div class="card" style="overflow:auto;max-height:600px;padding:0;">
+                        <pre class="code-block" style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:12px;"
+                             x-text="renderFileContent()"></pre>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div><!-- /viewer tab -->
+
+            </div><!-- /deep-search -->
 
           </div><!-- /page-content (moved closing tag) -->
         </main>

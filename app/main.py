@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
 
@@ -97,6 +97,9 @@ async def lifespan(app: FastAPI):
                 session.add(folder)
                 await session.commit()
 
+    # Create deep_search_data/ directory if it doesn't exist
+    Path(settings.deep_search_dir).mkdir(parents=True, exist_ok=True)
+
     yield
 
     from app.services.scheduler import stop_scheduler
@@ -128,6 +131,7 @@ app.include_router(brand_protection.router, prefix="/api/v1/brands", tags=["bran
 app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["watchlist"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(cve.router, prefix="/api/v1/cve", tags=["cve"])
+app.include_router(deep_search.router, prefix="/api/v1/deep-search", tags=["deep-search"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     whoosh_index_dir: str = "./data/index"
     uploads_dir: str = "./data/uploads"
     monitored_dir: str = "./data/monitored"
+    deep_search_dir: str = "deep_search_data"
 
     http_port: int = 8181
     https_port: int = 8443
