@@ -330,6 +330,33 @@ class WatchedFolderOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Deep Search ───────────────────────────────────────────────────────────────
+class DeepSearchFolderInfo(BaseModel):
+    name: str
+    files_count: int
+    size_bytes: int
+    created_at: Optional[str] = None
+
+
+class DeepSearchFileMatch(BaseModel):
+    line: int
+    text: str
+
+
+class DeepSearchResult(BaseModel):
+    file_path: str
+    file_name: str
+    matches: List[DeepSearchFileMatch]
+    match_count: int
+
+
+class DeepSearchResponse(BaseModel):
+    query: str
+    results: List[DeepSearchResult]
+    total_files_searched: int
+    total_matches: int
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 class DashboardStats(BaseModel):
     total_files: int

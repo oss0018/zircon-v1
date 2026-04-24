@@ -100,7 +100,7 @@ print("SSL cert generated (10 years)")
     print("✅ SSL certificate generated")
 
 def init_dirs():
-    for d in ["data/uploads", "data/monitored", "data/index", "data/db", "leaked_accounts"]:
+    for d in ["data/uploads", "data/monitored", "data/index", "data/db", "leaked_accounts", "deep_search_data"]:
         Path(d).mkdir(parents=True, exist_ok=True)
 
 def start_server():
