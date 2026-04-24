@@ -43,7 +43,16 @@ def _safe_resolve(base: Path, rel: str) -> Path:
 
 
 def _build_tree(path: Path, base: Path) -> dict:
-    """Recursively build a JSON-serialisable tree node for *path*."""
+    """Recursively build a JSON-serialisable tree node for *path*.
+
+    Only nodes that are strictly inside *base* are included.
+    """
+    # Safety: skip anything that escapes the base directory
+    try:
+        path.resolve().relative_to(base.resolve())
+    except ValueError:
+        return {"name": path.name, "type": "directory", "children": []}
+
     if path.is_file():
         rel = str(path.relative_to(base))
         return {

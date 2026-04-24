@@ -94,7 +94,9 @@ def _sync_search(base: Path, query: str, folder: Optional[str], limit: int):
 
         # Check content
         try:
-            matches.extend(_grep_file(abs_path, q_lower, limit - total_matches - len(matches)))
+            remaining = max(0, limit - total_matches - len(matches))
+            if remaining > 0:
+                matches.extend(_grep_file(abs_path, q_lower, remaining))
         except Exception:
             pass
 
