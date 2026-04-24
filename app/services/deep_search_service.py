@@ -67,7 +67,7 @@ async def search_deep_data(
     effective_limit = min(limit, _MAX_TOTAL_MATCHES)
 
     loop = asyncio.get_event_loop()
-    results, _total_files = await loop.run_in_executor(
+    results, _ = await loop.run_in_executor(
         None, _sync_search, base, query, folder, effective_limit
     )
     return results

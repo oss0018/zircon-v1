@@ -1,6 +1,9 @@
 /**
  * Zircon FRT — Deep Search module
  */
+
+const DS_CSV_PREVIEW_ROWS = 200;
+
 document.addEventListener('alpine:init', () => {
   Alpine.data('deepSearchPage', () => ({
     // Tabs
@@ -204,7 +207,7 @@ document.addEventListener('alpine:init', () => {
 
     csvRows() {
       if (!this.viewerFile || !this.viewerFile.content) return [];
-      return this.viewerFile.content.split('\n').slice(0, 200).map(r => r.split(','));
+      return this.viewerFile.content.split('\n').slice(0, DS_CSV_PREVIEW_ROWS).map(r => r.split(','));
     },
 
     async copyViewerContent() {
