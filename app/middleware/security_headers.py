@@ -12,11 +12,17 @@ from starlette.responses import Response
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'self'; "
-        "script-src 'self' https://cdn.jsdelivr.net https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; "
+        # Alpine.js v3 CDN build evaluates x-data/x-show/x-bind expressions via the
+        # Function() constructor, which requires 'unsafe-eval'.  This is the minimal
+        # relaxation needed; all other directives remain strict.
+        "script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com "
+        "https://fonts.googleapis.com; "
         "img-src 'self' data:; "
-        "font-src 'self' https://cdn.jsdelivr.net https://unpkg.com; "
-        "connect-src 'self'; "
+        "font-src 'self' https://cdn.jsdelivr.net https://unpkg.com "
+        "https://fonts.gstatic.com; "
+        # Allow CDN hosts so DevTools sourcemap (.map) requests don't violate CSP.
+        "connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'"
