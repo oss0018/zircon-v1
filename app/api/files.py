@@ -22,8 +22,8 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Allowlist of permitted upload extensions
 ALLOWED_UPLOAD_EXTENSIONS = {
-    ".txt", ".csv", ".json", ".xml", ".xlsx", ".pdf", ".docx", ".sql",
-    ".log", ".md",
+    ".txt", ".csv", ".json", ".xml", ".xlsx", ".xls", ".pdf", ".docx", ".doc",
+    ".sql", ".log", ".md", ".odt", ".rtf",
 }
 
 # Maximum upload size: 100 MB
@@ -198,8 +198,8 @@ async def reindex_all(db: AsyncSession = Depends(get_db), _: User = Depends(get_
 # ── Watched Folders ───────────────────────────────────────────────────────────
 
 SUPPORTED_EXTENSIONS = {
-    ".txt", ".csv", ".sql", ".json", ".xml", ".xlsx",
-    ".pdf", ".docx", ".log", ".md",
+    ".txt", ".csv", ".sql", ".json", ".xml", ".xlsx", ".xls",
+    ".pdf", ".docx", ".doc", ".log", ".md", ".odt", ".rtf",
 }
 
 
