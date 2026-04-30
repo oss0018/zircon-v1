@@ -1694,7 +1694,7 @@
               <!-- Tab switcher -->
               <div class="flex gap-2 mb-4" style="border-bottom:1px solid var(--border-color);padding-bottom:10px;">
                 <button class="btn btn-sm" :class="activeTab==='tree' ? 'btn-primary' : 'btn-secondary'"
-                        @click="activeTab='tree'">📁 File Tree</button>
+                        @click="activeTab='tree'">📁 Folder File Tree</button>
                 <button class="btn btn-sm" :class="activeTab==='search' ? 'btn-primary' : 'btn-secondary'"
                         @click="activeTab='search'">🔍 Deep Search</button>
                 <button class="btn btn-sm" :class="activeTab==='viewer' ? 'btn-primary' : 'btn-secondary'"
@@ -1752,31 +1752,54 @@
 
                 <!-- Tree view -->
                 <div class="card">
-                  <div class="card-title flex justify-between">
-                    <span>File Tree</span>
+                  <div class="card-title flex justify-between items-center">
+                    <div class="flex items-center gap-2">
+                      <button x-show="navigationStack.length > 0" class="btn btn-sm btn-secondary"
+                              @click="navBack()" title="Go back" style="padding:2px 8px;">← Back</button>
+                      <span>Folder File Tree</span>
+                    </div>
                     <span x-show="treeLoading" class="spinner" style="width:14px;height:14px;"></span>
+                  </div>
+                  <!-- Breadcrumbs -->
+                  <div class="ft-breadcrumbs" x-show="navBreadcrumbParts.length > 0">
+                    <span class="crumb" @click="navToIndex(-1)">Home</span>
+                    <template x-for="(part, idx) in navBreadcrumbParts" :key="part + idx">
+                      <span class="flex items-center gap-1">
+                        <span class="sep">›</span>
+                        <span class="crumb" :class="idx === navBreadcrumbParts.length - 1 ? 'active' : ''"
+                              @click="idx < navBreadcrumbParts.length - 1 && navToIndex(idx)"
+                              x-text="part"></span>
+                      </span>
+                    </template>
                   </div>
                   <template x-if="!treeLoading && treeData">
                     <div style="font-family:'JetBrains Mono',monospace;font-size:13px;">
                       <template x-for="child in (treeData.children || [])" :key="child.name">
                         <div x-data="{ node: child }">
+                          <!-- Directory -->
                           <template x-if="node.type==='directory'">
                             <div>
-                              <div class="flex items-center gap-1 cursor-pointer" style="padding:3px 0;"
-                                   @click="toggleNode(node.name)">
-                                <span x-text="isCollapsed(node.name) ? '▶' : '▼'" style="color:var(--text-muted);font-size:10px;"></span>
+                              <div class="flex items-center gap-1 cursor-pointer grep-line" style="padding:3px 0;"
+                                   @click="toggleNode(node.name)"
+                                   @dblclick.stop="navigateToFolder(node)"
+                                   @contextmenu.stop="showContextMenu($event, {type:'directory', name:node.name, path:node.name, children:node.children})">
+                                <span x-text="isCollapsed(node.name, true) ? '▶' : '▼'" style="color:var(--text-muted);font-size:10px;min-width:10px;"></span>
                                 <span>📁</span>
                                 <span class="text-green" x-text="node.name"></span>
                                 <span class="badge badge-gray text-xs" x-text="(node.children||[]).length + ' items'"></span>
                                 <button class="btn btn-sm btn-danger" style="margin-left:auto;padding:1px 6px;"
-                                        @click.stop="deleteFolder(node.name)">🗑</button>
+                                        @click.stop="deleteFolder(node.name)" title="Delete folder">🗑</button>
                               </div>
-                              <div x-show="!isCollapsed(node.name)" style="padding-left:20px;">
-                                <template x-for="sub in (node.children||[])" :key="sub.name + sub.path">
+                              <!-- Children with CSS transition -->
+                              <div :class="isCollapsed(node.name, true) ? 'ft-children collapsed' : 'ft-children'"
+                                   style="padding-left:20px;">
+                                <template x-for="sub in (node.children||[])" :key="sub.name + (sub.path||sub.name)">
                                   <div>
                                     <template x-if="sub.type==='file'">
                                       <div class="flex items-center gap-1 cursor-pointer grep-line"
-                                           style="padding:2px 0;" @click="openFile(sub.path)">
+                                           style="padding:2px 0;"
+                                           @click="openFile(sub.path)"
+                                           @contextmenu.stop="showContextMenu($event, {type:'file', name:sub.name, path:sub.path})">
                                         <span x-text="fileIcon(sub)"></span>
                                         <span x-text="sub.name" style="color:var(--text-primary);"></span>
                                         <span class="text-xs text-muted" x-text="formatSize(sub.size)"></span>
@@ -1784,16 +1807,21 @@
                                     </template>
                                     <template x-if="sub.type==='directory'">
                                       <div>
-                                        <div class="flex items-center gap-1 cursor-pointer" style="padding:2px 0;"
-                                             @click="toggleNode(node.name+'/'+sub.name)">
-                                          <span x-text="isCollapsed(node.name+'/'+sub.name) ? '▶' : '▼'" style="color:var(--text-muted);font-size:10px;"></span>
+                                        <div class="flex items-center gap-1 cursor-pointer grep-line" style="padding:2px 0;"
+                                             @click="toggleNode(node.name+'/'+sub.name)"
+                                             @dblclick.stop="navigateToFolder(sub)"
+                                             @contextmenu.stop="showContextMenu($event, {type:'directory', name:sub.name, path:node.name+'/'+sub.name, children:sub.children})">
+                                          <span x-text="isCollapsed(node.name+'/'+sub.name) ? '▶' : '▼'" style="color:var(--text-muted);font-size:10px;min-width:10px;"></span>
                                           <span>📁</span>
                                           <span class="text-green" x-text="sub.name"></span>
                                         </div>
-                                        <div x-show="!isCollapsed(node.name+'/'+sub.name)" style="padding-left:20px;">
+                                        <div :class="isCollapsed(node.name+'/'+sub.name) ? 'ft-children collapsed' : 'ft-children'"
+                                             style="padding-left:20px;">
                                           <template x-for="leaf in (sub.children||[])" :key="leaf.name + (leaf.path||leaf.name)">
                                             <div class="flex items-center gap-1 cursor-pointer grep-line"
-                                                 style="padding:2px 0;" @click="leaf.type==='file' && openFile(leaf.path)">
+                                                 style="padding:2px 0;"
+                                                 @click="leaf.type==='file' && openFile(leaf.path)"
+                                                 @contextmenu.stop="showContextMenu($event, leaf.type==='file' ? {type:'file', name:leaf.name, path:leaf.path} : {type:'directory', name:leaf.name, path:sub.name+'/'+leaf.name, children:leaf.children})">
                                               <span x-text="fileIcon(leaf)"></span>
                                               <span x-text="leaf.name"></span>
                                               <span x-show="leaf.type==='file'" class="text-xs text-muted" x-text="formatSize(leaf.size)"></span>
@@ -1807,9 +1835,11 @@
                               </div>
                             </div>
                           </template>
+                          <!-- File at root level -->
                           <template x-if="node.type==='file'">
                             <div class="flex items-center gap-1 cursor-pointer grep-line" style="padding:3px 0;"
-                                 @click="openFile(node.path)">
+                                 @click="openFile(node.path)"
+                                 @contextmenu.stop="showContextMenu($event, {type:'file', name:node.name, path:node.path})">
                               <span x-text="fileIcon(node)"></span>
                               <span x-text="node.name"></span>
                               <span class="text-xs text-muted" x-text="formatSize(node.size)"></span>
@@ -1831,11 +1861,17 @@
               <!-- ── TAB: Deep Search ── -->
               <div x-show="activeTab==='search'">
                 <div class="card mb-4">
-                  <div class="card-title">Search in Files</div>
-                  <div class="flex gap-2 flex-wrap">
+                  <div class="card-title flex items-center gap-2">
+                    Search in Files
+                    <span x-show="searchLoading" class="spinner" style="width:14px;height:14px;"></span>
+                  </div>
+                  <!-- Query + folder selector row -->
+                  <div class="flex gap-2 flex-wrap mb-2">
                     <input class="form-input" type="text" x-model="searchQuery"
                            placeholder="domain, email, IP, keyword..." style="flex:2;min-width:200px;"
-                           @keyup.enter="runSearch()" maxlength="512" />
+                           @keyup.enter="runSearch()"
+                           @input="debouncedSearch()"
+                           maxlength="512" />
                     <select class="form-select" x-model="searchFolder" style="width:180px;">
                       <option value="">All folders</option>
                       <template x-for="f in folders" :key="f.name">
@@ -1843,10 +1879,30 @@
                       </template>
                     </select>
                     <button class="btn btn-primary" @click="runSearch()" :disabled="searchLoading">
-                      <span x-show="searchLoading" class="spinner" style="width:14px;height:14px;"></span>
                       <span x-text="searchLoading ? 'Searching...' : 'Search'"></span>
                     </button>
                   </div>
+                  <!-- Client-side filters (shown only after results) -->
+                  <template x-if="_allResults.length > 0">
+                    <div class="flex gap-2 flex-wrap items-center mt-2" style="border-top:1px solid var(--border-color);padding-top:8px;">
+                      <select class="form-select" x-model="filterExt" style="width:130px;" title="Filter by file type">
+                        <option value="">All types</option>
+                        <template x-for="ext in availableExtensions()" :key="ext">
+                          <option :value="ext" x-text="ext"></option>
+                        </template>
+                      </select>
+                      <select class="form-select" x-model="filterFolder" style="width:160px;" title="Filter by folder">
+                        <option value="">All folders</option>
+                        <template x-for="fld in availableFolders()" :key="fld">
+                          <option :value="fld" x-text="fld"></option>
+                        </template>
+                      </select>
+                      <button class="btn btn-sm btn-secondary" @click="clearFilters()"
+                              x-show="filterExt || filterFolder">✕ Clear filters</button>
+                      <span class="text-xs text-muted" style="margin-left:auto;"
+                            x-text="(() => { const fc = filteredCount(), tc = totalCount(), vc = visibleResults().length; return 'Showing ' + vc + ' of ' + fc + (fc !== tc ? ' (filtered from ' + tc + ')' : ''); })()"></span>
+                    </div>
+                  </template>
                 </div>
 
                 <!-- Stats -->
@@ -1857,14 +1913,14 @@
                   </div>
                 </template>
 
-                <!-- Results -->
-                <template x-for="result in searchResults" :key="result.file_path">
+                <!-- Results (virtualised: only renders up to _visibleCount items) -->
+                <template x-for="result in visibleResults()" :key="result.file_path">
                   <div class="card mb-2" style="padding:0;overflow:hidden;">
                     <div style="background:var(--bg-secondary);padding:8px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-color);">
                       <div class="flex items-center gap-2 cursor-pointer" @click="toggleResultExpand(result.file_path)">
                         <span style="color:var(--text-muted);font-size:10px;" x-text="isResultExpanded(result.file_path) ? '▼' : '▶'"></span>
                         <span>📄</span>
-                        <span class="font-mono text-sm text-green" x-text="result.file_name"></span>
+                        <span class="font-mono text-sm text-green" x-html="highlightFileName(result.file_name)"></span>
                         <span class="badge badge-gray text-xs" x-text="result.match_count + ' matches'"></span>
                       </div>
                       <div class="flex gap-2 items-center">
@@ -1883,7 +1939,10 @@
                   </div>
                 </template>
 
-                <template x-if="searchResults.length === 0 && searchStats !== null">
+                <!-- Sentinel for Intersection Observer (loads more results on scroll) -->
+                <div id="ds-results-sentinel" style="height:1px;"></div>
+
+                <template x-if="filteredCount() === 0 && searchStats !== null">
                   <div class="card text-center" style="color:var(--text-muted);padding:40px;">
                     <div style="font-size:32px;margin-bottom:12px;">🔍</div>
                     <div>No results found for "<span x-text="searchQuery"></span>"</div>
@@ -1968,6 +2027,20 @@
                   </div>
                 </template>
               </div><!-- /viewer tab -->
+
+              <!-- ── Context Menu ── -->
+              <div class="context-menu" x-show="ctxMenu.show"
+                   :style="`left:${ctxMenu.x}px;top:${ctxMenu.y}px;`"
+                   @click.stop>
+                <button class="context-menu-item" @click="ctxOpen()">📄 Open</button>
+                <button class="context-menu-item" @click="ctxOpenNewTab()"
+                        x-show="ctxMenu.item && ctxMenu.item.type==='file'">🔗 Open in new tab</button>
+                <button class="context-menu-item" @click="ctxCopyPath()">📋 Copy path</button>
+                <hr class="context-menu-sep">
+                <button class="context-menu-item" @click="ctxDownload()"
+                        x-show="ctxMenu.item && ctxMenu.item.type==='file'">⬇️ Download</button>
+                <button class="context-menu-item danger" @click="ctxDelete()">🗑️ Delete</button>
+              </div>
 
             </div><!-- /deep-search -->
 
