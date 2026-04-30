@@ -163,3 +163,14 @@ class WatchedFolder(Base):
     files_count = Column(Integer, default=0)
     last_scan = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
+
+
+class TILookupHistory(Base):
+    __tablename__ = "ti_lookup_history"
+    id = Column(Integer, primary_key=True)
+    ioc_value = Column(String(512), nullable=False)
+    ioc_type = Column(String(20), nullable=False)   # ip, domain, hash, url, email
+    sources_json = Column(Text, default="[]")        # JSON list of queried service types
+    results_json = Column(Text, default="{}")        # Full JSON results keyed by service type
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)

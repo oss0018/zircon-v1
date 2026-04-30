@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
 
@@ -132,6 +132,7 @@ app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["watchlis
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(cve.router, prefix="/api/v1/cve", tags=["cve"])
 app.include_router(deep_search.router, prefix="/api/v1/deep-search", tags=["deep-search"])
+app.include_router(threat_intel.router, prefix="/api/v1/ti", tags=["threat-intel"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)

@@ -111,6 +111,7 @@ document.addEventListener('alpine:init', () => {
     // Navigation
     page: 'dashboard',
     lang: localStorage.getItem('zircon_lang') || 'en',
+    csintOpen: false,
 
     // Stats
     stats: null,
@@ -168,6 +169,9 @@ document.addEventListener('alpine:init', () => {
 
     navigate(p) {
       this.page = p;
+      if (p === 'deep-search' || p === 'threat-intel') {
+        this.csintOpen = true;
+      }
     },
 
     async loadStats() {
