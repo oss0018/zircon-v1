@@ -240,8 +240,8 @@ async def ti_stats(
         for svc in sources:
             per_service[svc][day] += 1
 
-    # Build 7-day date range
-    days = [(since + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(8)]
+    # Build 7-day date range (last 7 days, most recent last)
+    days = [(_utcnow() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
 
     service_stats = []
     for svc, day_counts in per_service.items():
