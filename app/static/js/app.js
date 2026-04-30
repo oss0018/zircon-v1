@@ -25,13 +25,14 @@ window.createSafeElement = createSafeElement;
 const api = {
   _token() { return localStorage.getItem('zircon_token'); },
 
-  async request(method, path, body = null, isFormData = false) {
+  async request(method, path, body = null, isFormData = false, signal = null) {
     const headers = {};
     if (this._token()) headers['Authorization'] = `Bearer ${this._token()}`;
     if (body && !isFormData) headers['Content-Type'] = 'application/json';
 
     const opts = { method, headers };
     if (body) opts.body = isFormData ? body : JSON.stringify(body);
+    if (signal) opts.signal = signal;
 
     const resp = await fetch(API_BASE + path, opts);
     if (resp.status === 401) {
@@ -47,8 +48,8 @@ const api = {
     return resp.json();
   },
 
-  get(path) { return this.request('GET', path); },
-  post(path, body) { return this.request('POST', path, body); },
+  get(path, signal) { return this.request('GET', path, null, false, signal); },
+  post(path, body, signal) { return this.request('POST', path, body, false, signal); },
   put(path, body) { return this.request('PUT', path, body); },
   patch(path, body) { return this.request('PATCH', path, body); },
   delete(path) { return this.request('DELETE', path); },

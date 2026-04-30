@@ -791,3 +791,84 @@ mark.highlight {
   transform: translateY(-2px);
   cursor: pointer;
 }
+
+/* ── Context menu ────────────────────────────────────────────── */
+.context-menu {
+  position: fixed;
+  z-index: 9000;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 200px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  font-size: 13px;
+}
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background 0.15s;
+  white-space: nowrap;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+}
+.context-menu-item:hover {
+  background: rgba(0, 255, 157, 0.08);
+  color: var(--accent-green);
+}
+.context-menu-item.danger:hover {
+  background: rgba(255, 0, 60, 0.1);
+  color: var(--danger);
+}
+.context-menu-sep {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 4px 0;
+}
+
+/* ── Collapsible folder transition ───────────────────────────── */
+.ft-children {
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  max-height: 2000px;
+  opacity: 1;
+}
+.ft-children.collapsed {
+  max-height: 0;
+  opacity: 0;
+}
+
+/* ── Breadcrumbs ─────────────────────────────────────────────── */
+.ft-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.ft-breadcrumbs .crumb {
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.15s;
+}
+.ft-breadcrumbs .crumb:hover {
+  color: var(--accent-green);
+}
+.ft-breadcrumbs .crumb.active {
+  color: var(--accent-green);
+  cursor: default;
+}
+.ft-breadcrumbs .sep {
+  color: var(--text-muted);
+  font-size: 10px;
+}

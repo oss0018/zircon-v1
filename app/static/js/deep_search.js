@@ -3,6 +3,8 @@
  */
 
 const DS_CSV_PREVIEW_ROWS = 200;
+const DS_VISIBLE_INCREMENT = 100;
+const DS_CACHE_SIZE = 20;
 
 document.addEventListener('alpine:init', () => {
   Alpine.data('deepSearchPage', () => ({
@@ -12,7 +14,11 @@ document.addEventListener('alpine:init', () => {
     // File tree
     treeData: null,
     treeLoading: false,
-    collapsedNodes: {},
+    _collapseVersion: 0,  // bumped on toggle to force Alpine reactivity
+
+    // Navigation (back stack)
+    navigationStack: [],      // [{treeData, breadcrumbs}]
+    navBreadcrumbParts: [],   // ['folder', 'subfolder', ...]
 
     // Upload
     uploadFolderName: '',
@@ -21,22 +27,47 @@ document.addEventListener('alpine:init', () => {
     // Folder list
     folders: [],
 
-    // Deep search
+    // Deep search — raw results from API
+    _allResults: [],
     searchQuery: '',
     searchFolder: '',
     searchLoading: false,
-    searchResults: [],
     searchStats: null,
     expandedResults: {},
+
+    // Virtual list
+    _visibleCount: DS_VISIBLE_INCREMENT,
+
+    // Client-side filters
+    filterExt: '',
+    filterFolder: '',
+
+    // Internal: debounce / cache / abort
+    _searchDebounceTimer: null,
+    _searchCache: null,
+    _abortController: null,
+    _sentinelObserver: null,
 
     // File viewer
     viewerFile: null,
     viewerLoading: false,
     viewerCopied: false,
 
+    // Context menu
+    ctxMenu: { show: false, x: 0, y: 0, item: null },
+
     async init() {
+      this._searchCache = new Map();
       await this.loadFolders();
       await this.loadTree();
+      this._setupSentinel();
+
+      // Global listeners for context menu dismissal
+      document.addEventListener('click', () => this.closeContextMenu());
+      document.addEventListener('scroll', () => this.closeContextMenu(), true);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') this.closeContextMenu();
+      });
     },
 
     // ── Tree ──────────────────────────────────────────────────────────────
@@ -45,6 +76,8 @@ document.addEventListener('alpine:init', () => {
       this.treeLoading = true;
       try {
         this.treeData = await api.get('/deep-search/tree');
+        this.navBreadcrumbParts = [];
+        this.navigationStack = [];
       } catch (e) {
         showToast('Failed to load tree: ' + e.message, 'error');
       } finally {
@@ -52,17 +85,71 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    // Toggle collapse state and persist to localStorage
     toggleNode(path) {
-      this.collapsedNodes[path] = !this.collapsedNodes[path];
+      const key = 'filetree_collapsed_' + path;
+      const current = this._readCollapse(path);
+      localStorage.setItem(key, current ? 'false' : 'true');
+      this._collapseVersion++;   // trigger Alpine re-render
     },
 
-    isCollapsed(path) {
-      return !!this.collapsedNodes[path];
+    // Read collapse state from localStorage; defaultCollapsed used when no entry yet
+    _readCollapse(path, defaultCollapsed) {
+      const stored = localStorage.getItem('filetree_collapsed_' + path);
+      if (stored !== null) return stored === 'true';
+      return !!defaultCollapsed;
+    },
+
+    // isCollapsed(path, isTopLevel):
+    //   top-level folders default to expanded (defaultCollapsed=false)
+    //   nested folders default to collapsed (defaultCollapsed=true)
+    isCollapsed(path, isTopLevel) {
+      void this._collapseVersion;  // ensure reactive dependency
+      return this._readCollapse(path, !isTopLevel);
+    },
+
+    // ── Navigation / Breadcrumbs ──────────────────────────────────────────
+
+    navigateToFolder(node) {
+      // Save current state
+      this.navigationStack.push({
+        treeData: this.treeData,
+        breadcrumbs: [...this.navBreadcrumbParts],
+      });
+      // Enter folder
+      this.treeData = { name: node.name, type: 'directory', children: node.children || [] };
+      this.navBreadcrumbParts = [...this.navBreadcrumbParts, node.name];
+    },
+
+    navBack() {
+      if (this.navigationStack.length === 0) return;
+      const prev = this.navigationStack.pop();
+      this.treeData = prev.treeData;
+      this.navBreadcrumbParts = prev.breadcrumbs;
+    },
+
+    navToIndex(idx) {
+      // idx === -1 → root, idx >= 0 → specific breadcrumb level
+      if (idx < 0) {
+        this.navigationStack = [];
+        this.navBreadcrumbParts = [];
+        this.loadTree();
+        return;
+      }
+      // Pop stack down to the entry that represents the state AFTER idx
+      while (this.navigationStack.length > idx + 1) {
+        this.navigationStack.pop();
+      }
+      if (this.navigationStack.length > 0) {
+        const target = this.navigationStack.pop();
+        this.treeData = target.treeData;
+        this.navBreadcrumbParts = target.breadcrumbs;
+      }
     },
 
     fileIcon(node) {
       if (node.type === 'directory') return '📁';
-      const name = node.name.toLowerCase();
+      const name = (node.name || '').toLowerCase();
       if (name.includes('cookie')) return '🍪';
       if (name.includes('password') || name.includes('pass')) return '🔑';
       const ext = node.ext || '';
@@ -143,29 +230,143 @@ document.addEventListener('alpine:init', () => {
 
     // ── Search ────────────────────────────────────────────────────────────
 
+    debouncedSearch() {
+      clearTimeout(this._searchDebounceTimer);
+      this._searchDebounceTimer = setTimeout(() => this.runSearch(), 300);
+    },
+
     async runSearch() {
       if (!this.searchQuery.trim()) return;
+
+      const cacheKey = this.searchQuery.trim() + '|' + (this.searchFolder || '');
+
+      // Return cached result without HTTP request
+      if (this._searchCache && this._searchCache.has(cacheKey)) {
+        const cached = this._searchCache.get(cacheKey);
+        this._allResults = cached.results;
+        this.searchStats = cached.stats;
+        this.expandedResults = {};
+        this._visibleCount = DS_VISIBLE_INCREMENT;
+        return;
+      }
+
+      // Abort previous in-flight request
+      if (this._abortController) {
+        this._abortController.abort();
+      }
+      this._abortController = new AbortController();
+
       this.searchLoading = true;
-      this.searchResults = [];
+      this._allResults = [];
       this.searchStats = null;
       this.expandedResults = {};
+      this._visibleCount = DS_VISIBLE_INCREMENT;
 
       try {
         const data = await api.post('/deep-search/search', {
           query: this.searchQuery.trim(),
           folder: this.searchFolder || null,
-        });
-        this.searchResults = data.results || [];
-        this.searchStats = {
+        }, this._abortController.signal);
+
+        // Sort by match_count descending (higher = more relevant)
+        const sorted = (data.results || []).slice().sort((a, b) => b.match_count - a.match_count);
+        this._allResults = sorted;
+
+        const stats = {
           total_matches: data.total_matches,
           total_files: data.results.length,
         };
+        this.searchStats = stats;
+
+        // Store in cache (evict oldest if at capacity)
+        if (this._searchCache) {
+          if (this._searchCache.size >= DS_CACHE_SIZE) {
+            const firstKey = this._searchCache.keys().next().value;
+            this._searchCache.delete(firstKey);
+          }
+          this._searchCache.set(cacheKey, { results: sorted, stats });
+        }
+
         showToast(`Found ${data.total_matches} matches in ${data.results.length} files`, 'success');
       } catch (e) {
+        if (e.name === 'AbortError') return;
         showToast('Search failed: ' + e.message, 'error');
       } finally {
         this.searchLoading = false;
       }
+    },
+
+    // ── Filters ───────────────────────────────────────────────────────────
+
+    filteredResults() {
+      let results = this._allResults;
+      if (this.filterExt) {
+        results = results.filter(r => {
+          const dot = r.file_name.lastIndexOf('.');
+          const ext = dot >= 0 ? r.file_name.slice(dot).toLowerCase() : '';
+          return ext === this.filterExt;
+        });
+      }
+      if (this.filterFolder) {
+        results = results.filter(r => {
+          const folder = r.file_path.split('/')[0] || '';
+          return folder === this.filterFolder;
+        });
+      }
+      return results;
+    },
+
+    visibleResults() {
+      return this.filteredResults().slice(0, this._visibleCount);
+    },
+
+    filteredCount() {
+      return this.filteredResults().length;
+    },
+
+    totalCount() {
+      return this._allResults.length;
+    },
+
+    availableExtensions() {
+      const exts = new Set();
+      for (const r of this._allResults) {
+        const dot = r.file_name.lastIndexOf('.');
+        if (dot >= 0) exts.add(r.file_name.slice(dot).toLowerCase());
+      }
+      return Array.from(exts).sort();
+    },
+
+    availableFolders() {
+      const seen = new Set();
+      for (const r of this._allResults) {
+        const folder = r.file_path.split('/')[0] || '';
+        if (folder) seen.add(folder);
+      }
+      return Array.from(seen).sort();
+    },
+
+    clearFilters() {
+      this.filterExt = '';
+      this.filterFolder = '';
+      this._visibleCount = DS_VISIBLE_INCREMENT;
+    },
+
+    _setupSentinel() {
+      const sentinel = document.getElementById('ds-results-sentinel');
+      if (!sentinel) return;
+      if (this._sentinelObserver) this._sentinelObserver.disconnect();
+      this._sentinelObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const total = this.filteredCount();
+            if (this._visibleCount < total) {
+              this._visibleCount += DS_VISIBLE_INCREMENT;
+            }
+          }
+        });
+      });
+      this._sentinelObserver.observe(sentinel);
     },
 
     toggleResultExpand(filePath) {
@@ -183,8 +384,83 @@ document.addEventListener('alpine:init', () => {
       return safeText.replace(new RegExp(q, 'gi'), m => `<mark class="highlight">${m}</mark>`);
     },
 
+    highlightFileName(name) {
+      return this.highlightMatch(name);
+    },
+
     openFileFromSearch(filePath) {
       this.openFile(filePath);
+    },
+
+    // ── Context Menu ──────────────────────────────────────────────────────
+
+    showContextMenu(event, item) {
+      event.preventDefault();
+      event.stopPropagation();
+      const margin = 8;
+      const menuW = 200;
+      const menuH = 210;
+      let x = event.clientX;
+      let y = event.clientY;
+      if (x + menuW > window.innerWidth - margin) x = window.innerWidth - menuW - margin;
+      if (y + menuH > window.innerHeight - margin) y = window.innerHeight - menuH - margin;
+      this.ctxMenu = { show: true, x, y, item };
+    },
+
+    closeContextMenu() {
+      if (this.ctxMenu.show) this.ctxMenu = { show: false, x: 0, y: 0, item: null };
+    },
+
+    ctxOpen() {
+      const item = this.ctxMenu.item;
+      this.closeContextMenu();
+      if (!item) return;
+      if (item.type === 'file') this.openFile(item.path);
+      else if (item.type === 'directory') this.navigateToFolder(item);
+    },
+
+    ctxOpenNewTab() {
+      const item = this.ctxMenu.item;
+      this.closeContextMenu();
+      if (!item || item.type !== 'file') return;
+      const token = localStorage.getItem('zircon_token');
+      window.open(`/api/v1/deep-search/file?path=${encodeURIComponent(item.path)}&token=${encodeURIComponent(token || '')}`, '_blank');
+    },
+
+    async ctxCopyPath() {
+      const item = this.ctxMenu.item;
+      this.closeContextMenu();
+      if (!item) return;
+      try {
+        await navigator.clipboard.writeText(item.path || item.name);
+        showToast('Path copied to clipboard', 'success');
+      } catch {
+        showToast('Failed to copy path', 'error');
+      }
+    },
+
+    ctxDownload() {
+      const item = this.ctxMenu.item;
+      this.closeContextMenu();
+      if (!item || item.type !== 'file') return;
+      const token = localStorage.getItem('zircon_token');
+      const a = document.createElement('a');
+      a.href = `/api/v1/deep-search/file?path=${encodeURIComponent(item.path)}&token=${encodeURIComponent(token || '')}`;
+      a.download = item.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    },
+
+    async ctxDelete() {
+      const item = this.ctxMenu.item;
+      this.closeContextMenu();
+      if (!item) return;
+      if (item.type === 'directory') {
+        await this.deleteFolder(item.name);
+      } else {
+        showToast('Individual file deletion is not supported — delete the parent folder', 'info');
+      }
     },
 
     // ── File Viewer ───────────────────────────────────────────────────────
