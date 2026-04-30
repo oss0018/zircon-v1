@@ -238,7 +238,7 @@ document.addEventListener('alpine:init', () => {
     async runSearch() {
       if (!this.searchQuery.trim()) return;
 
-      const cacheKey = this.searchQuery.trim() + '|' + (this.searchFolder || '');
+      const cacheKey = JSON.stringify({ q: this.searchQuery.trim(), f: this.searchFolder || '' });
 
       // Return cached result without HTTP request
       if (this._searchCache && this._searchCache.has(cacheKey)) {

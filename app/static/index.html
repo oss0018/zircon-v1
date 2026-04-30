@@ -1780,7 +1780,7 @@
                           <template x-if="node.type==='directory'">
                             <div>
                               <div class="flex items-center gap-1 cursor-pointer grep-line" style="padding:3px 0;"
-                                   @click="toggleNode(node.name, true)"
+                                   @click="toggleNode(node.name)"
                                    @dblclick.stop="navigateToFolder(node)"
                                    @contextmenu.stop="showContextMenu($event, {type:'directory', name:node.name, path:node.name, children:node.children})">
                                 <span x-text="isCollapsed(node.name, true) ? '▶' : '▼'" style="color:var(--text-muted);font-size:10px;min-width:10px;"></span>
@@ -1900,7 +1900,7 @@
                       <button class="btn btn-sm btn-secondary" @click="clearFilters()"
                               x-show="filterExt || filterFolder">✕ Clear filters</button>
                       <span class="text-xs text-muted" style="margin-left:auto;"
-                            x-text="'Showing ' + Math.min(visibleResults().length, filteredCount()) + ' of ' + filteredCount() + (filteredCount() !== totalCount() ? ' (filtered from ' + totalCount() + ')' : '')"></span>
+                            x-text="(() => { const fc = filteredCount(), tc = totalCount(), vc = visibleResults().length; return 'Showing ' + vc + ' of ' + fc + (fc !== tc ? ' (filtered from ' + tc + ')' : ''); })()"></span>
                     </div>
                   </template>
                 </div>
