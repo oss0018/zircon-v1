@@ -23,3 +23,6 @@ pytz==2024.1
 aiohttp>=3.13.3
 aiodns>=3.1.0
 bleach>=6.1.0
+xlrd>=2.0.1
+chardet>=5.0.0
+striprtf>=0.0.26

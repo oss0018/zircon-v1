@@ -26,16 +26,22 @@ async def run_search(query: SearchQuery, db: AsyncSession = Depends(get_db),
 
     if query.source in ("local", "all"):
         try:
-            local_hits = search_engine.search(query.query, limit=query.limit)
+            local_hits = search_engine.search(
+                query.query,
+                limit=query.limit,
+                offset=query.offset,
+                fuzzy=query.fuzzy,
+            )
             for hit in local_hits:
                 results.append({
                     "source": "local",
                     "score": hit.get("score", 0),
                     "data": hit,
                     "cached": False,
+                    "snippet": hit.get("snippet", ""),
                 })
         except Exception as e:
-            results.append({"source": "local", "score": 0, "data": {"error": "Search error"}, "cached": False})
+            results.append({"source": "local", "score": 0, "data": {"error": "Search error"}, "cached": False, "snippet": ""})
 
     if query.source in ("osint", "all") and query.integrations:
         from app.models import Integration

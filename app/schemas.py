@@ -136,6 +136,8 @@ class SearchQuery(BaseModel):
     integrations: List[str] = []
     query_type: str = "general"  # email/domain/ip/url/hash/general
     limit: int = 50
+    offset: int = 0
+    fuzzy: bool = True
 
     @field_validator("query")
     @classmethod
