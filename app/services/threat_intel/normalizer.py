@@ -31,6 +31,7 @@ Converts raw API responses from each connector into a unified, human-readable sc
 }
 """
 from __future__ import annotations
+import datetime as _dt
 from typing import Any
 
 
@@ -293,7 +294,6 @@ def _adapt_virustotal(raw: dict, ioc_type: str) -> dict:
     # Timeline: first submission and last analysis dates
     first_sub = attrs.get("first_submission_date")
     if first_sub:
-        import datetime as _dt
         try:
             ts = _dt.datetime.fromtimestamp(int(first_sub), tz=_dt.timezone.utc).isoformat()
         except Exception:
@@ -305,7 +305,6 @@ def _adapt_virustotal(raw: dict, ioc_type: str) -> dict:
         })
     last_an = attrs.get("last_analysis_date")
     if last_an:
-        import datetime as _dt
         try:
             ts = _dt.datetime.fromtimestamp(int(last_an), tz=_dt.timezone.utc).isoformat()
         except Exception:
@@ -701,8 +700,12 @@ def _adapt_threatfox(raw: dict, ioc_type: str) -> dict:
                         "source": "ThreatFox",
                     })
                 conf = ioc_entry.get("confidence_level")
-                if conf is not None and int(conf) > partial["confidence"]:
-                    partial["confidence"] = int(conf)
+                if conf is not None:
+                    try:
+                        if int(conf) > partial["confidence"]:
+                            partial["confidence"] = int(conf)
+                    except (TypeError, ValueError):
+                        pass
     elif query_status == "no_result":
         partial["verdict"] = "clean"
 

@@ -357,7 +357,10 @@ document.addEventListener('alpine:init', () => {
       const sus = stats.suspicious || 0;
       const total = Object.values(stats).reduce((a, b) => a + b, 0) || 0;
       if (total > 0) {
-        fields.push({ label: 'Detections', value: `${mal} malicious / ${sus} suspicious / ${total} engines`, highlight: mal > 0 ? 'danger' : sus > 0 ? 'warning' : 'success' });
+        let detHighlight = 'success';
+        if (mal > 0) detHighlight = 'danger';
+        else if (sus > 0) detHighlight = 'warning';
+        fields.push({ label: 'Detections', value: `${mal} malicious / ${sus} suspicious / ${total} engines`, highlight: detHighlight });
       }
       if (attrs.meaningful_name) fields.push({ label: 'Name', value: attrs.meaningful_name, highlight: '' });
       if (attrs.type_description) fields.push({ label: 'Type', value: attrs.type_description, highlight: '' });
@@ -791,7 +794,7 @@ document.addEventListener('alpine:init', () => {
         if (!vals.length) continue;
         const displayVals = vals.slice(0, 8).map(v => {
           if (typeof v === 'string') return v;
-          return v.ip || v.hostname || v.nameserver || v.value || v.ipv6 || JSON.stringify(v).slice(0, 60);
+          return v.ip || v.hostname || v.nameserver || v.value || v.ipv6 || v.name || '(complex value)';
         });
         result.push({ type: label, values: displayVals });
       }
