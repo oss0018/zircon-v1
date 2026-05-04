@@ -392,11 +392,38 @@ document.addEventListener('alpine:init', () => {
 
     _fieldsAlienVault(d) {
       const fields = [];
-      const pulseCount = (d.pulse_info && d.pulse_info.count !== undefined) ? d.pulse_info.count : (d.pulse_count || 0);
+      const pi = d.pulse_info || {};
+      const pulseCount = pi.count !== undefined ? pi.count : (d.pulse_count || 0);
       fields.push({ label: 'Pulse count', value: String(pulseCount), highlight: pulseCount > 0 ? 'warning' : 'success' });
-      if (d.reputation !== undefined) fields.push({ label: 'Reputation', value: String(d.reputation), highlight: d.reputation < 0 ? 'danger' : '' });
-      if (d.country_name) fields.push({ label: 'Country', value: d.country_name, highlight: '' });
-      if (d.asn) fields.push({ label: 'ASN', value: d.asn, highlight: '' });
+      if (d.type_title)
+        fields.push({ label: 'Type', value: d.type_title, highlight: '' });
+      if (d.reputation !== undefined)
+        fields.push({ label: 'Reputation', value: String(d.reputation), highlight: d.reputation < 0 ? 'danger' : '' });
+      if (d.country_name)
+        fields.push({ label: 'Country', value: d.country_name + (d.country_code ? ` (${d.country_code})` : ''), highlight: '' });
+      if (d.asn)
+        fields.push({ label: 'ASN', value: d.asn, highlight: '' });
+      if (d.city)
+        fields.push({ label: 'City', value: d.city, highlight: '' });
+
+      // Validation summary
+      const validation = d.validation || [];
+      if (validation.length > 0) {
+        const vMsg = validation.map(v => v.message || v.name || String(v)).join('; ');
+        fields.push({ label: 'Validation', value: vMsg, highlight: '' });
+      }
+
+      // Top-3 pulse name/TLP summary for compact card
+      const pulses = (pi.pulses || []).slice(0, 3);
+      pulses.forEach((p, i) => {
+        const tlp = p.tlp ? `[TLP:${p.tlp.toUpperCase()}] ` : '';
+        const tags = (p.tags || []).slice(0, 4).join(', ');
+        const val = `${tlp}${p.name}${tags ? ' — ' + tags : ''}`;
+        fields.push({ label: `Pulse ${i + 1}`, value: val, highlight: p.tlp === 'red' ? 'danger' : p.tlp === 'amber' ? 'warning' : '' });
+      });
+      if (pulseCount > 3)
+        fields.push({ label: '', value: `+${pulseCount - 3} more pulses (see pulse list below or Raw JSON)`, highlight: '' });
+
       return fields.length ? fields : this._fieldsGeneric(d);
     },
 

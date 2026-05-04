@@ -66,6 +66,7 @@ def normalize(ioc: str, ioc_type: str, source_results: dict[str, Any]) -> dict:
         "timeline": [],
         "summary": "",
         "raw": {},
+        "per_source_enriched": {},
     }
 
     per_source_verdicts: list[tuple[str, str, int]] = []  # (source, verdict, score)
@@ -125,6 +126,10 @@ def _merge_partial(result: dict, partial: dict, source: str):
     for art_key in result["artifacts"]:
         if partial.get("artifacts", {}).get(art_key):
             result["artifacts"][art_key].extend(partial["artifacts"][art_key])
+
+    # OTX-specific structured enrichment
+    if partial.get("otx"):
+        result["per_source_enriched"][source] = partial["otx"]
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +402,36 @@ def _adapt_alienvault(raw: dict, ioc_type: str) -> dict:
             "event": f"Pulse: {pulse.get('name', '?')}",
             "source": "AlienVault OTX",
         })
+
+    # Structured OTX data for XDR-style per-source view
+    pulses_raw = pulse_info.get("pulses") or []
+    structured_pulses = []
+    for p in pulses_raw:
+        author = p.get("author") or {}
+        author_name = author.get("username", "") if isinstance(author, dict) else str(author)
+        structured_pulses.append({
+            "id": p.get("id", ""),
+            "name": p.get("name", ""),
+            "tlp": p.get("tlp", "white"),
+            "created": p.get("created", ""),
+            "modified": p.get("modified", ""),
+            "tags": p.get("tags") or [],
+            "references": p.get("references") or [],
+            "author": {"username": author_name},
+            "malware_families": [
+                m.get("display_name", "") for m in (p.get("malware_families") or []) if isinstance(m, dict)
+            ],
+            "adversary": p.get("adversary", ""),
+        })
+
+    partial["otx"] = {
+        "pulse_count": pulse_info.get("count", 0),
+        "pulses": structured_pulses,
+        "validation": raw.get("validation") or [],
+        "type_title": raw.get("type_title", ""),
+        "base_indicator": raw.get("base_indicator") or {},
+        "sections": raw.get("sections") or [],
+    }
 
     return partial
 
