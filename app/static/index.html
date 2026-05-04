@@ -110,22 +110,32 @@
               <span x-text="t('integrations')"></span>
             </div>
 
-            <div class="nav-item" :class="page === 'watchlist' ? 'active' : ''" @click="navigate('watchlist')">
-              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-              <span x-text="t('watchlist')"></span>
+            <!-- ── Automation Section (collapsible) ── -->
+            <div class="nav-group-header" :class="automationOpen ? 'open' : ''"
+                 @click="automationOpen = !automationOpen">
+              <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Automation
+              <span class="nav-group-arrow">▶</span>
             </div>
 
-            <div class="nav-section">Automation</div>
+            <template x-if="automationOpen">
+              <div>
+                <div class="nav-sub-item" :class="page === 'monitoring' ? 'active' : ''" @click="navigate('monitoring')">
+                  <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                  <span x-text="t('monitoring')"></span>
+                </div>
 
-            <div class="nav-item" :class="page === 'monitoring' ? 'active' : ''" @click="navigate('monitoring')">
-              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-              <span x-text="t('monitoring')"></span>
-            </div>
+                <div class="nav-sub-item" :class="page === 'brands' ? 'active' : ''" @click="navigate('brands')">
+                  <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                  <span x-text="t('brand_protection')"></span>
+                </div>
 
-            <div class="nav-item" :class="page === 'brands' ? 'active' : ''" @click="navigate('brands')">
-              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-              <span x-text="t('brand_protection')"></span>
-            </div>
+                <div class="nav-sub-item" :class="page === 'watchlist' ? 'active' : ''" @click="navigate('watchlist')">
+                  <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                  <span x-text="t('watchlist')"></span>
+                </div>
+              </div>
+            </template>
 
             <!-- ── CSINT Section ── -->
             <div class="nav-group-header" :class="csintOpen ? 'open' : ''"
@@ -197,7 +207,7 @@
           <div class="topbar">
             <div class="topbar-title">
               <span class="pulse" style="margin-right:8px;"></span>
-              <span x-text="page === 'brands' ? t('brand_protection') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : t(page)"></span>
+              <span x-text="page === 'brands' ? 'Automation › ' + t('brand_protection') : page === 'monitoring' ? 'Automation › ' + t('monitoring') : page === 'watchlist' ? 'Automation › ' + t('watchlist') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : t(page)"></span>
             </div>
             <div class="topbar-actions">
               <span class="text-muted text-sm" x-text="new Date().toLocaleDateString()"></span>
@@ -911,6 +921,23 @@
 
             <!-- ── MONITORING ─────────────────────────────────────── -->
             <div x-show="page === 'monitoring'" x-data="monitoringPage" x-init="init()">
+              <!-- Context Menu -->
+              <div x-show="ctxMenu.show" class="context-menu"
+                   :style="`left:${ctxMenu.x}px;top:${ctxMenu.y}px;`"
+                   @click.stop="">
+                <button class="context-menu-item" @click="ctxMenu.show=false; triggerJob(ctxMenu.job && ctxMenu.job.id)">▶️ Run now</button>
+                <button class="context-menu-item" @click="ctxOpenNewWindow()">🪟 Open in new window</button>
+                <hr class="context-menu-sep">
+                <button class="context-menu-item danger" @click="ctxMenu.show=false; deleteJob(ctxMenu.job && ctxMenu.job.id)">🗑️ Delete</button>
+              </div>
+
+              <!-- Breadcrumbs -->
+              <div class="flex items-center gap-1 mb-4 text-sm" style="color:var(--text-muted);">
+                <span>Automation</span>
+                <span style="margin:0 4px;">›</span>
+                <span style="color:var(--accent-green);" x-text="t('monitoring')"></span>
+              </div>
+
               <div class="flex justify-between items-center mb-4">
                 <div></div>
                 <button class="btn btn-primary" @click="showModal = true" x-text="t('add_job')"></button>
@@ -933,7 +960,7 @@
                       <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
                     </template>
                     <template x-for="job in jobs" :key="job.id">
-                      <tr>
+                      <tr @contextmenu.prevent="showCtxMenu($event, job)" style="cursor:context-menu;">
                         <td x-text="job.name"></td>
                         <td><span class="badge badge-blue" x-text="jobTypeLabel(job.type)"></span></td>
                         <td><code class="text-xs" x-text="job.schedule"></code></td>
@@ -1275,9 +1302,12 @@
               checkResult: null, checkLoading: false,
               newItem: { type: 'email', value: '', integrations_json: '[]', alert_email: '', alert_telegram: '' },
               itemTypes: ['email', 'domain', 'ip', 'keyword', 'brand'],
+              ctxMenu: { show: false, x: 0, y: 0, item: null },
               async init() {
                 await this.load();
                 try { const i = await api.get('/integrations/'); this.integrations = i.filter(x=>x.is_active); } catch {}
+                document.addEventListener('click', () => { this.ctxMenu.show = false; });
+                document.addEventListener('keydown', e => { if(e.key==='Escape') this.ctxMenu.show = false; });
               },
               async load() {
                 this.loading = true;
@@ -1304,7 +1334,34 @@
               },
               selectedIntegrations: [],
               toggleInteg(t) { const i=this.selectedIntegrations.indexOf(t); if(i>=0) this.selectedIntegrations.splice(i,1); else this.selectedIntegrations.push(t); },
+              showCtxMenu(e, item) {
+                e.preventDefault(); e.stopPropagation();
+                const x = Math.min(e.clientX, window.innerWidth - 200);
+                const y = Math.min(e.clientY, window.innerHeight - 120);
+                this.ctxMenu = { show: true, x, y, item };
+              },
+              ctxOpenNewWindow() {
+                this.ctxMenu.show = false;
+                window.open('/?page=watchlist', '_blank');
+              },
             }">
+              <!-- Context Menu -->
+              <div x-show="ctxMenu.show" class="context-menu"
+                   :style="`left:${ctxMenu.x}px;top:${ctxMenu.y}px;`"
+                   @click.stop="">
+                <button class="context-menu-item" @click="ctxMenu.show=false; checkItem(ctxMenu.item && ctxMenu.item.id)">✅ Check now</button>
+                <button class="context-menu-item" @click="ctxOpenNewWindow()">🪟 Open in new window</button>
+                <hr class="context-menu-sep">
+                <button class="context-menu-item danger" @click="ctxMenu.show=false; deleteItem(ctxMenu.item && ctxMenu.item.id)">🗑️ Delete</button>
+              </div>
+
+              <!-- Breadcrumbs -->
+              <div class="flex items-center gap-1 mb-4 text-sm" style="color:var(--text-muted);">
+                <span>Automation</span>
+                <span style="margin:0 4px;">›</span>
+                <span style="color:var(--accent-green);" x-text="t('watchlist')"></span>
+              </div>
+
               <div class="flex justify-between items-center mb-4">
                 <div></div>
                 <button class="btn btn-primary" @click="showModal = true" x-text="t('add_item')"></button>
@@ -1327,7 +1384,7 @@
                       <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
                     </template>
                     <template x-for="item in items" :key="item.id">
-                      <tr>
+                      <tr @contextmenu.prevent="showCtxMenu($event, item)" style="cursor:context-menu;">
                         <td><span class="badge badge-blue" x-text="item.type"></span></td>
                         <td class="font-mono" x-text="item.value"></td>
                         <td class="text-xs text-muted" x-text="item.integrations_json"></td>
@@ -2116,6 +2173,33 @@
                     </div>
                   </div>
 
+                  <!-- Dashboard charts row -->
+                  <template x-if="stats && stats.service_stats && stats.service_stats.length > 0">
+                    <div class="grid-2" style="gap:16px;margin-bottom:20px;">
+                      <!-- Source distribution doughnut -->
+                      <div class="card">
+                        <div class="card-title">🍩 Lookups by Source (7 days)</div>
+                        <div style="height:180px;position:relative;">
+                          <canvas id="ti-summary-chart"></canvas>
+                        </div>
+                      </div>
+                      <!-- Top sources table -->
+                      <div class="card">
+                        <div class="card-title">📊 Top Sources</div>
+                        <template x-for="svc in (stats.service_stats || []).slice().sort((a,b)=>b.total-a.total).slice(0,6)" :key="svc.service_type">
+                          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                            <div style="flex:1;font-size:12px;" x-text="svc.name"></div>
+                            <div style="width:100px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;height:8px;">
+                              <div style="height:100%;background:var(--accent-green);border-radius:4px;transition:width 0.4s;"
+                                   :style="`width:${stats.total_lookups_7d > 0 ? Math.round(svc.total/stats.total_lookups_7d*100) : 0}%`"></div>
+                            </div>
+                            <div class="badge badge-gray text-xs" x-text="svc.total + ' lookups'"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+
                   <!-- IoC Lookup -->
                   <div class="card mb-4">
                     <div class="card-title">🔎 IoC Lookup</div>
@@ -2143,20 +2227,56 @@
                         Results for
                         <span class="badge badge-green" x-text="lookupResults.ioc"></span>
                         <span class="badge badge-gray" x-text="lookupResults.ioc_type"></span>
+                        <span class="text-muted text-sm" x-text="lookupResults.results.length + ' sources'"></span>
                       </div>
-                      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:8px;">
+                      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:12px;">
                         <template x-for="result in lookupResults.results" :key="result.source">
-                          <div class="ti-result-card" :class="result.error ? 'has-error' : ''">
-                            <div class="flex items-center gap-2 mb-2">
-                              <span style="font-weight:600;color:var(--text-primary);" x-text="result.name"></span>
-                              <a :href="result.url" target="_blank" rel="noopener noreferrer"
-                                 class="badge badge-gray text-xs" style="text-decoration:none;">↗ Site</a>
+                          <div class="ti-result-card" :class="[result.error ? 'has-error' : '', threatLevelClass(threatLevel(result.source, result.data))]">
+                            <!-- Card header -->
+                            <div class="flex items-center gap-2 mb-2" style="justify-content:space-between;">
+                              <div class="flex items-center gap-2">
+                                <span style="font-weight:700;font-size:13px;" x-text="result.name"></span>
+                                <a :href="result.url" target="_blank" rel="noopener noreferrer"
+                                   class="badge badge-gray text-xs" style="text-decoration:none;">↗</a>
+                              </div>
+                              <div class="flex items-center gap-1">
+                                <span class="ti-threat-badge" :class="threatLevelClass(threatLevel(result.source, result.data))"
+                                      x-text="threatLevelLabel(threatLevel(result.source, result.data))"></span>
+                                <button class="btn btn-sm btn-secondary" style="padding:2px 6px;font-size:10px;"
+                                        @click="toggleCard(result.source)"
+                                        x-text="isCollapsed(result.source) ? '▶ Expand' : '▼ Collapse'"></button>
+                              </div>
                             </div>
-                            <div class="text-sm mb-2" :style="result.error ? 'color:var(--danger)' : 'color:var(--text-secondary)'"
-                                 x-text="resultSummary(result.data)"></div>
-                            <button class="btn btn-sm btn-secondary" @click="openRawData(result)">
-                              🔍 View raw data
-                            </button>
+
+                            <!-- Human-readable fields (collapsible) -->
+                            <template x-if="!isCollapsed(result.source)">
+                              <div>
+                                <template x-if="!result.data || result.data.not_found">
+                                  <div class="text-muted text-sm" style="padding:8px 0;">No data found</div>
+                                </template>
+                                <template x-if="result.data && !result.data.not_found">
+                                  <div class="ti-fields-grid">
+                                    <template x-for="field in humanFields(result.source, result.data)" :key="field.label">
+                                      <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
+                                        <div class="ti-field-label" x-text="field.label"></div>
+                                        <div class="ti-field-value">
+                                          <template x-if="field.isLink">
+                                            <a :href="field.value" target="_blank" rel="noopener noreferrer"
+                                               class="text-green" style="word-break:break-all;" x-text="field.value"></a>
+                                          </template>
+                                          <template x-if="!field.isLink">
+                                            <span style="word-break:break-word;" x-text="field.value"></span>
+                                          </template>
+                                        </div>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </template>
+                                <button class="btn btn-sm btn-secondary" style="margin-top:8px;" @click="openRawData(result)">
+                                  🔍 Raw JSON
+                                </button>
+                              </div>
+                            </template>
                           </div>
                         </template>
                       </div>
@@ -2270,26 +2390,51 @@
               <!-- History detail modal -->
               <template x-if="historyDetailModal.show && historyDetailModal.entry">
                 <div class="modal-overlay" @click.self="closeHistoryDetail()">
-                  <div class="modal" style="max-width:700px;max-height:80vh;display:flex;flex-direction:column;">
+                  <div class="modal" style="max-width:800px;max-height:85vh;display:flex;flex-direction:column;">
                     <div class="modal-header">
                       <span>Lookup details — <span class="font-mono text-green" x-text="historyDetailModal.entry.ioc_value"></span></span>
                       <button class="btn btn-sm btn-secondary" @click="closeHistoryDetail()">✕</button>
                     </div>
                     <div style="overflow:auto;flex:1;padding:16px;">
-                      <div class="flex gap-2 mb-3 flex-wrap">
+                      <div class="flex gap-2 mb-4 flex-wrap">
                         <span class="badge badge-gray" x-text="'Type: ' + historyDetailModal.entry.ioc_type"></span>
                         <span class="badge badge-gray" x-text="'Date: ' + formatDate(historyDetailModal.entry.created_at)"></span>
                         <template x-for="src in (historyDetailModal.entry.sources || [])" :key="src">
                           <span class="badge badge-green" x-text="src"></span>
                         </template>
                       </div>
-                      <template x-for="[svc, data] in Object.entries(historyDetailModal.entry.results || {})" :key="svc">
-                        <div class="card mb-3" style="padding:10px;">
-                          <div style="font-weight:600;margin-bottom:6px;" x-text="svc"></div>
-                          <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-secondary);"
-                               x-text="prettyJson(data)"></pre>
-                        </div>
-                      </template>
+                      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+                        <template x-for="[svc, data] in Object.entries(historyDetailModal.entry.results || {})" :key="svc">
+                          <div class="ti-result-card" :class="threatLevelClass(threatLevel(svc, data))">
+                            <div class="flex items-center gap-2 mb-2" style="justify-content:space-between;">
+                              <span style="font-weight:700;font-size:13px;" x-text="svc"></span>
+                              <span class="ti-threat-badge" :class="threatLevelClass(threatLevel(svc, data))"
+                                    x-text="threatLevelLabel(threatLevel(svc, data))"></span>
+                            </div>
+                            <div class="ti-fields-grid">
+                              <template x-for="field in humanFields(svc, data)" :key="field.label">
+                                <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
+                                  <div class="ti-field-label" x-text="field.label"></div>
+                                  <div class="ti-field-value">
+                                    <template x-if="field.isLink">
+                                      <a :href="field.value" target="_blank" rel="noopener noreferrer"
+                                         class="text-green" style="word-break:break-all;" x-text="field.value"></a>
+                                    </template>
+                                    <template x-if="!field.isLink">
+                                      <span style="word-break:break-word;" x-text="field.value"></span>
+                                    </template>
+                                  </div>
+                                </div>
+                              </template>
+                            </div>
+                            <details style="margin-top:8px;">
+                              <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);">Raw JSON</summary>
+                              <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-secondary);margin-top:4px;"
+                                   x-text="prettyJson(data)"></pre>
+                            </details>
+                          </div>
+                        </template>
+                      </div>
                     </div>
                   </div>
                 </div>

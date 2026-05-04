@@ -29,8 +29,25 @@ document.addEventListener('alpine:init', () => {
       { label: 'Weekly (Sunday)', value: '0 0 * * 0' },
     ],
 
+    ctxMenu: { show: false, x: 0, y: 0, job: null },
+
     async init() {
       await this.loadJobs();
+      document.addEventListener('click', () => { this.ctxMenu.show = false; });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') this.ctxMenu.show = false; });
+    },
+
+    showCtxMenu(e, job) {
+      e.preventDefault();
+      e.stopPropagation();
+      const x = Math.min(e.clientX, window.innerWidth - 200);
+      const y = Math.min(e.clientY, window.innerHeight - 140);
+      this.ctxMenu = { show: true, x, y, job };
+    },
+
+    ctxOpenNewWindow() {
+      this.ctxMenu.show = false;
+      window.open('/?page=monitoring', '_blank');
     },
 
     async loadJobs() {

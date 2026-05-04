@@ -226,11 +226,70 @@ body::before {
   border-radius: 8px;
   padding: 14px;
   margin-bottom: 10px;
+  transition: border-color 0.2s;
 }
 
 .ti-result-card.has-error {
   border-color: rgba(255, 0, 60, 0.3);
 }
+
+/* ── TI Threat level border colors ──────────────────────────── */
+.ti-result-card.ti-threat-critical { border-color: rgba(220, 38, 38, 0.55); background: rgba(220, 38, 38, 0.04); }
+.ti-result-card.ti-threat-high     { border-color: rgba(251, 146, 60, 0.55); background: rgba(251, 146, 60, 0.04); }
+.ti-result-card.ti-threat-medium   { border-color: rgba(250, 204, 21, 0.45); background: rgba(250, 204, 21, 0.03); }
+.ti-result-card.ti-threat-low      { border-color: rgba(74, 222, 128, 0.4); }
+.ti-result-card.ti-threat-none     { border-color: rgba(0, 255, 157, 0.15); }
+.ti-result-card.ti-threat-error    { border-color: rgba(148, 163, 184, 0.3); }
+
+/* ── TI Threat badge ──────────────────────────────────────────── */
+.ti-threat-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ti-threat-badge.ti-threat-critical { background: rgba(220,38,38,0.2); color: #f87171; }
+.ti-threat-badge.ti-threat-high     { background: rgba(251,146,60,0.2); color: #fb923c; }
+.ti-threat-badge.ti-threat-medium   { background: rgba(250,204,21,0.2); color: #fbbf24; }
+.ti-threat-badge.ti-threat-low      { background: rgba(74,222,128,0.2); color: #4ade80; }
+.ti-threat-badge.ti-threat-none     { background: rgba(0,255,157,0.15); color: var(--accent-green); }
+.ti-threat-badge.ti-threat-error    { background: rgba(148,163,184,0.15); color: var(--text-muted); }
+
+/* ── TI Human-readable fields ────────────────────────────────── */
+.ti-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.ti-field {
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ti-field-label {
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 90px;
+  font-size: 11px;
+  padding-top: 1px;
+}
+
+.ti-field-value {
+  color: var(--text-primary);
+  flex: 1;
+  word-break: break-word;
+}
+
+.ti-field.ti-field-danger  { background: rgba(220,38,38,0.08); }
+.ti-field.ti-field-warning { background: rgba(251,146,60,0.08); }
+.ti-field.ti-field-success { background: rgba(0,255,157,0.06); }
 
 .ti-no-integrations-banner {
   display: flex;
