@@ -10,6 +10,8 @@ from app.services.osint.censys import CensysClient
 from app.services.osint.securitytrails import SecurityTrailsClient
 from app.services.osint.abuseipdb import AbuseIPDBClient
 from app.services.osint.alienvault import AlienVaultClient
+from app.services.osint.malwarebazaar import MalwareBazaarClient
+from app.services.osint.threatfox import ThreatFoxClient
 
 OSINT_CLIENTS = {
     "hibp": HIBPClient,
@@ -24,6 +26,8 @@ OSINT_CLIENTS = {
     "securitytrails": SecurityTrailsClient,
     "abuseipdb": AbuseIPDBClient,
     "alienvault": AlienVaultClient,
+    "malwarebazaar": MalwareBazaarClient,
+    "threatfox": ThreatFoxClient,
 }
 
 

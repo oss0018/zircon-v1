@@ -257,6 +257,253 @@ body::before {
 .ti-threat-badge.ti-threat-none     { background: rgba(0,255,157,0.15); color: var(--accent-green); }
 .ti-threat-badge.ti-threat-error    { background: rgba(148,163,184,0.15); color: var(--text-muted); }
 
+/* ── TI Severity badges ──────────────────────────────────────── */
+.ti-sev-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.ti-sev-critical { background: rgba(220,38,38,0.18); color: #f87171; border: 1px solid rgba(220,38,38,0.35); }
+.ti-sev-high     { background: rgba(251,146,60,0.18); color: #fb923c; border: 1px solid rgba(251,146,60,0.35); }
+.ti-sev-medium   { background: rgba(250,204,21,0.18); color: #fbbf24; border: 1px solid rgba(250,204,21,0.35); }
+.ti-sev-low      { background: rgba(74,222,128,0.18); color: #4ade80; border: 1px solid rgba(74,222,128,0.35); }
+.ti-sev-none     { background: rgba(0,255,157,0.1); color: var(--accent-green); border: 1px solid rgba(0,255,157,0.2); }
+
+/* ── TI Summary card ─────────────────────────────────────────── */
+.ti-summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+}
+.ti-summary-card.verdict-malicious { border-color: rgba(220,38,38,0.5); background: rgba(220,38,38,0.04); }
+.ti-summary-card.verdict-suspicious { border-color: rgba(251,146,60,0.5); background: rgba(251,146,60,0.04); }
+.ti-summary-card.verdict-clean { border-color: rgba(0,255,157,0.35); background: rgba(0,255,157,0.03); }
+
+.ti-verdict-icon {
+  font-size: 36px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.ti-confidence-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  width: 100%;
+  margin-top: 4px;
+}
+.ti-confidence-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* ── TI Result tabs ──────────────────────────────────────────── */
+.ti-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+.ti-tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+}
+.ti-tab:hover { color: var(--text-primary); }
+.ti-tab.active { color: var(--accent-green); border-bottom-color: var(--accent-green); }
+.ti-tab .ti-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(0,255,157,0.15);
+  color: var(--accent-green);
+  margin-left: 4px;
+}
+
+/* ── TI Detection row ────────────────────────────────────────── */
+.ti-detection-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  background: rgba(255,255,255,0.03);
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.ti-detection-engine {
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 120px;
+  flex-shrink: 0;
+}
+.ti-detection-result {
+  color: var(--text-secondary);
+  flex: 1;
+}
+.ti-detection-cat {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.06);
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+/* ── TI Enrichment geo ───────────────────────────────────────── */
+.ti-geo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.ti-geo-item {
+  background: rgba(255,255,255,0.04);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.ti-geo-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+.ti-geo-value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* ── TI Artifacts ────────────────────────────────────────────── */
+.ti-artifact-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-secondary);
+  border: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer;
+  transition: background 0.15s;
+  text-decoration: none;
+}
+.ti-artifact-chip:hover {
+  background: rgba(0,255,157,0.12);
+  color: var(--accent-green);
+  border-color: rgba(0,255,157,0.3);
+}
+
+/* ── TI Timeline ─────────────────────────────────────────────── */
+.ti-timeline {
+  position: relative;
+  padding-left: 20px;
+}
+.ti-timeline::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--border-color);
+}
+.ti-timeline-event {
+  position: relative;
+  padding: 6px 0 6px 12px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.ti-timeline-event::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  border: 1px solid var(--bg-main);
+}
+.ti-timeline-date {
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+.ti-timeline-text {
+  color: var(--text-primary);
+}
+.ti-timeline-source {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+/* ── TI Source checkboxes ────────────────────────────────────── */
+.ti-source-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.ti-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+  color: var(--text-secondary);
+}
+.ti-source-chip:hover { border-color: rgba(0,255,157,0.4); color: var(--text-primary); }
+.ti-source-chip.selected {
+  background: rgba(0,255,157,0.12);
+  border-color: rgba(0,255,157,0.4);
+  color: var(--accent-green);
+}
+.ti-source-chip.free-badge::after {
+  content: 'FREE';
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0,180,216,0.2);
+  color: #38bdf8;
+  letter-spacing: 0.05em;
+}
+
 /* ── TI Human-readable fields ────────────────────────────────── */
 .ti-fields-grid {
   display: grid;
@@ -304,6 +551,7 @@ body::before {
   border-radius: 10px;
   margin: 24px 0;
 }
+
 
 
 .sidebar-footer {

@@ -2130,289 +2130,217 @@
                 <span style="color:var(--accent-green);">Threat Intelligence</span>
               </div>
 
-              <!-- No active integrations banner -->
-              <template x-if="!integrationsLoading && !hasActiveIntegrations()">
-                <div class="ti-no-integrations-banner">
-                  <div style="font-size:48px;">🔌</div>
-                  <div>
-                    <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:6px;">No active Threat Intelligence integrations</div>
-                    <div style="color:var(--text-muted);font-size:13px;">Connect at least one TI integration to use this dashboard.</div>
-                    <div style="color:var(--text-muted);font-size:12px;margin-top:4px;">Supported: Shodan, VirusTotal, AbuseIPDB, AlienVault OTX, urlscan.io, URLhaus, PhishTank, Censys, SecurityTrails, HIBP, Intelligence X</div>
+              <!-- Stats row (always visible) -->
+              <div class="stats-grid" style="margin-bottom:16px;">
+                <div class="stat-card">
+                  <div class="stat-label">🔌 Active Sources</div>
+                  <div class="stat-value text-green" x-text="stats ? stats.active_ti_integrations : activeIntegrations.length"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">🔎 Lookups (7 days)</div>
+                  <div class="stat-value" x-text="stats ? stats.total_lookups_7d : '—'"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">📋 History entries</div>
+                  <div class="stat-value" x-text="history.length"></div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">🆓 Free connectors</div>
+                  <div class="stat-value text-green">4</div>
+                </div>
+              </div>
+
+              <!-- Dashboard charts row -->
+              <template x-if="stats && stats.service_stats && stats.service_stats.length > 0">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
+                  <!-- Source distribution doughnut -->
+                  <div class="card">
+                    <div class="card-title">🍩 Lookups by Source (7 days)</div>
+                    <div style="height:200px;position:relative;">
+                      <canvas id="ti-summary-chart"></canvas>
+                    </div>
                   </div>
-                  <button class="btn btn-primary" @click="$dispatch('navigate', {page:'integrations'}); navigate('integrations')">
-                    ⚡ Go to Integrations
+                  <!-- Top sources bar -->
+                  <div class="card">
+                    <div class="card-title">📊 Top Sources (7 days)</div>
+                    <div style="height:200px;position:relative;">
+                      <canvas id="ti-top-sources-bar"></canvas>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- ── IOC SEARCH FORM ─────────────────────────── -->
+              <div class="card" style="margin-bottom:16px;">
+                <div class="card-title">🔎 IOC Search</div>
+
+                <!-- Search bar row -->
+                <div class="flex gap-2 flex-wrap mb-3">
+                  <div style="flex:3;min-width:220px;position:relative;">
+                    <input class="form-input" type="text" x-model="iocForm.ioc"
+                           placeholder="Enter IP, domain, hash, URL, email..."
+                           style="width:100%;padding-right:36px;" maxlength="512"
+                           @keyup.enter="runSearch()" />
+                  </div>
+                  <select class="form-select" x-model="iocForm.ioc_type" style="width:130px;">
+                    <template x-for="t in iocTypes" :key="t">
+                      <option :value="t" x-text="t.charAt(0).toUpperCase() + t.slice(1)"></option>
+                    </template>
+                  </select>
+                  <button class="btn btn-primary" @click="runSearch()"
+                          :disabled="lookupLoading || !iocForm.ioc.trim()"
+                          style="min-width:100px;">
+                    <span x-show="lookupLoading" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="lookupLoading ? 'Searching…' : '🔍 Search'"></span>
                   </button>
                 </div>
-              </template>
 
-              <!-- Loading -->
-              <template x-if="integrationsLoading">
-                <div class="card text-center text-muted" style="padding:40px;">
-                  <span class="spinner" style="width:20px;height:20px;display:inline-block;"></span>
-                  <span style="margin-left:10px;">Loading integrations...</span>
+                <!-- Source selection -->
+                <div>
+                  <div class="flex items-center gap-2 mb-2" style="font-size:12px;color:var(--text-muted);">
+                    <span>Sources:</span>
+                    <label class="flex items-center gap-1" style="cursor:pointer;">
+                      <input type="checkbox" x-model="selectAllSources" @change="toggleSelectAll()"
+                             style="accent-color:var(--accent-green);" />
+                      <span style="color:var(--text-secondary);font-weight:600;">All sources</span>
+                    </label>
+                  </div>
+                  <div class="ti-source-grid">
+                    <template x-for="src in activeIntegrations" :key="src.service_type">
+                      <label class="ti-source-chip"
+                             :class="[selectedSources.includes(src.service_type) ? 'selected' : '', src.free ? 'free-badge' : '']">
+                        <input type="checkbox" :value="src.service_type"
+                               x-model="selectedSources" @change="onSourceToggle()"
+                               style="display:none;" />
+                        <span x-text="src.name"></span>
+                      </label>
+                    </template>
+                  </div>
                 </div>
-              </template>
 
-              <!-- Main dashboard (only if active integrations exist) -->
-              <template x-if="!integrationsLoading && hasActiveIntegrations()">
+                <!-- Error -->
+                <template x-if="lookupError">
+                  <div class="alert alert-error mt-2" style="font-size:12px;" x-text="lookupError"></div>
+                </template>
+              </div>
+
+              <!-- ── SEARCH RESULTS ─────────────────────────── -->
+              <template x-if="searchResult && normalized">
                 <div>
 
-                  <!-- Stats row -->
-                  <div class="stats-grid" style="margin-bottom:20px;">
-                    <div class="stat-card">
-                      <div class="stat-label">Active TI Integrations</div>
-                      <div class="stat-value text-green" x-text="stats ? stats.active_ti_integrations : activeIntegrations.length"></div>
-                    </div>
-                    <div class="stat-card">
-                      <div class="stat-label">Lookups (7 days)</div>
-                      <div class="stat-value" x-text="stats ? stats.total_lookups_7d : '—'"></div>
-                    </div>
-                    <div class="stat-card">
-                      <div class="stat-label">History records</div>
-                      <div class="stat-value" x-text="history.length"></div>
-                    </div>
-                  </div>
-
-                  <!-- Dashboard charts row -->
-                  <template x-if="stats && stats.service_stats && stats.service_stats.length > 0">
-                    <div class="grid-2" style="gap:16px;margin-bottom:20px;">
-                      <!-- Source distribution doughnut -->
-                      <div class="card">
-                        <div class="card-title">🍩 Lookups by Source (7 days)</div>
-                        <div style="height:180px;position:relative;">
-                          <canvas id="ti-summary-chart"></canvas>
+                  <!-- Summary card -->
+                  <div class="ti-summary-card mb-3"
+                       :class="'verdict-' + normalized.verdict">
+                    <div class="flex items-start gap-4">
+                      <!-- Verdict icon -->
+                      <div class="ti-verdict-icon" x-text="verdictIcon(normalized.verdict)"></div>
+                      <!-- Main info -->
+                      <div style="flex:1;min-width:0;">
+                        <div class="flex items-center gap-3 flex-wrap mb-2">
+                          <span style="font-size:17px;font-weight:700;color:var(--text-primary);font-family:monospace;" x-text="searchResult.ioc"></span>
+                          <span class="badge badge-gray" x-text="searchResult.ioc_type"></span>
+                          <span class="ti-sev-badge" :class="severityClass(normalized.severity)"
+                                x-text="severityLabel(normalized.severity)"></span>
+                        </div>
+                        <!-- Summary text -->
+                        <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;" x-text="normalized.summary"></div>
+                        <!-- Confidence bar -->
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                          <span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">Confidence</span>
+                          <div class="ti-confidence-bar" style="max-width:180px;">
+                            <div class="ti-confidence-fill"
+                                 :style="`width:${normalized.confidence}%;background:${confidenceColor(normalized.confidence)}`"></div>
+                          </div>
+                          <span style="font-size:11px;font-weight:700;" :style="`color:${confidenceColor(normalized.confidence)}`"
+                                x-text="normalized.confidence + '%'"></span>
+                        </div>
+                        <!-- Sources hit + tags -->
+                        <div class="flex gap-2 flex-wrap">
+                          <template x-if="normalized.sources_hit && normalized.sources_hit.length > 0">
+                            <div class="flex gap-1 flex-wrap items-center">
+                              <span style="font-size:11px;color:var(--text-muted);">Detected by:</span>
+                              <template x-for="src in normalized.sources_hit" :key="src">
+                                <span class="badge badge-red text-xs" x-text="src"></span>
+                              </template>
+                            </div>
+                          </template>
+                          <template x-if="normalized.tags && normalized.tags.length > 0">
+                            <div class="flex gap-1 flex-wrap items-center">
+                              <span style="font-size:11px;color:var(--text-muted);">Tags:</span>
+                              <template x-for="tag in normalized.tags.slice(0,8)" :key="tag">
+                                <span class="badge badge-gray text-xs" x-text="tag"></span>
+                              </template>
+                              <span x-show="normalized.tags.length > 8" class="badge badge-gray text-xs"
+                                    x-text="'+' + (normalized.tags.length - 8) + ' more'"></span>
+                            </div>
+                          </template>
                         </div>
                       </div>
-                      <!-- Top sources table -->
-                      <div class="card">
-                        <div class="card-title">📊 Top Sources</div>
-                        <template x-for="svc in (stats.service_stats || []).slice().sort((a,b)=>b.total-a.total).slice(0,6)" :key="svc.service_type">
-                          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                            <div style="flex:1;font-size:12px;" x-text="svc.name"></div>
-                            <div style="width:100px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;height:8px;">
-                              <div style="height:100%;background:var(--accent-green);border-radius:4px;transition:width 0.4s;"
-                                   :style="`width:${stats.total_lookups_7d > 0 ? Math.round(svc.total/stats.total_lookups_7d*100) : 0}%`"></div>
-                            </div>
-                            <div class="badge badge-gray text-xs" x-text="svc.total + ' lookups'"></div>
-                          </div>
-                        </template>
+                      <!-- Queried at -->
+                      <div style="text-align:right;flex-shrink:0;">
+                        <div style="font-size:10px;color:var(--text-muted);">Queried at</div>
+                        <div style="font-size:11px;color:var(--text-secondary);" x-text="formatDate(searchResult.queried_at)"></div>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;" x-text="perSource.length + ' source(s)'"></div>
                       </div>
-                    </div>
-                  </template>
-
-                  <!-- IoC Lookup -->
-                  <div class="card mb-4">
-                    <div class="card-title">🔎 IoC Lookup</div>
-                    <div class="flex gap-2 flex-wrap mb-2">
-                      <input class="form-input" type="text" x-model="iocForm.ioc"
-                             placeholder="IP, domain, hash, URL, email..."
-                             style="flex:3;min-width:200px;" maxlength="512"
-                             @keyup.enter="runLookup()" />
-                      <select class="form-select" x-model="iocForm.ioc_type" style="width:140px;">
-                        <template x-for="t in iocTypes" :key="t">
-                          <option :value="t" x-text="t"></option>
-                        </template>
-                      </select>
-                      <button class="btn btn-primary" @click="runLookup()" :disabled="lookupLoading || !iocForm.ioc.trim()">
-                        <span x-show="lookupLoading" class="spinner" style="width:14px;height:14px;"></span>
-                        <span x-text="lookupLoading ? 'Searching...' : 'Search'"></span>
-                      </button>
                     </div>
                   </div>
 
-                  <!-- Lookup results -->
-                  <template x-if="lookupResults">
-                    <div class="card mb-4">
-                      <div class="card-title flex items-center gap-2">
-                        Results for
-                        <span class="badge badge-green" x-text="lookupResults.ioc"></span>
-                        <span class="badge badge-gray" x-text="lookupResults.ioc_type"></span>
-                        <span class="text-muted text-sm" x-text="lookupResults.results.length + ' sources'"></span>
-                      </div>
-                      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:12px;">
-                        <template x-for="result in lookupResults.results" :key="result.source">
-                          <div class="ti-result-card" :class="[result.error ? 'has-error' : '', threatLevelClass(threatLevel(result.source, result.data))]">
-                            <!-- Card header -->
-                            <div class="flex items-center gap-2 mb-2" style="justify-content:space-between;">
-                              <div class="flex items-center gap-2">
-                                <span style="font-weight:700;font-size:13px;" x-text="result.name"></span>
-                                <a :href="result.url" target="_blank" rel="noopener noreferrer"
-                                   class="badge badge-gray text-xs" style="text-decoration:none;">↗</a>
-                              </div>
-                              <div class="flex items-center gap-1">
-                                <span class="ti-threat-badge" :class="threatLevelClass(threatLevel(result.source, result.data))"
-                                      x-text="threatLevelLabel(threatLevel(result.source, result.data))"></span>
-                                <button class="btn btn-sm btn-secondary" style="padding:2px 6px;font-size:10px;"
-                                        @click="toggleCard(result.source)"
-                                        x-text="isCollapsed(result.source) ? '▶ Expand' : '▼ Collapse'"></button>
-                              </div>
-                            </div>
-
-                            <!-- Human-readable fields (collapsible) -->
-                            <template x-if="!isCollapsed(result.source)">
-                              <div>
-                                <template x-if="!result.data || result.data.not_found">
-                                  <div class="text-muted text-sm" style="padding:8px 0;">No data found</div>
-                                </template>
-                                <template x-if="result.data && !result.data.not_found">
-                                  <div class="ti-fields-grid">
-                                    <template x-for="field in humanFields(result.source, result.data)" :key="field.label">
-                                      <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
-                                        <div class="ti-field-label" x-text="field.label"></div>
-                                        <div class="ti-field-value">
-                                          <template x-if="field.isLink">
-                                            <a :href="field.value" target="_blank" rel="noopener noreferrer"
-                                               class="text-green" style="word-break:break-all;" x-text="field.value"></a>
-                                          </template>
-                                          <template x-if="!field.isLink">
-                                            <span style="word-break:break-word;" x-text="field.value"></span>
-                                          </template>
-                                        </div>
-                                      </div>
-                                    </template>
-                                  </div>
-                                </template>
-                                <button class="btn btn-sm btn-secondary" style="margin-top:8px;" @click="openRawData(result)">
-                                  🔍 Raw JSON
-                                </button>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-                      </div>
-                    </div>
-                  </template>
-
-                  <!-- Active integrations with charts -->
-                  <template x-if="stats && stats.service_stats && stats.service_stats.length > 0">
-                    <div class="card mb-4">
-                      <div class="card-title">📊 Activity — Last 7 Days</div>
-                      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:8px;">
-                        <template x-for="svc in stats.service_stats" :key="svc.service_type">
-                          <div class="ti-integration-card">
-                            <div class="flex items-center justify-between mb-1">
-                              <span style="font-weight:600;font-size:12px;" x-text="svc.name"></span>
-                              <span class="badge badge-green text-xs" x-text="svc.total + ' lookups'"></span>
-                            </div>
-                            <div class="ti-chart-container">
-                              <canvas :id="'ti-chart-' + svc.service_type"></canvas>
-                            </div>
-                          </div>
-                        </template>
-                      </div>
-                    </div>
-                  </template>
-
-                  <!-- Lookup history table -->
-                  <div class="card">
-                    <div class="card-title flex items-center justify-between">
-                      <span>📋 IoC Lookup History</span>
-                      <span x-show="historyLoading" class="spinner" style="width:14px;height:14px;"></span>
-                    </div>
-
-                    <!-- History filters -->
-                    <div class="flex gap-2 flex-wrap mb-3">
-                      <select class="form-select" x-model="historyFilter.type" style="width:130px;" title="Filter by IoC type">
-                        <option value="">All types</option>
-                        <template x-for="tp in iocTypes" :key="tp">
-                          <option :value="tp" x-text="tp"></option>
-                        </template>
-                      </select>
-                      <select class="form-select" x-model="historyFilter.source" style="width:160px;" title="Filter by source">
-                        <option value="">All sources</option>
-                        <template x-for="src in availableHistorySources()" :key="src">
-                          <option :value="src" x-text="src"></option>
-                        </template>
-                      </select>
-                      <input class="form-input" type="date" x-model="historyFilter.date" style="width:150px;" title="Filter by date" />
-                      <button class="btn btn-sm btn-secondary" x-show="historyFilter.type || historyFilter.source || historyFilter.date"
-                              @click="clearHistoryFilters()">✕ Clear</button>
-                    </div>
-
-                    <template x-if="filteredHistory().length === 0">
-                      <div class="text-center text-muted" style="padding:30px;">
-                        <div style="font-size:28px;margin-bottom:8px;">📭</div>
-                        <div>No lookup history yet</div>
-                      </div>
-                    </template>
-
-                    <template x-if="filteredHistory().length > 0">
-                      <div style="overflow-x:auto;">
-                        <table class="table">
-                          <thead>
-                            <tr>
-                              <th>IoC</th><th>Type</th><th>Sources</th><th>Date</th><th></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <template x-for="entry in filteredHistory()" :key="entry.id">
-                              <tr>
-                                <td class="font-mono text-green" x-text="entry.ioc_value" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;"></td>
-                                <td><span class="badge badge-gray" x-text="entry.ioc_type"></span></td>
-                                <td>
-                                  <div class="flex gap-1 flex-wrap">
-                                    <template x-for="src in entry.sources" :key="src">
-                                      <span class="badge badge-gray text-xs" x-text="src"></span>
-                                    </template>
-                                  </div>
-                                </td>
-                                <td class="text-muted text-sm" x-text="formatDate(entry.created_at)"></td>
-                                <td>
-                                  <button class="btn btn-sm btn-secondary" @click="openHistoryDetail(entry)">Details</button>
-                                </td>
-                              </tr>
-                            </template>
-                          </tbody>
-                        </table>
-                      </div>
-                    </template>
+                  <!-- Result tabs -->
+                  <div class="ti-tabs">
+                    <button class="ti-tab" :class="activeResultTab === 'summary' ? 'active' : ''"
+                            @click="activeResultTab = 'summary'">
+                      📋 Summary
+                    </button>
+                    <button class="ti-tab" :class="activeResultTab === 'detections' ? 'active' : ''"
+                            @click="activeResultTab = 'detections'"
+                            x-show="hasDetections">
+                      🛡️ Detections
+                      <span class="ti-tab-badge" x-text="normalized.detections.length"></span>
+                    </button>
+                    <button class="ti-tab" :class="activeResultTab === 'enrichment' ? 'active' : ''"
+                            @click="activeResultTab = 'enrichment'"
+                            x-show="hasEnrichment">
+                      🌐 Enrichment
+                    </button>
+                    <button class="ti-tab" :class="activeResultTab === 'artifacts' ? 'active' : ''"
+                            @click="activeResultTab = 'artifacts'"
+                            x-show="hasArtifacts">
+                      🔗 Artifacts
+                    </button>
+                    <button class="ti-tab" :class="activeResultTab === 'timeline' ? 'active' : ''"
+                            @click="activeResultTab = 'timeline'"
+                            x-show="hasTimeline">
+                      📅 Timeline
+                      <span class="ti-tab-badge" x-text="normalized.timeline.length"></span>
+                    </button>
+                    <button class="ti-tab" :class="activeResultTab === 'sources' ? 'active' : ''"
+                            @click="activeResultTab = 'sources'">
+                      🔍 Sources
+                      <span class="ti-tab-badge" x-text="perSource.length"></span>
+                    </button>
                   </div>
 
-                </div>
-              </template>
-
-              <!-- Raw data modal -->
-              <template x-if="rawDataModal.show">
-                <div class="modal-overlay" @click.self="closeRawData()">
-                  <div class="modal" style="max-width:700px;max-height:80vh;display:flex;flex-direction:column;">
-                    <div class="modal-header">
-                      <span x-text="'Raw data — ' + rawDataModal.source"></span>
-                      <button class="btn btn-sm btn-secondary" @click="closeRawData()">✕</button>
-                    </div>
-                    <div style="overflow:auto;flex:1;padding:16px;">
-                      <pre class="code-block" style="font-size:11px;white-space:pre-wrap;word-break:break-all;"
-                           x-text="prettyJson(rawDataModal.data)"></pre>
-                    </div>
-                  </div>
-                </div>
-              </template>
-
-              <!-- History detail modal -->
-              <template x-if="historyDetailModal.show && historyDetailModal.entry">
-                <div class="modal-overlay" @click.self="closeHistoryDetail()">
-                  <div class="modal" style="max-width:800px;max-height:85vh;display:flex;flex-direction:column;">
-                    <div class="modal-header">
-                      <span>Lookup details — <span class="font-mono text-green" x-text="historyDetailModal.entry.ioc_value"></span></span>
-                      <button class="btn btn-sm btn-secondary" @click="closeHistoryDetail()">✕</button>
-                    </div>
-                    <div style="overflow:auto;flex:1;padding:16px;">
-                      <div class="flex gap-2 mb-4 flex-wrap">
-                        <span class="badge badge-gray" x-text="'Type: ' + historyDetailModal.entry.ioc_type"></span>
-                        <span class="badge badge-gray" x-text="'Date: ' + formatDate(historyDetailModal.entry.created_at)"></span>
-                        <template x-for="src in (historyDetailModal.entry.sources || [])" :key="src">
-                          <span class="badge badge-green" x-text="src"></span>
-                        </template>
-                      </div>
-                      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
-                        <template x-for="[svc, data] in Object.entries(historyDetailModal.entry.results || {})" :key="svc">
-                          <div class="ti-result-card" :class="threatLevelClass(threatLevel(svc, data))">
-                            <div class="flex items-center gap-2 mb-2" style="justify-content:space-between;">
-                              <span style="font-weight:700;font-size:13px;" x-text="svc"></span>
-                              <span class="ti-threat-badge" :class="threatLevelClass(threatLevel(svc, data))"
-                                    x-text="threatLevelLabel(threatLevel(svc, data))"></span>
+                  <!-- Tab: Summary (per-source overview) -->
+                  <div x-show="activeResultTab === 'summary'">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">
+                      <template x-for="src in perSource" :key="src.source">
+                        <div class="ti-result-card"
+                             :class="src.error ? 'ti-threat-error has-error' : src.free ? 'ti-threat-none' : 'ti-threat-none'">
+                          <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                              <span style="font-weight:700;font-size:12px;" x-text="src.name"></span>
+                              <template x-if="src.free">
+                                <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(0,180,216,0.15);color:#38bdf8;font-weight:700;">FREE</span>
+                              </template>
+                              <a :href="src.url" target="_blank" rel="noopener noreferrer"
+                                 class="badge badge-gray text-xs" style="text-decoration:none;">↗</a>
                             </div>
+                            <button class="btn btn-sm btn-secondary" style="font-size:10px;padding:2px 7px;"
+                                    @click="openRaw(src.name, src.data)">Raw JSON</button>
+                          </div>
+                          <template x-if="!src.error && src.data && !src.data.not_found">
                             <div class="ti-fields-grid">
-                              <template x-for="field in humanFields(svc, data)" :key="field.label">
+                              <template x-for="field in humanFields(src.source, src.data)" :key="field.label">
                                 <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
                                   <div class="ti-field-label" x-text="field.label"></div>
                                   <div class="ti-field-value">
@@ -2421,21 +2349,416 @@
                                          class="text-green" style="word-break:break-all;" x-text="field.value"></a>
                                     </template>
                                     <template x-if="!field.isLink">
-                                      <span style="word-break:break-word;" x-text="field.value"></span>
+                                      <span x-text="field.value"></span>
                                     </template>
                                   </div>
                                 </div>
                               </template>
                             </div>
-                            <details style="margin-top:8px;">
-                              <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);">Raw JSON</summary>
-                              <pre style="font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-secondary);margin-top:4px;"
-                                   x-text="prettyJson(data)"></pre>
-                            </details>
+                          </template>
+                          <template x-if="src.error">
+                            <div style="font-size:11px;color:#f87171;" x-text="src.error"></div>
+                          </template>
+                          <template x-if="!src.error && (!src.data || src.data.not_found)">
+                            <div style="font-size:11px;color:var(--text-muted);">No data found for this IOC</div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Tab: Detections -->
+                  <div x-show="activeResultTab === 'detections'">
+                    <div class="card">
+                      <div class="card-title" x-text="'🛡️ ' + normalized.detections.length + ' Detection(s)'"></div>
+                      <template x-if="normalized.detections.length === 0">
+                        <div class="text-center text-muted" style="padding:20px;">No detections from any source</div>
+                      </template>
+                      <template x-for="det in normalized.detections" :key="det.engine + det.result">
+                        <div class="ti-detection-row">
+                          <div class="ti-detection-engine" x-text="det.engine"></div>
+                          <div class="ti-detection-result" x-text="det.result"></div>
+                          <span class="ti-detection-cat" x-text="det.category"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Tab: Enrichment -->
+                  <div x-show="activeResultTab === 'enrichment'">
+                    <!-- Geo / Network -->
+                    <template x-if="normalized.enrichment.geo && Object.values(normalized.enrichment.geo).some(v => v)">
+                      <div class="card mb-3">
+                        <div class="card-title">🌍 Geographic & Network Info</div>
+                        <div class="ti-geo-grid">
+                          <template x-for="f in geoFields(normalized.enrichment.geo)" :key="f.label">
+                            <div class="ti-geo-item">
+                              <div class="ti-geo-label" x-text="f.label"></div>
+                              <div class="ti-geo-value" x-text="f.value"></div>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                    <!-- Open ports / services -->
+                    <template x-if="normalized.enrichment.network && normalized.enrichment.network.ports && normalized.enrichment.network.ports.length > 0">
+                      <div class="card mb-3">
+                        <div class="card-title">🔌 Network Services</div>
+                        <div class="flex gap-1 flex-wrap mt-2">
+                          <template x-for="port in normalized.enrichment.network.ports" :key="port">
+                            <span class="badge badge-gray font-mono text-xs" x-text="port"></span>
+                          </template>
+                        </div>
+                        <template x-if="normalized.enrichment.network.os">
+                          <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">
+                            <span style="color:var(--text-muted);">OS: </span>
+                            <span x-text="normalized.enrichment.network.os"></span>
                           </div>
                         </template>
                       </div>
+                    </template>
+                    <!-- DNS -->
+                    <template x-if="normalized.enrichment.dns && Object.keys(normalized.enrichment.dns).length > 0">
+                      <div class="card mb-3">
+                        <div class="card-title">🔗 DNS Records</div>
+                        <template x-for="[rtype, records] in Object.entries(normalized.enrichment.dns)" :key="rtype">
+                          <div style="margin-bottom:8px;">
+                            <span class="badge badge-gray text-xs" x-text="rtype"></span>
+                            <template x-if="Array.isArray(records)">
+                              <div class="flex gap-1 flex-wrap mt-1">
+                                <template x-for="rec in records.slice(0,10)" :key="JSON.stringify(rec)">
+                                  <span class="badge badge-gray font-mono text-xs"
+                                        x-text="typeof rec === 'object' ? (rec.value || JSON.stringify(rec)) : rec"></span>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <template x-if="!hasEnrichment">
+                      <div class="card text-center text-muted" style="padding:30px;">
+                        No enrichment data available for this IOC type
+                      </div>
+                    </template>
+                  </div>
+
+                  <!-- Tab: Artifacts -->
+                  <div x-show="activeResultTab === 'artifacts'">
+                    <div class="card">
+                      <div class="card-title">🔗 Related Indicators / Artifacts</div>
+                      <template x-if="!hasArtifacts">
+                        <div class="text-center text-muted" style="padding:20px;">No related artifacts found</div>
+                      </template>
+                      <template x-if="hasArtifacts">
+                        <div>
+                          <template x-if="normalized.artifacts.ips && normalized.artifacts.ips.length > 0">
+                            <div style="margin-bottom:14px;">
+                              <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">IP Addresses</div>
+                              <div class="flex gap-1 flex-wrap">
+                                <template x-for="ip in normalized.artifacts.ips" :key="ip">
+                                  <span class="ti-artifact-chip"
+                                        @click="iocForm.ioc = ip; iocForm.ioc_type = 'ip'; runSearch();"
+                                        title="Click to search this IP">🖥 <span x-text="ip"></span></span>
+                                </template>
+                              </div>
+                            </div>
+                          </template>
+                          <template x-if="normalized.artifacts.domains && normalized.artifacts.domains.length > 0">
+                            <div style="margin-bottom:14px;">
+                              <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">Domains</div>
+                              <div class="flex gap-1 flex-wrap">
+                                <template x-for="d in normalized.artifacts.domains" :key="d">
+                                  <span class="ti-artifact-chip"
+                                        @click="iocForm.ioc = d; iocForm.ioc_type = 'domain'; runSearch();"
+                                        title="Click to search this domain">🌐 <span x-text="d"></span></span>
+                                </template>
+                              </div>
+                            </div>
+                          </template>
+                          <template x-if="normalized.artifacts.urls && normalized.artifacts.urls.length > 0">
+                            <div style="margin-bottom:14px;">
+                              <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">URLs</div>
+                              <div class="flex gap-1 flex-wrap">
+                                <template x-for="u in normalized.artifacts.urls" :key="u">
+                                  <span class="ti-artifact-chip"
+                                        @click="iocForm.ioc = u; iocForm.ioc_type = 'url'; runSearch();"
+                                        title="Click to search this URL">🔗 <span x-text="u.length > 60 ? u.slice(0,60) + '…' : u"></span></span>
+                                </template>
+                              </div>
+                            </div>
+                          </template>
+                          <template x-if="normalized.artifacts.hashes && normalized.artifacts.hashes.length > 0">
+                            <div style="margin-bottom:14px;">
+                              <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">File Hashes</div>
+                              <div class="flex gap-1 flex-wrap">
+                                <template x-for="h in normalized.artifacts.hashes" :key="h">
+                                  <span class="ti-artifact-chip"
+                                        @click="iocForm.ioc = h; iocForm.ioc_type = 'hash'; runSearch();"
+                                        title="Click to search this hash">🔑 <span x-text="h"></span></span>
+                                </template>
+                              </div>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
                     </div>
+                  </div>
+
+                  <!-- Tab: Timeline -->
+                  <div x-show="activeResultTab === 'timeline'">
+                    <div class="card">
+                      <div class="card-title">📅 Event Timeline</div>
+                      <template x-if="!hasTimeline">
+                        <div class="text-center text-muted" style="padding:20px;">No timeline events available</div>
+                      </template>
+                      <template x-if="hasTimeline">
+                        <div class="ti-timeline mt-2">
+                          <template x-for="ev in normalized.timeline.slice().sort((a,b) => new Date(b.date) - new Date(a.date))" :key="ev.date + ev.event">
+                            <div class="ti-timeline-event">
+                              <div class="ti-timeline-date" x-text="formatDate(ev.date)"></div>
+                              <div class="ti-timeline-text" x-text="ev.event"></div>
+                              <div class="ti-timeline-source" x-text="'via ' + ev.source"></div>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Tab: Sources (per-source detail) -->
+                  <div x-show="activeResultTab === 'sources'">
+                    <template x-for="src in perSource" :key="src.source">
+                      <div class="ti-result-card mb-3"
+                           :class="src.error ? 'ti-threat-error has-error' : ''">
+                        <!-- Source header -->
+                        <div class="flex items-center justify-between mb-2">
+                          <div class="flex items-center gap-2">
+                            <span style="font-weight:700;font-size:13px;" x-text="src.name"></span>
+                            <template x-if="src.free">
+                              <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(0,180,216,0.15);color:#38bdf8;font-weight:700;">FREE</span>
+                            </template>
+                            <a :href="src.url" target="_blank" rel="noopener noreferrer"
+                               class="badge badge-gray text-xs" style="text-decoration:none;">↗</a>
+                          </div>
+                          <button class="btn btn-sm btn-secondary" style="font-size:10px;padding:2px 7px;"
+                                  @click="openRaw(src.name, src.data)">🔍 Raw JSON</button>
+                        </div>
+                        <!-- Human-readable fields -->
+                        <template x-if="!src.error && src.data && !src.data.not_found">
+                          <div class="ti-fields-grid">
+                            <template x-for="field in humanFields(src.source, src.data)" :key="field.label">
+                              <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
+                                <div class="ti-field-label" x-text="field.label"></div>
+                                <div class="ti-field-value">
+                                  <template x-if="field.isLink">
+                                    <a :href="field.value" target="_blank" rel="noopener noreferrer"
+                                       class="text-green" style="word-break:break-all;" x-text="field.value"></a>
+                                  </template>
+                                  <template x-if="!field.isLink">
+                                    <span style="word-break:break-word;" x-text="field.value"></span>
+                                  </template>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="src.error">
+                          <div style="font-size:12px;color:#f87171;padding:4px 0;" x-text="src.error"></div>
+                        </template>
+                        <template x-if="!src.error && (!src.data || src.data.not_found)">
+                          <div style="font-size:12px;color:var(--text-muted);">No data found for this IOC</div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+
+                </div>
+              </template>
+              <!-- No result yet placeholder -->
+              <template x-if="!searchResult && !lookupLoading">
+                <div class="card text-center" style="padding:40px 24px;margin-bottom:16px;">
+                  <div style="font-size:40px;margin-bottom:10px;">🔍</div>
+                  <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:4px;">Enter an IOC to get started</div>
+                  <div style="font-size:13px;color:var(--text-muted);">Supported: IP address, domain, hash (MD5/SHA1/SHA256), URL, email</div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:8px;">
+                    Free connectors (no API key needed): URLhaus, PhishTank, MalwareBazaar, ThreatFox
+                  </div>
+                </div>
+              </template>
+
+              <!-- ── ACTIVITY CHARTS (per integration) ──────── -->
+              <template x-if="stats && stats.service_stats && stats.service_stats.length > 0">
+                <div class="card mb-4">
+                  <div class="card-title">📊 Source Activity — Last 7 Days</div>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:8px;">
+                    <template x-for="svc in stats.service_stats" :key="svc.service_type">
+                      <div class="ti-integration-card">
+                        <div class="flex items-center justify-between mb-1">
+                          <span style="font-weight:600;font-size:12px;" x-text="svc.name"></span>
+                          <span class="badge badge-green text-xs" x-text="svc.total + ' lookups'"></span>
+                        </div>
+                        <div class="ti-chart-container">
+                          <canvas :id="'ti-chart-' + svc.service_type"></canvas>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+
+              <!-- ── LOOKUP HISTORY TABLE ───────────────────── -->
+              <div class="card">
+                <div class="card-title flex items-center justify-between">
+                  <span>📋 Recent Searches</span>
+                  <span x-show="historyLoading" class="spinner" style="width:14px;height:14px;"></span>
+                </div>
+                <!-- Filters -->
+                <div class="flex gap-2 flex-wrap mb-3">
+                  <select class="form-select" x-model="historyFilter.type" style="width:130px;">
+                    <option value="">All types</option>
+                    <template x-for="tp in iocTypes" :key="tp">
+                      <option :value="tp" x-text="tp"></option>
+                    </template>
+                  </select>
+                  <select class="form-select" x-model="historyFilter.source" style="width:160px;">
+                    <option value="">All sources</option>
+                    <template x-for="src in availableHistorySources()" :key="src">
+                      <option :value="src" x-text="src"></option>
+                    </template>
+                  </select>
+                  <input class="form-input" type="date" x-model="historyFilter.date" style="width:150px;" />
+                  <button class="btn btn-sm btn-secondary"
+                          x-show="historyFilter.type || historyFilter.source || historyFilter.date"
+                          @click="clearHistoryFilters()">✕ Clear</button>
+                </div>
+                <template x-if="filteredHistory().length === 0">
+                  <div class="text-center text-muted" style="padding:30px;">
+                    <div style="font-size:24px;margin-bottom:8px;">📭</div>
+                    <div>No search history yet</div>
+                  </div>
+                </template>
+                <template x-if="filteredHistory().length > 0">
+                  <div style="overflow-x:auto;">
+                    <table class="table">
+                      <thead>
+                        <tr>
+                          <th>IOC</th><th>Type</th><th>Sources</th><th>Date</th><th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-for="entry in filteredHistory()" :key="entry.id">
+                          <tr>
+                            <td class="font-mono text-green" x-text="entry.ioc_value"
+                                style="max-width:220px;overflow:hidden;text-overflow:ellipsis;"></td>
+                            <td><span class="badge badge-gray" x-text="entry.ioc_type"></span></td>
+                            <td>
+                              <div class="flex gap-1 flex-wrap">
+                                <template x-for="src in (entry.sources || []).slice(0,5)" :key="src">
+                                  <span class="badge badge-gray text-xs" x-text="src"></span>
+                                </template>
+                                <span x-show="(entry.sources || []).length > 5" class="badge badge-gray text-xs"
+                                      x-text="'+' + ((entry.sources || []).length - 5)"></span>
+                              </div>
+                            </td>
+                            <td class="text-muted text-sm" x-text="formatDate(entry.created_at)"></td>
+                            <td>
+                              <button class="btn btn-sm btn-secondary" @click="openHistoryDetail(entry)">Details</button>
+                            </td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+              </div>
+
+              <!-- ── RAW DATA MODAL ─────────────────────────── -->
+              <template x-if="rawModal.show">
+                <div class="modal-overlay" @click.self="closeRaw()">
+                  <div class="modal" style="max-width:700px;max-height:80vh;display:flex;flex-direction:column;">
+                    <div class="modal-header">
+                      <span x-text="'Raw JSON — ' + rawModal.source"></span>
+                      <button class="btn btn-sm btn-secondary" @click="closeRaw()">✕</button>
+                    </div>
+                    <div style="overflow:auto;flex:1;padding:16px;">
+                      <pre class="code-block" style="font-size:11px;white-space:pre-wrap;word-break:break-all;"
+                           x-text="prettyJson(rawModal.data)"></pre>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- ── HISTORY DETAIL MODAL ──────────────────── -->
+              <template x-if="historyDetailModal.show">
+                <div class="modal-overlay" @click.self="closeHistoryDetail()">
+                  <div class="modal" style="max-width:860px;max-height:88vh;display:flex;flex-direction:column;">
+                    <div class="modal-header">
+                      <template x-if="historyDetailModal.entry">
+                        <span>Lookup — <span class="font-mono text-green" x-text="historyDetailModal.entry.ioc_value"></span></span>
+                      </template>
+                      <template x-if="!historyDetailModal.entry">
+                        <span>Loading…</span>
+                      </template>
+                      <button class="btn btn-sm btn-secondary" @click="closeHistoryDetail()">✕</button>
+                    </div>
+                    <template x-if="historyDetailLoading">
+                      <div class="text-center" style="padding:40px;">
+                        <span class="spinner" style="width:20px;height:20px;"></span>
+                      </div>
+                    </template>
+                    <template x-if="historyDetailModal.entry">
+                      <div style="overflow:auto;flex:1;padding:16px;">
+                        <!-- Meta row -->
+                        <div class="flex gap-2 mb-3 flex-wrap">
+                          <span class="badge badge-gray" x-text="'Type: ' + historyDetailModal.entry.ioc_type"></span>
+                          <span class="badge badge-gray" x-text="'Date: ' + formatDate(historyDetailModal.entry.created_at)"></span>
+                          <template x-for="src in (historyDetailModal.entry.sources || [])" :key="src">
+                            <span class="badge badge-green" x-text="src"></span>
+                          </template>
+                        </div>
+                        <!-- Normalized summary from history -->
+                        <template x-if="historyDetailModal.entry.normalized">
+                          <div class="ti-summary-card mb-3"
+                               :class="'verdict-' + historyDetailModal.entry.normalized.verdict">
+                            <div class="flex items-center gap-3 flex-wrap mb-2">
+                              <span x-text="verdictIcon(historyDetailModal.entry.normalized.verdict)" style="font-size:28px;"></span>
+                              <span class="ti-sev-badge" :class="severityClass(historyDetailModal.entry.normalized.severity)"
+                                    x-text="severityLabel(historyDetailModal.entry.normalized.severity)"></span>
+                              <span style="font-size:12px;color:var(--text-secondary);" x-text="historyDetailModal.entry.normalized.summary"></span>
+                            </div>
+                            <div class="flex gap-1 flex-wrap">
+                              <template x-for="tag in (historyDetailModal.entry.normalized.tags || []).slice(0,8)" :key="tag">
+                                <span class="badge badge-gray text-xs" x-text="tag"></span>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+                        <!-- Per-source cards -->
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">
+                          <template x-for="[svc, data] in Object.entries(historyDetailModal.entry.results || {})" :key="svc">
+                            <div class="ti-result-card">
+                              <div class="flex items-center justify-between mb-2">
+                                <span style="font-weight:700;font-size:12px;" x-text="svc"></span>
+                              </div>
+                              <div class="ti-fields-grid">
+                                <template x-for="field in humanFields(svc, data)" :key="field.label">
+                                  <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
+                                    <div class="ti-field-label" x-text="field.label"></div>
+                                    <div class="ti-field-value" x-text="field.value"></div>
+                                  </div>
+                                </template>
+                              </div>
+                              <details style="margin-top:6px;">
+                                <summary style="cursor:pointer;font-size:11px;color:var(--text-muted);">Raw JSON</summary>
+                                <pre style="font-size:10px;white-space:pre-wrap;word-break:break-all;color:var(--text-secondary);margin-top:4px;"
+                                     x-text="prettyJson(data)"></pre>
+                              </details>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </template>
