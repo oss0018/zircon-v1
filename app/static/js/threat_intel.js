@@ -254,9 +254,10 @@ document.addEventListener('alpine:init', () => {
       if (data.result === 'phishing') return 'high';
       if (data.urls && Array.isArray(data.urls) && data.urls.length > 0) return 'medium';
       // HIBP — breach found
-      if (Array.isArray(data) && data.length > 0 && source === 'hibp') {
+      if (source === 'hibp' && Array.isArray(data)) {
         if (data.length >= 5) return 'high';
-        return 'medium';
+        if (data.length > 0) return 'medium';
+        return 'none';
       }
       return 'none';
     },
@@ -339,7 +340,7 @@ document.addEventListener('alpine:init', () => {
     _fieldsShodan(d) {
       const fields = [];
       if (d.ip_str || d.ip) fields.push({ label: 'IP address', value: d.ip_str || d.ip, highlight: '' });
-      if (d.org) fields.push({ label: 'Organisation', value: d.org, highlight: '' });
+      if (d.org) fields.push({ label: 'Organization', value: d.org, highlight: '' });
       if (d.isp) fields.push({ label: 'ISP', value: d.isp, highlight: '' });
       if (d.country_name) fields.push({ label: 'Country', value: `${d.country_name}${d.city ? ', ' + d.city : ''}`, highlight: '' });
       if (d.os) fields.push({ label: 'OS', value: d.os, highlight: '' });

@@ -213,7 +213,9 @@ async def read_file(
     encodings_to_try = []
     if detected_enc and detected_enc.lower() not in ('utf-8', 'ascii'):
         encodings_to_try.append(detected_enc)
-    encodings_to_try.extend(['utf-8', 'cp1251', 'cp1252', 'latin-1'])
+    for _enc in ['utf-8', 'cp1251', 'cp1252', 'latin-1']:
+        if _enc not in encodings_to_try:
+            encodings_to_try.append(_enc)
 
     for enc in encodings_to_try:
         try:
