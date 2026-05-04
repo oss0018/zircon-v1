@@ -659,9 +659,9 @@ document.addEventListener('alpine:init', () => {
 
     formatDate(dateStr) {
       if (!dateStr) return '—';
-      const d = new Date(dateStr);
-      if (isNaN(d)) return dateStr;
-      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const parsedDate = new Date(dateStr);
+      if (isNaN(parsedDate)) return dateStr;
+      return parsedDate.toLocaleDateString() + ' ' + parsedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     },
 
     prettyJson(data) {

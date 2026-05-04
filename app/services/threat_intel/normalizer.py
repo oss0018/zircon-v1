@@ -88,8 +88,6 @@ def normalize(ioc: str, ioc_type: str, source_results: dict[str, Any]) -> dict:
     result["verdict"], result["severity"], result["confidence"] = _aggregate_verdict(per_source_verdicts)
 
     # De-duplicate lists
-    for key in result["tags"]:
-        pass  # already strings
     result["tags"] = _dedup(result["tags"])
     for k in result["artifacts"]:
         result["artifacts"][k] = _dedup(result["artifacts"][k])

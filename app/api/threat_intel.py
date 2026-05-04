@@ -75,17 +75,17 @@ async def list_ti_integrations(
         )
     )
     integrations = result.scalars().all()
-    configured = [
-        {
+    configured = []
+    for i in integrations:
+        meta = TI_SERVICE_META.get(i.service_type, {})
+        configured.append({
             "id": i.id,
             "service_type": i.service_type,
-            "name": TI_SERVICE_META.get(i.service_type, {}).get("name", i.name),
+            "name": meta.get("name", i.name),
             "is_active": i.is_active,
-            "url": TI_SERVICE_META.get(i.service_type, {}).get("url", ""),
+            "url": meta.get("url", ""),
             "free": i.service_type in TI_FREE_SOURCES,
-        }
-        for i in integrations
-    ]
+        })
     # Always include free sources (no key required) if not already in the list
     configured_types = {i["service_type"] for i in configured}
     for svc in sorted(TI_FREE_SOURCES):
@@ -105,14 +105,15 @@ async def list_ti_integrations(
 @router.get("/free-sources")
 async def list_free_sources(_: User = Depends(get_current_user)):
     """Return list of free (no API key required) TI sources."""
-    return [
-        {
+    result = []
+    for svc in sorted(TI_FREE_SOURCES):
+        meta = TI_SERVICE_META.get(svc, {})
+        result.append({
             "service_type": svc,
-            "name": TI_SERVICE_META.get(svc, {}).get("name", svc),
-            "url": TI_SERVICE_META.get(svc, {}).get("url", ""),
-        }
-        for svc in sorted(TI_FREE_SOURCES)
-    ]
+            "name": meta.get("name", svc),
+            "url": meta.get("url", ""),
+        })
+    return result
 
 
 @router.post("/lookup")
