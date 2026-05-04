@@ -112,6 +112,7 @@ document.addEventListener('alpine:init', () => {
     page: 'dashboard',
     lang: localStorage.getItem('zircon_lang') || 'en',
     csintOpen: false,
+    automationOpen: false,
 
     // Stats
     stats: null,
@@ -171,6 +172,9 @@ document.addEventListener('alpine:init', () => {
       this.page = p;
       if (p === 'deep-search' || p === 'threat-intel') {
         this.csintOpen = true;
+      }
+      if (p === 'watchlist' || p === 'monitoring' || p === 'brands') {
+        this.automationOpen = true;
       }
     },
 

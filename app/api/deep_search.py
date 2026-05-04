@@ -199,14 +199,31 @@ async def read_file(
         content = "\n".join(lines)
         encoding_used = enc
 
+    # Try chardet first for automatic encoding detection (handles ANSI/cp1251/cp1252)
+    detected_enc = None
     try:
-        _read_preview('utf-8')
+        import chardet
+        with open(abs_path, 'rb') as f:
+            raw_sample = f.read(min(size, 32768))
+        det = chardet.detect(raw_sample)
+        detected_enc = det.get('encoding') or None
     except Exception:
+        pass
+
+    encodings_to_try = []
+    if detected_enc and detected_enc.lower() not in ('utf-8', 'ascii'):
+        encodings_to_try.append(detected_enc)
+    encodings_to_try.extend(['utf-8', 'cp1251', 'cp1252', 'latin-1'])
+
+    for enc in encodings_to_try:
         try:
             lines_total = 0
-            _read_preview('latin-1')
+            _read_preview(enc)
+            break
         except Exception:
-            raise HTTPException(status_code=500, detail="Cannot read file")
+            continue
+    else:
+        raise HTTPException(status_code=500, detail="Cannot read file")
 
     return {
         "path": path,

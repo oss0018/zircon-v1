@@ -143,13 +143,24 @@ def extract_text_streaming(file_path: str, max_bytes: int = MAX_INDEX_BYTES) -> 
     chunks = []
     chunk_size = max_bytes // 3
 
+    # Auto-detect encoding from the first 32 KB
+    enc = "utf-8"
+    try:
+        import chardet
+        with open(file_path, "rb") as f:
+            sample = f.read(min(32768, chunk_size))
+        det = chardet.detect(sample)
+        enc = det.get("encoding") or "utf-8"
+    except Exception:
+        pass
+
     try:
         with open(file_path, "rb") as f:
-            chunks.append(f.read(chunk_size).decode("utf-8", errors="replace"))
+            chunks.append(f.read(chunk_size).decode(enc, errors="replace"))
             f.seek(file_size // 2)
-            chunks.append(f.read(chunk_size).decode("utf-8", errors="replace"))
+            chunks.append(f.read(chunk_size).decode(enc, errors="replace"))
             f.seek(max(0, file_size - chunk_size))
-            chunks.append(f.read(chunk_size).decode("utf-8", errors="replace"))
+            chunks.append(f.read(chunk_size).decode(enc, errors="replace"))
     except Exception as e:
         return f"[large file read error: {e}]"
 
