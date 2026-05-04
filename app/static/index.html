@@ -2338,6 +2338,18 @@
                             <button class="btn btn-sm btn-secondary" style="font-size:10px;padding:2px 7px;"
                                     @click="openRaw(src.name, src.data)">Raw JSON</button>
                           </div>
+                          <!-- OTX header pills: indicator type, pulse count, reputation -->
+                          <template x-if="src.source === 'alienvault' && src.data && src.data.pulse_info">
+                            <div class="flex gap-2 flex-wrap mb-2" style="font-size:10px;">
+                              <span x-show="src.data.type_title" class="badge badge-gray"
+                                    x-text="src.data.type_title"></span>
+                              <span :class="src.data.pulse_info.count > 0 ? 'badge badge-red' : 'badge badge-gray'"
+                                    x-text="src.data.pulse_info.count + ' pulse(s)'"></span>
+                              <span x-show="src.data.reputation !== undefined"
+                                    :class="src.data.reputation < 0 ? 'badge badge-red' : 'badge badge-gray'"
+                                    x-text="'Rep: ' + src.data.reputation"></span>
+                            </div>
+                          </template>
                           <template x-if="!src.error && src.data && !src.data.not_found">
                             <div class="ti-fields-grid">
                               <template x-for="field in humanFields(src.source, src.data)" :key="field.label">
@@ -2361,6 +2373,56 @@
                           </template>
                           <template x-if="!src.error && (!src.data || src.data.not_found)">
                             <div style="font-size:11px;color:var(--text-muted);">No data found for this IOC</div>
+                          </template>
+                          <!-- OTX rich pulse list (Summary card) -->
+                          <template x-if="src.source === 'alienvault' && src.data && src.data.pulse_info && src.data.pulse_info.pulses && src.data.pulse_info.pulses.length > 0">
+                            <div style="margin-top:10px;">
+                              <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;">
+                                Pulses (<span x-text="src.data.pulse_info.pulses.length"></span>)
+                              </div>
+                              <template x-for="(pulse, idx) in src.data.pulse_info.pulses.slice(0,20)" :key="pulse.id || idx">
+                                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:5px;padding:6px 8px;margin-bottom:5px;">
+                                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                                    <span style="font-size:11px;font-weight:700;color:var(--text-primary);" x-text="pulse.name"></span>
+                                    <span x-show="pulse.tlp"
+                                          :style="`font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700;background:${pulse.tlp==='red'?'rgba(255,80,80,0.15)':pulse.tlp==='amber'?'rgba(255,200,0,0.15)':pulse.tlp==='green'?'rgba(0,200,80,0.15)':'rgba(148,163,184,0.15)'};color:${pulse.tlp==='red'?'#f87171':pulse.tlp==='amber'?'#fbbf24':pulse.tlp==='green'?'#34d399':'#94a3b8'};`"
+                                          x-text="'TLP:' + (pulse.tlp || 'WHITE').toUpperCase()"></span>
+                                    <span x-show="pulse.author && pulse.author.username" style="font-size:10px;color:var(--text-muted);" x-text="'@ ' + pulse.author.username"></span>
+                                  </div>
+                                  <template x-if="pulse.tags && pulse.tags.length > 0">
+                                    <div class="flex gap-1 flex-wrap mb-1">
+                                      <template x-for="tag in pulse.tags.slice(0,8)" :key="tag">
+                                        <span class="badge badge-gray text-xs" x-text="tag"></span>
+                                      </template>
+                                    </div>
+                                  </template>
+                                  <div class="flex gap-3 flex-wrap" style="font-size:10px;color:var(--text-muted);">
+                                    <span x-show="pulse.created" x-text="'Created: ' + formatDate(pulse.created)"></span>
+                                    <span x-show="pulse.modified" x-text="'Modified: ' + formatDate(pulse.modified)"></span>
+                                    <template x-if="pulse.references && pulse.references.length > 0">
+                                      <span>
+                                        <a :href="pulse.references[0]" target="_blank" rel="noopener noreferrer"
+                                           class="text-green" style="text-decoration:none;">↗ Reference</a>
+                                        <span x-show="pulse.references.length > 1" x-text="' +' + (pulse.references.length - 1) + ' more'"></span>
+                                      </span>
+                                    </template>
+                                  </div>
+                                </div>
+                              </template>
+                              <div x-show="src.data.pulse_info.pulses.length > 20"
+                                   style="font-size:11px;color:var(--text-muted);margin-top:4px;"
+                                   x-text="'+' + (src.data.pulse_info.pulses.length - 20) + ' more pulses (see Raw JSON)'"></div>
+                            </div>
+                          </template>
+                          <!-- OTX Validation section (Summary card) -->
+                          <template x-if="src.source === 'alienvault' && src.data && src.data.validation && src.data.validation.length > 0">
+                            <div style="margin-top:8px;">
+                              <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Validation</div>
+                              <template x-for="v in src.data.validation" :key="JSON.stringify(v)">
+                                <div style="font-size:11px;color:var(--text-secondary);padding:2px 0;"
+                                     x-text="(v.source || '') + (v.message ? ': ' + v.message : '') + (v.name ? ' (' + v.name + ')' : '')"></div>
+                              </template>
+                            </div>
                           </template>
                         </div>
                       </template>
@@ -2544,6 +2606,18 @@
                           <button class="btn btn-sm btn-secondary" style="font-size:10px;padding:2px 7px;"
                                   @click="openRaw(src.name, src.data)">🔍 Raw JSON</button>
                         </div>
+                        <!-- OTX header pills: indicator type, pulse count, reputation -->
+                        <template x-if="src.source === 'alienvault' && src.data && src.data.pulse_info">
+                          <div class="flex gap-2 flex-wrap mb-2" style="font-size:10px;">
+                            <span x-show="src.data.type_title" class="badge badge-gray"
+                                  x-text="src.data.type_title"></span>
+                            <span :class="src.data.pulse_info.count > 0 ? 'badge badge-red' : 'badge badge-gray'"
+                                  x-text="src.data.pulse_info.count + ' pulse(s)'"></span>
+                            <span x-show="src.data.reputation !== undefined"
+                                  :class="src.data.reputation < 0 ? 'badge badge-red' : 'badge badge-gray'"
+                                  x-text="'Rep: ' + src.data.reputation"></span>
+                          </div>
+                        </template>
                         <!-- Human-readable fields -->
                         <template x-if="!src.error && src.data && !src.data.not_found">
                           <div class="ti-fields-grid">
@@ -2568,6 +2642,56 @@
                         </template>
                         <template x-if="!src.error && (!src.data || src.data.not_found)">
                           <div style="font-size:12px;color:var(--text-muted);">No data found for this IOC</div>
+                        </template>
+                        <!-- OTX rich pulse list (Sources tab) -->
+                        <template x-if="src.source === 'alienvault' && src.data && src.data.pulse_info && src.data.pulse_info.pulses && src.data.pulse_info.pulses.length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Pulses (<span x-text="src.data.pulse_info.pulses.length"></span>)
+                            </div>
+                            <template x-for="(pulse, idx) in src.data.pulse_info.pulses.slice(0,20)" :key="pulse.id || idx">
+                              <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:6px;padding:8px 10px;margin-bottom:6px;">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                  <span style="font-size:12px;font-weight:700;color:var(--text-primary);" x-text="pulse.name"></span>
+                                  <span x-show="pulse.tlp"
+                                        :style="`font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700;background:${pulse.tlp==='red'?'rgba(255,80,80,0.15)':pulse.tlp==='amber'?'rgba(255,200,0,0.15)':pulse.tlp==='green'?'rgba(0,200,80,0.15)':'rgba(148,163,184,0.15)'};color:${pulse.tlp==='red'?'#f87171':pulse.tlp==='amber'?'#fbbf24':pulse.tlp==='green'?'#34d399':'#94a3b8'};`"
+                                        x-text="'TLP:' + (pulse.tlp || 'WHITE').toUpperCase()"></span>
+                                  <span x-show="pulse.author && pulse.author.username" style="font-size:10px;color:var(--text-muted);" x-text="'@ ' + pulse.author.username"></span>
+                                </div>
+                                <template x-if="pulse.tags && pulse.tags.length > 0">
+                                  <div class="flex gap-1 flex-wrap mb-1">
+                                    <template x-for="tag in pulse.tags.slice(0,8)" :key="tag">
+                                      <span class="badge badge-gray text-xs" x-text="tag"></span>
+                                    </template>
+                                  </div>
+                                </template>
+                                <div class="flex gap-3 flex-wrap" style="font-size:10px;color:var(--text-muted);">
+                                  <span x-show="pulse.created" x-text="'Created: ' + formatDate(pulse.created)"></span>
+                                  <span x-show="pulse.modified" x-text="'Modified: ' + formatDate(pulse.modified)"></span>
+                                  <template x-if="pulse.references && pulse.references.length > 0">
+                                    <span>
+                                      <a :href="pulse.references[0]" target="_blank" rel="noopener noreferrer"
+                                         class="text-green" style="text-decoration:none;">↗ Reference</a>
+                                      <span x-show="pulse.references.length > 1" x-text="' +' + (pulse.references.length - 1) + ' more'"></span>
+                                    </span>
+                                  </template>
+                                </div>
+                              </div>
+                            </template>
+                            <div x-show="src.data.pulse_info.pulses.length > 20"
+                                 style="font-size:11px;color:var(--text-muted);margin-top:4px;"
+                                 x-text="'+' + (src.data.pulse_info.pulses.length - 20) + ' more pulses (see Raw JSON)'"></div>
+                          </div>
+                        </template>
+                        <!-- OTX Validation section (Sources tab) -->
+                        <template x-if="src.source === 'alienvault' && src.data && src.data.validation && src.data.validation.length > 0">
+                          <div style="margin-top:10px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Validation</div>
+                            <template x-for="v in src.data.validation" :key="JSON.stringify(v)">
+                              <div style="font-size:11px;color:var(--text-secondary);padding:2px 0;"
+                                   x-text="(v.source || '') + (v.message ? ': ' + v.message : '') + (v.name ? ' (' + v.name + ')' : '')"></div>
+                            </template>
+                          </div>
                         </template>
                       </div>
                     </template>
