@@ -422,7 +422,7 @@ document.addEventListener('alpine:init', () => {
         fields.push({ label: `Pulse ${i + 1}`, value: val, highlight: p.tlp === 'red' ? 'danger' : p.tlp === 'amber' ? 'warning' : '' });
       });
       if (pulseCount > 3)
-        fields.push({ label: '', value: `+${pulseCount - 3} more pulses (see Raw JSON)`, highlight: '' });
+        fields.push({ label: '', value: `+${pulseCount - 3} more pulses (see pulse list below or Raw JSON)`, highlight: '' });
 
       return fields.length ? fields : this._fieldsGeneric(d);
     },

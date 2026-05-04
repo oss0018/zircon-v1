@@ -417,7 +417,7 @@ def _adapt_alienvault(raw: dict, ioc_type: str) -> dict:
             "modified": p.get("modified", ""),
             "tags": p.get("tags") or [],
             "references": p.get("references") or [],
-            "author": author_name,
+            "author": {"username": author_name},
             "malware_families": [
                 m.get("display_name", "") for m in (p.get("malware_families") or []) if isinstance(m, dict)
             ],
