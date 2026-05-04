@@ -2338,7 +2338,7 @@
                             <button class="btn btn-sm btn-secondary" style="font-size:10px;padding:2px 7px;"
                                     @click="openRaw(src.name, src.data)">Raw JSON</button>
                           </div>
-                          <!-- OTX header pills: indicator type, pulse count, reputation -->
+                          <!-- OTX header pills: indicator type, pulse count, reputation, whois/alexa links -->
                           <template x-if="src.source === 'alienvault' && src.data && src.data.pulse_info">
                             <div class="flex gap-2 flex-wrap mb-2" style="font-size:10px;">
                               <span x-show="src.data.type_title" class="badge badge-gray"
@@ -2348,6 +2348,11 @@
                               <span x-show="src.data.reputation !== undefined"
                                     :class="src.data.reputation < 0 ? 'badge badge-red' : 'badge badge-gray'"
                                     x-text="'Rep: ' + src.data.reputation"></span>
+                              <template x-for="link in otxLinks(src.data)" :key="link.label">
+                                <a :href="link.url" target="_blank" rel="noopener noreferrer"
+                                   class="badge badge-gray" style="text-decoration:none;"
+                                   x-text="'↗ ' + link.label"></a>
+                              </template>
                             </div>
                           </template>
                           <template x-if="!src.error && src.data && !src.data.not_found">
@@ -2606,7 +2611,7 @@
                           <button class="btn btn-sm btn-secondary" style="font-size:10px;padding:2px 7px;"
                                   @click="openRaw(src.name, src.data)">🔍 Raw JSON</button>
                         </div>
-                        <!-- OTX header pills: indicator type, pulse count, reputation -->
+                        <!-- OTX header pills: indicator type, pulse count, reputation, whois/alexa links -->
                         <template x-if="src.source === 'alienvault' && src.data && src.data.pulse_info">
                           <div class="flex gap-2 flex-wrap mb-2" style="font-size:10px;">
                             <span x-show="src.data.type_title" class="badge badge-gray"
@@ -2616,6 +2621,11 @@
                             <span x-show="src.data.reputation !== undefined"
                                   :class="src.data.reputation < 0 ? 'badge badge-red' : 'badge badge-gray'"
                                   x-text="'Rep: ' + src.data.reputation"></span>
+                            <template x-for="link in otxLinks(src.data)" :key="link.label">
+                              <a :href="link.url" target="_blank" rel="noopener noreferrer"
+                                 class="badge badge-gray" style="text-decoration:none;"
+                                 x-text="'↗ ' + link.label"></a>
+                            </template>
                           </div>
                         </template>
                         <!-- Human-readable fields -->
@@ -2690,6 +2700,272 @@
                             <template x-for="v in src.data.validation" :key="JSON.stringify(v)">
                               <div style="font-size:11px;color:var(--text-secondary);padding:2px 0;"
                                    x-text="(v.source || '') + (v.message ? ': ' + v.message : '') + (v.name ? ' (' + v.name + ')' : '')"></div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- VirusTotal: engine detections list -->
+                        <template x-if="src.source === 'virustotal' && vtEngineDetections(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Engine Detections (<span x-text="vtEngineDetections(src.data).length"></span>)
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+                              <template x-for="det in vtEngineDetections(src.data)" :key="det.engine">
+                                <div style="background:rgba(255,80,80,0.07);border:1px solid rgba(255,80,80,0.15);border-radius:4px;padding:4px 7px;font-size:10px;">
+                                  <span style="font-weight:600;color:var(--text-primary);" x-text="det.engine"></span>
+                                  <span style="color:#f87171;margin-left:4px;" x-text="det.result"></span>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+
+                        <!-- AbuseIPDB: recent abuse reports -->
+                        <template x-if="src.source === 'abuseipdb' && abuseRecentReports(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Recent Abuse Reports (<span x-text="abuseRecentReports(src.data).length"></span>)
+                            </div>
+                            <template x-for="(rep, idx) in abuseRecentReports(src.data)" :key="idx">
+                              <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:5px 8px;margin-bottom:4px;font-size:11px;">
+                                <div class="flex items-center justify-between mb-1">
+                                  <span style="color:var(--text-muted);" x-text="formatDate(rep.date)"></span>
+                                  <span x-show="rep.country" class="badge badge-gray text-xs" x-text="rep.country"></span>
+                                </div>
+                                <div x-show="rep.comment" style="color:var(--text-secondary);" x-text="rep.comment"></div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- Shodan: services/banners list -->
+                        <template x-if="src.source === 'shodan' && shodanServices(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Services / Banners (<span x-text="shodanServices(src.data).length"></span>)
+                            </div>
+                            <template x-for="(svc, idx) in shodanServices(src.data)" :key="idx">
+                              <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:5px 8px;margin-bottom:4px;font-size:11px;">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                  <span class="badge badge-gray font-mono text-xs" x-text="svc.port + '/' + (svc.proto || 'tcp')"></span>
+                                  <span x-show="svc.product" style="font-weight:600;color:var(--text-primary);" x-text="svc.product"></span>
+                                  <span x-show="svc.version" style="color:var(--text-muted);" x-text="'v' + svc.version"></span>
+                                </div>
+                                <div x-show="svc.banner" style="color:var(--text-muted);margin-top:2px;font-family:monospace;" x-text="svc.banner"></div>
+                              </div>
+                            </template>
+                            <!-- Shodan CVE list -->
+                            <template x-if="src.data.vulns && Object.keys(src.data.vulns).length > 0">
+                              <div style="margin-top:8px;">
+                                <div style="font-size:11px;font-weight:700;color:#f87171;margin-bottom:4px;">
+                                  CVEs (<span x-text="Object.keys(src.data.vulns).length"></span>)
+                                </div>
+                                <div class="flex gap-1 flex-wrap">
+                                  <template x-for="cve in Object.keys(src.data.vulns).slice(0,20)" :key="cve">
+                                    <span class="badge" style="background:rgba(255,80,80,0.12);color:#f87171;font-size:10px;" x-text="cve"></span>
+                                  </template>
+                                  <span x-show="Object.keys(src.data.vulns).length > 20"
+                                        style="font-size:10px;color:var(--text-muted);"
+                                        x-text="'+' + (Object.keys(src.data.vulns).length - 20) + ' more'"></span>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- URLhaus: malicious URLs list -->
+                        <template x-if="src.source === 'urlhaus' && urlhausUrlList(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Malicious URLs (<span x-text="urlhausUrlList(src.data).length"></span>)
+                            </div>
+                            <template x-for="(u, idx) in urlhausUrlList(src.data)" :key="idx">
+                              <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,80,80,0.15);border-radius:4px;padding:5px 8px;margin-bottom:4px;font-size:11px;">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                  <span :class="u.status === 'online' ? 'badge badge-red' : 'badge badge-gray'" x-text="u.status || 'unknown'"></span>
+                                  <span x-show="u.threat" class="badge badge-gray text-xs" x-text="u.threat"></span>
+                                  <span x-show="u.date_added" style="color:var(--text-muted);font-size:10px;" x-text="u.date_added"></span>
+                                </div>
+                                <div style="font-family:monospace;color:var(--text-secondary);word-break:break-all;" x-text="u.url"></div>
+                                <template x-if="u.tags && u.tags.length > 0">
+                                  <div class="flex gap-1 flex-wrap mt-1">
+                                    <template x-for="tag in u.tags.slice(0,5)" :key="tag">
+                                      <span class="badge badge-gray text-xs" x-text="tag"></span>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- URLscan: scan results list -->
+                        <template x-if="src.source === 'urlscan' && urlscanResultList(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Scan Results (<span x-text="urlscanResultList(src.data).length"></span>)
+                            </div>
+                            <template x-for="(scan, idx) in urlscanResultList(src.data)" :key="idx">
+                              <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:5px 8px;margin-bottom:4px;font-size:11px;">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                  <span :class="scan.malicious ? 'badge badge-red' : 'badge badge-green'" x-text="scan.malicious ? 'Malicious' : 'Clean'"></span>
+                                  <span x-show="scan.score" class="badge badge-gray text-xs" x-text="'Score: ' + scan.score"></span>
+                                  <span x-show="scan.country" class="badge badge-gray text-xs" x-text="scan.country"></span>
+                                  <span x-show="scan.time" style="color:var(--text-muted);font-size:10px;" x-text="formatDate(scan.time)"></span>
+                                </div>
+                                <div x-show="scan.url" style="font-family:monospace;color:var(--text-secondary);word-break:break-all;font-size:10px;" x-text="scan.url"></div>
+                                <a x-show="scan.report" :href="scan.report" target="_blank" rel="noopener noreferrer"
+                                   class="text-green" style="font-size:10px;text-decoration:none;">↗ View full report</a>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- MalwareBazaar: sample details -->
+                        <template x-if="src.source === 'malwarebazaar' && mbSampleDetails(src.data)">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Sample Details</div>
+                            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,80,80,0.15);border-radius:5px;padding:8px 10px;">
+                              <template x-if="mbSampleDetails(src.data).sha256">
+                                <div style="font-size:10px;margin-bottom:3px;">
+                                  <span style="color:var(--text-muted);">SHA256: </span>
+                                  <span class="font-mono" style="color:var(--text-secondary);word-break:break-all;" x-text="mbSampleDetails(src.data).sha256"></span>
+                                </div>
+                              </template>
+                              <div class="flex gap-2 flex-wrap" style="font-size:11px;margin-top:4px;">
+                                <template x-if="mbSampleDetails(src.data).file_name">
+                                  <span><span style="color:var(--text-muted);">File: </span><span x-text="mbSampleDetails(src.data).file_name"></span></span>
+                                </template>
+                                <template x-if="mbSampleDetails(src.data).file_type">
+                                  <span><span style="color:var(--text-muted);">Type: </span><span x-text="mbSampleDetails(src.data).file_type"></span></span>
+                                </template>
+                                <template x-if="mbSampleDetails(src.data).signature">
+                                  <span style="color:#f87171;font-weight:600;" x-text="mbSampleDetails(src.data).signature"></span>
+                                </template>
+                              </div>
+                              <template x-if="mbSampleDetails(src.data).tags && mbSampleDetails(src.data).tags.length > 0">
+                                <div class="flex gap-1 flex-wrap mt-2">
+                                  <template x-for="tag in mbSampleDetails(src.data).tags.slice(0,8)" :key="tag">
+                                    <span class="badge badge-gray text-xs" x-text="tag"></span>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+
+                        <!-- ThreatFox: IOC entries list -->
+                        <template x-if="src.source === 'threatfox' && tfIocEntries(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              IOC Entries (<span x-text="tfIocEntries(src.data).length"></span>)
+                            </div>
+                            <template x-for="(ioc, idx) in tfIocEntries(src.data)" :key="idx">
+                              <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,80,80,0.15);border-radius:4px;padding:6px 8px;margin-bottom:5px;font-size:11px;">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                  <span style="font-weight:700;color:#f87171;" x-text="ioc.malware"></span>
+                                  <span x-show="ioc.ioc_type" class="badge badge-gray text-xs" x-text="ioc.ioc_type"></span>
+                                  <span x-show="ioc.confidence !== ''" :class="ioc.confidence >= 75 ? 'badge badge-red' : 'badge badge-gray'" x-text="ioc.confidence + '% confidence'"></span>
+                                </div>
+                                <div x-show="ioc.ioc" style="font-family:monospace;color:var(--text-secondary);font-size:10px;word-break:break-all;" x-text="ioc.ioc"></div>
+                                <div class="flex gap-3 flex-wrap mt-1" style="font-size:10px;color:var(--text-muted);">
+                                  <span x-show="ioc.first_seen" x-text="'First: ' + ioc.first_seen"></span>
+                                  <span x-show="ioc.last_seen" x-text="'Last: ' + ioc.last_seen"></span>
+                                </div>
+                                <template x-if="ioc.tags && ioc.tags.length > 0">
+                                  <div class="flex gap-1 flex-wrap mt-1">
+                                    <template x-for="tag in ioc.tags.slice(0,6)" :key="tag">
+                                      <span class="badge badge-gray text-xs" x-text="tag"></span>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- HIBP: breach list -->
+                        <template x-if="src.source === 'hibp' && hibpBreachList(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Data Breaches (<span x-text="hibpBreachList(src.data).length"></span>)
+                            </div>
+                            <template x-for="(breach, idx) in hibpBreachList(src.data)" :key="breach.name">
+                              <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,200,0,0.15);border-radius:4px;padding:5px 8px;margin-bottom:4px;font-size:11px;">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                  <span style="font-weight:700;color:var(--text-primary);" x-text="breach.name"></span>
+                                  <span x-show="breach.date" class="badge badge-gray text-xs" x-text="breach.date"></span>
+                                  <span x-show="breach.count" class="badge badge-gray text-xs" x-text="(breach.count || 0).toLocaleString() + ' records'"></span>
+                                </div>
+                                <template x-if="breach.data_classes && breach.data_classes.length > 0">
+                                  <div class="flex gap-1 flex-wrap">
+                                    <template x-for="dc in breach.data_classes" :key="dc">
+                                      <span class="badge badge-gray text-xs" x-text="dc"></span>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- IntelX: records list -->
+                        <template x-if="src.source === 'intelx' && intelxRecordList(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Records (<span x-text="intelxRecordList(src.data).length"></span>
+                              <span x-show="src.data.total > intelxRecordList(src.data).length"
+                                    x-text="' of ' + src.data.total + ' total'"></span>)
+                            </div>
+                            <template x-for="(rec, idx) in intelxRecordList(src.data)" :key="idx">
+                              <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:5px 8px;margin-bottom:3px;font-size:11px;">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                  <span x-show="rec.type !== ''" class="badge badge-gray text-xs" x-text="'Type ' + rec.type"></span>
+                                  <span x-show="rec.bucket" class="badge badge-gray text-xs" x-text="rec.bucket"></span>
+                                  <span x-show="rec.date" style="color:var(--text-muted);font-size:10px;" x-text="formatDate(rec.date)"></span>
+                                  <span x-show="rec.size" style="color:var(--text-muted);font-size:10px;" x-text="rec.size + ' bytes'"></span>
+                                </div>
+                                <div x-show="rec.name" style="color:var(--text-secondary);margin-top:2px;font-size:10px;" x-text="rec.name"></div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+
+                        <!-- Censys: services list -->
+                        <template x-if="src.source === 'censys' && censysServiceList(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+                              Services (<span x-text="censysServiceList(src.data).length"></span>)
+                            </div>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:4px;">
+                              <template x-for="(svc, idx) in censysServiceList(src.data)" :key="idx">
+                                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:4px;padding:5px 8px;font-size:11px;">
+                                  <div class="flex items-center gap-1">
+                                    <span class="badge badge-gray font-mono text-xs" x-text="svc.port"></span>
+                                    <span x-show="svc.proto" style="color:var(--text-muted);font-size:10px;" x-text="svc.proto"></span>
+                                  </div>
+                                  <div x-show="svc.name && svc.name !== 'UNKNOWN'" style="font-weight:600;color:var(--text-primary);margin-top:2px;" x-text="svc.name"></div>
+                                  <div x-show="svc.software" style="color:var(--text-muted);font-size:10px;" x-text="svc.software"></div>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+
+                        <!-- SecurityTrails: DNS breakdown -->
+                        <template x-if="src.source === 'securitytrails' && stDnsBreakdown(src.data).length > 0">
+                          <div style="margin-top:12px;">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">DNS Records</div>
+                            <template x-for="section in stDnsBreakdown(src.data)" :key="section.type">
+                              <div style="margin-bottom:8px;">
+                                <span class="badge badge-gray text-xs" x-text="section.type"></span>
+                                <div class="flex gap-1 flex-wrap mt-1">
+                                  <template x-for="val in section.values" :key="val">
+                                    <span class="badge badge-gray font-mono text-xs" style="word-break:break-all;" x-text="val.length > 60 ? val.slice(0,60) + '…' : val"></span>
+                                  </template>
+                                </div>
+                              </div>
                             </template>
                           </div>
                         </template>

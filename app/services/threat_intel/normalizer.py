@@ -73,9 +73,10 @@ def normalize(ioc: str, ioc_type: str, source_results: dict[str, Any]) -> dict:
 
     for source, raw in source_results.items():
         result["raw"][source] = raw
-        if not raw or not isinstance(raw, dict):
+        if raw is None:
             continue
-        if raw.get("error") or raw.get("not_found"):
+        # Skip error/not_found responses (dict only)
+        if isinstance(raw, dict) and (raw.get("error") or raw.get("not_found")):
             continue
 
         adapter = _ADAPTERS.get(source)
@@ -289,6 +290,32 @@ def _adapt_virustotal(raw: dict, ioc_type: str) -> dict:
     if attrs.get("url"):
         partial["artifacts"]["urls"].append(attrs["url"])
 
+    # Timeline: first submission and last analysis dates
+    first_sub = attrs.get("first_submission_date")
+    if first_sub:
+        import datetime as _dt
+        try:
+            ts = _dt.datetime.fromtimestamp(int(first_sub), tz=_dt.timezone.utc).isoformat()
+        except Exception:
+            ts = str(first_sub)
+        partial["timeline"].append({
+            "date": ts,
+            "event": f"First submitted to VirusTotal",
+            "source": "VirusTotal",
+        })
+    last_an = attrs.get("last_analysis_date")
+    if last_an:
+        import datetime as _dt
+        try:
+            ts = _dt.datetime.fromtimestamp(int(last_an), tz=_dt.timezone.utc).isoformat()
+        except Exception:
+            ts = str(last_an)
+        partial["timeline"].append({
+            "date": ts,
+            "event": "Last analysis on VirusTotal",
+            "source": "VirusTotal",
+        })
+
     return partial
 
 
@@ -337,6 +364,15 @@ def _adapt_abuseipdb(raw: dict, ioc_type: str) -> dict:
         for rep in (data.get("reports") or [])[:5]:
             for cat in (rep.get("categories") or []):
                 partial["tags"].append(str(cat))
+
+    # Timeline: last reported date
+    last_reported = data.get("lastReportedAt", data.get("last_reported_at", ""))
+    if last_reported:
+        partial["timeline"].append({
+            "date": last_reported,
+            "event": f"Last abuse report on AbuseIPDB (score: {score}%)",
+            "source": "AbuseIPDB",
+        })
 
     return partial
 
@@ -558,6 +594,15 @@ def _adapt_shodan(raw: dict, ioc_type: str) -> dict:
     for hostname in (raw.get("hostnames") or [])[:10]:
         partial["artifacts"]["domains"].append(hostname)
 
+    # Timeline: last update
+    last_update = raw.get("last_update") or raw.get("last_seen", "")
+    if last_update:
+        partial["timeline"].append({
+            "date": last_update,
+            "event": f"Shodan last scanned {'(' + str(len(ports)) + ' ports open)' if ports else ''}".strip(),
+            "source": "Shodan",
+        })
+
     return partial
 
 
@@ -599,6 +644,12 @@ def _adapt_malwarebazaar(raw: dict, ioc_type: str) -> dict:
                     partial["timeline"].append({
                         "date": sample["first_seen"],
                         "event": f"Malware first seen: {sample.get('signature', '?')}",
+                        "source": "MalwareBazaar",
+                    })
+                if sample.get("last_seen"):
+                    partial["timeline"].append({
+                        "date": sample["last_seen"],
+                        "event": f"Malware last seen: {sample.get('signature', '?')}",
                         "source": "MalwareBazaar",
                     })
     elif query_status == "hash_not_found":
@@ -643,6 +694,15 @@ def _adapt_threatfox(raw: dict, ioc_type: str) -> dict:
                         "event": f"IOC added to ThreatFox: {ioc_entry.get('malware', '?')}",
                         "source": "ThreatFox",
                     })
+                if ioc_entry.get("last_seen"):
+                    partial["timeline"].append({
+                        "date": ioc_entry["last_seen"],
+                        "event": f"IOC last seen on ThreatFox: {ioc_entry.get('malware', '?')}",
+                        "source": "ThreatFox",
+                    })
+                conf = ioc_entry.get("confidence_level")
+                if conf is not None and int(conf) > partial["confidence"]:
+                    partial["confidence"] = int(conf)
     elif query_status == "no_result":
         partial["verdict"] = "clean"
 
@@ -671,6 +731,11 @@ def _adapt_urlscan(raw: dict, ioc_type: str) -> dict:
         if overall.get("malicious"):
             partial["verdict"] = "malicious"
             partial["confidence"] = min(overall.get("score", 50), 100)
+            partial["detections"].append({
+                "engine": "urlscan.io",
+                "result": "Malicious website",
+                "category": "malicious_url",
+            })
         elif overall.get("score", 0) > 0:
             partial["verdict"] = "suspicious"
             partial["confidence"] = overall.get("score", 30)
@@ -685,6 +750,17 @@ def _adapt_urlscan(raw: dict, ioc_type: str) -> dict:
         }
         if first.get("result"):
             partial["artifacts"]["urls"].append(first["result"])
+        # Timeline: scan dates
+        for scan in results[:5]:
+            task = scan.get("task") or {}
+            scan_time = task.get("time", "")
+            scan_url = (scan.get("page") or {}).get("url", "")
+            if scan_time:
+                partial["timeline"].append({
+                    "date": scan_time,
+                    "event": f"urlscan.io scan: {scan_url[:80] if scan_url else 'URL scanned'}",
+                    "source": "urlscan.io",
+                })
 
     return partial
 
@@ -724,6 +800,149 @@ def _adapt_hibp(raw: dict, ioc_type: str) -> dict:
     return partial
 
 
+def _adapt_censys(raw: dict, ioc_type: str) -> dict:
+    partial: dict = {
+        "sources_hit": [],
+        "verdict": "unknown",
+        "confidence": 0,
+        "tags": [],
+        "detections": [],
+        "enrichment": {"geo": {}, "whois": {}, "dns": {}, "network": {}},
+        "artifacts": {"ips": [], "domains": [], "urls": [], "hashes": [], "emails": []},
+        "timeline": [],
+    }
+    # Censys v2 wraps IP data under "result"
+    data = raw.get("result", raw)
+    if not data or not isinstance(data, dict):
+        return partial
+
+    if data.get("ip"):
+        partial["sources_hit"].append("Censys")
+
+    loc = data.get("location") or {}
+    partial["enrichment"]["geo"] = {
+        "country": loc.get("country", ""),
+        "country_code": loc.get("country_code", ""),
+        "city": loc.get("city", ""),
+        "continent": loc.get("continent", ""),
+    }
+
+    asn_info = data.get("autonomous_system") or {}
+    if asn_info:
+        partial["enrichment"]["geo"]["asn"] = f"AS{asn_info.get('asn', '')}".strip()
+        partial["enrichment"]["geo"]["org"] = asn_info.get("description", "") or asn_info.get("name", "")
+
+    services = data.get("services") or []
+    ports: list = []
+    for svc in services:
+        if not isinstance(svc, dict):
+            continue
+        port = svc.get("port")
+        if port:
+            ports.append(port)
+        svc_name = svc.get("service_name", "")
+        proto = svc.get("transport_protocol", "")
+        if svc_name and svc_name not in ("UNKNOWN", ""):
+            partial["tags"].append(f"{svc_name}/{proto}" if proto else svc_name)
+        # Extract domain names from TLS certificates
+        tls = svc.get("tls") or {}
+        cert_data = (tls.get("certificates") or {}).get("leaf_data") or {}
+        for name in (cert_data.get("names") or [])[:5]:
+            if name:
+                partial["artifacts"]["domains"].append(name)
+
+    partial["enrichment"]["network"] = {"ports": ports[:30]}
+    return partial
+
+
+def _adapt_securitytrails(raw: dict, ioc_type: str) -> dict:
+    partial: dict = {
+        "sources_hit": [],
+        "verdict": "unknown",
+        "confidence": 0,
+        "tags": [],
+        "detections": [],
+        "enrichment": {"geo": {}, "whois": {}, "dns": {}, "network": {}},
+        "artifacts": {"ips": [], "domains": [], "urls": [], "hashes": [], "emails": []},
+        "timeline": [],
+    }
+    dns = raw.get("current_dns") or {}
+    if not dns:
+        return partial
+
+    partial["sources_hit"].append("SecurityTrails")
+    dns_records: dict = {}
+
+    # A records → IP artifacts
+    a_vals = (dns.get("a") or {}).get("values") or []
+    ips = [v.get("ip", "") if isinstance(v, dict) else str(v) for v in a_vals[:10]]
+    ips = [ip for ip in ips if ip]
+    if ips:
+        partial["artifacts"]["ips"].extend(ips)
+        dns_records["A"] = ips
+
+    # MX records → domain artifacts
+    mx_vals = (dns.get("mx") or {}).get("values") or []
+    mxs = [v.get("hostname", "") if isinstance(v, dict) else str(v) for v in mx_vals[:5]]
+    mxs = [m for m in mxs if m]
+    if mxs:
+        partial["artifacts"]["domains"].extend(mxs)
+        dns_records["MX"] = mxs
+
+    # NS records → domain artifacts
+    ns_vals = (dns.get("ns") or {}).get("values") or []
+    nss = [v.get("nameserver", "") if isinstance(v, dict) else str(v) for v in ns_vals[:5]]
+    nss = [n for n in nss if n]
+    if nss:
+        partial["artifacts"]["domains"].extend(nss)
+        dns_records["NS"] = nss
+
+    # TXT records
+    txt_vals = (dns.get("txt") or {}).get("values") or []
+    txts = [v.get("value", "") if isinstance(v, dict) else str(v) for v in txt_vals[:5]]
+    txts = [t for t in txts if t]
+    if txts:
+        dns_records["TXT"] = txts
+
+    if dns_records:
+        partial["enrichment"]["dns"] = dns_records
+
+    return partial
+
+
+def _adapt_intelx(raw: dict, ioc_type: str) -> dict:
+    partial: dict = {
+        "sources_hit": [],
+        "verdict": "unknown",
+        "confidence": 0,
+        "tags": [],
+        "detections": [],
+        "enrichment": {"geo": {}, "whois": {}, "dns": {}, "network": {}},
+        "artifacts": {"ips": [], "domains": [], "urls": [], "hashes": [], "emails": []},
+        "timeline": [],
+    }
+    records = raw.get("records") or []
+    total = raw.get("total") or len(records)
+
+    if total > 0 or records:
+        partial["sources_hit"].append("Intelligence X")
+        partial["verdict"] = "suspicious"
+        partial["confidence"] = min(int(total) * 10, 80)
+        for rec in (records if isinstance(records, list) else [])[:10]:
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("date"):
+                partial["timeline"].append({
+                    "date": rec["date"],
+                    "event": f"IntelX record type {rec.get('type', 'data')}",
+                    "source": "Intelligence X",
+                })
+            if rec.get("name"):
+                partial["tags"].append(str(rec["name"])[:80])
+
+    return partial
+
+
 def _adapt_generic(raw: dict, ioc_type: str) -> dict:
     return {
         "sources_hit": [],
@@ -752,6 +971,9 @@ _ADAPTERS = {
     "threatfox": _adapt_threatfox,
     "urlscan": _adapt_urlscan,
     "hibp": _adapt_hibp,
+    "censys": _adapt_censys,
+    "securitytrails": _adapt_securitytrails,
+    "intelx": _adapt_intelx,
 }
 
 
