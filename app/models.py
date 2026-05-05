@@ -124,6 +124,16 @@ class Brand(Base):
     alerts = relationship("BrandAlert", back_populates="brand")
 
 
+class OwnedDomain(Base):
+    """Domains owned/trusted by the organisation (used to mark alerts as trusted)."""
+    __tablename__ = "owned_domains"
+    id = Column(Integer, primary_key=True)
+    domain = Column(String(512), unique=True, nullable=False)
+    match_subdomains = Column(Boolean, default=True)
+    notes = Column(String(512), default="")
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class BrandAlert(Base):
     __tablename__ = "brand_alerts"
     id = Column(Integer, primary_key=True)

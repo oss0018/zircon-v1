@@ -21,6 +21,10 @@ document.addEventListener('alpine:init', () => {
     filterQuery: '',
     // Limit selector for generate-check
     generateLimit: 1000,
+    // Owned / Trusted domains
+    ownedDomains: [],
+    showOwnedDomains: false,
+    newOwnedDomain: { domain: '', notes: '', match_subdomains: true },
     newBrand: {
       name: '',
       url: '',
@@ -32,6 +36,7 @@ document.addEventListener('alpine:init', () => {
     async init() {
       await this.loadBrands();
       await this.loadAllAlerts();
+      await this.loadOwnedDomains();
     },
 
     async loadBrands() {
@@ -424,6 +429,55 @@ document.addEventListener('alpine:init', () => {
       if (alert.ssl_valid === true) return '✅';
       if (alert.ssl_valid === false) return '❌';
       return '—';
+    },
+
+    // ── Owned / Trusted Domains ───────────────────────────────────────────────
+
+    async loadOwnedDomains() {
+      try {
+        this.ownedDomains = await api.get('/brands/owned-domains');
+      } catch (e) {
+        console.warn('Could not load owned domains:', e.message);
+      }
+    },
+
+    async addOwnedDomain() {
+      const domain = this.newOwnedDomain.domain.trim();
+      if (!domain) return;
+      try {
+        await api.post('/brands/owned-domains', { ...this.newOwnedDomain, domain });
+        this.newOwnedDomain = { domain: '', notes: '', match_subdomains: true };
+        await this.loadOwnedDomains();
+        showToast(`${domain} added to owned domains`, 'success');
+      } catch (e) {
+        showToast(e.message || 'Failed to add domain', 'error');
+      }
+    },
+
+    async deleteOwnedDomain(id) {
+      try {
+        await api.delete(`/brands/owned-domains/${id}`);
+        await this.loadOwnedDomains();
+        showToast('Owned domain removed', 'success');
+      } catch (e) {
+        showToast(e.message || 'Failed to remove domain', 'error');
+      }
+    },
+
+    /**
+     * Check if a given domain matches any owned domain (including subdomain matching).
+     * @param {string} domain
+     * @returns {boolean}
+     */
+    isTrustedDomain(domain) {
+      if (!domain || !this.ownedDomains.length) return false;
+      const d = domain.toLowerCase();
+      return this.ownedDomains.some(od => {
+        const owned = od.domain.toLowerCase();
+        if (d === owned) return true;
+        if (od.match_subdomains && d.endsWith('.' + owned)) return true;
+        return false;
+      });
     },
   }));
 });
