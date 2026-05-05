@@ -436,7 +436,9 @@ document.addEventListener('alpine:init', () => {
     async loadOwnedDomains() {
       try {
         this.ownedDomains = await api.get('/brands/owned-domains');
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Could not load owned domains:', e.message);
+      }
     },
 
     async addOwnedDomain() {
@@ -454,12 +456,7 @@ document.addEventListener('alpine:init', () => {
 
     async deleteOwnedDomain(id) {
       try {
-        const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
-        const resp = await fetch(`/api/v1/brands/owned-domains/${id}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        if (!resp.ok && resp.status !== 204) throw new Error(`Server error ${resp.status}`);
+        await api.delete(`/brands/owned-domains/${id}`);
         await this.loadOwnedDomains();
         showToast('Owned domain removed', 'success');
       } catch (e) {
