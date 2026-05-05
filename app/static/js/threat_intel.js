@@ -354,12 +354,32 @@ document.addEventListener('alpine:init', () => {
       const attrs = (d.data && d.data.attributes) ? d.data.attributes : d.attributes || {};
       const stats = attrs.last_analysis_stats || {};
       const mal = stats.malicious || 0;
+      const sus = stats.suspicious || 0;
       const total = Object.values(stats).reduce((a, b) => a + b, 0) || 0;
-      if (total > 0) fields.push({ label: 'Detections', value: `${mal} / ${total} engines`, highlight: mal > 0 ? 'danger' : 'success' });
+      if (total > 0) {
+        let detHighlight = 'success';
+        if (mal > 0) detHighlight = 'danger';
+        else if (sus > 0) detHighlight = 'warning';
+        fields.push({ label: 'Detections', value: `${mal} malicious / ${sus} suspicious / ${total} engines`, highlight: detHighlight });
+      }
       if (attrs.meaningful_name) fields.push({ label: 'Name', value: attrs.meaningful_name, highlight: '' });
       if (attrs.type_description) fields.push({ label: 'Type', value: attrs.type_description, highlight: '' });
+      if (attrs.size) fields.push({ label: 'Size', value: attrs.size + ' bytes', highlight: '' });
       const tags = attrs.tags || [];
       if (tags.length) fields.push({ label: 'Tags', value: tags.slice(0, 6).join(', '), highlight: 'warning' });
+      // Analysis dates
+      if (attrs.last_analysis_date) {
+        const ts = new Date(attrs.last_analysis_date * 1000);
+        if (!isNaN(ts)) fields.push({ label: 'Last analysis', value: ts.toLocaleDateString(), highlight: '' });
+      }
+      if (attrs.first_submission_date) {
+        const ts = new Date(attrs.first_submission_date * 1000);
+        if (!isNaN(ts)) fields.push({ label: 'First seen', value: ts.toLocaleDateString(), highlight: '' });
+      }
+      // Popular threat name
+      const threatClass = attrs.popular_threat_classification || {};
+      const threatNames = (threatClass.popular_threat_name || []).slice(0, 3);
+      if (threatNames.length) fields.push({ label: 'Threat', value: threatNames.map(t => t.value || t).join(', '), highlight: 'danger' });
       return fields.length ? fields : this._fieldsGeneric(d);
     },
 
@@ -370,9 +390,13 @@ document.addEventListener('alpine:init', () => {
       if (score !== null) fields.push({ label: 'Abuse confidence', value: `${score}%`, highlight: score > 50 ? 'danger' : score > 10 ? 'warning' : 'success' });
       if (data.countryName || data.country_name) fields.push({ label: 'Country', value: `${data.countryName || data.country_name}${data.countryCode ? ' (' + data.countryCode + ')' : ''}`, highlight: '' });
       if (data.isp) fields.push({ label: 'ISP', value: data.isp, highlight: '' });
+      if (data.domain) fields.push({ label: 'Domain', value: data.domain, highlight: '' });
+      if (data.usageType || data.usage_type) fields.push({ label: 'Usage type', value: data.usageType || data.usage_type, highlight: '' });
       const reports = data.totalReports ?? data.total_reports ?? 0;
-      if (reports !== undefined) fields.push({ label: 'Reports', value: String(reports), highlight: reports > 0 ? 'warning' : '' });
-      if (data.lastReportedAt || data.last_reported_at) fields.push({ label: 'Last reported', value: data.lastReportedAt || data.last_reported_at, highlight: '' });
+      if (reports !== undefined) fields.push({ label: 'Total reports', value: String(reports), highlight: reports > 0 ? 'warning' : '' });
+      const distinct = data.numDistinctUsers ?? data.num_distinct_users;
+      if (distinct !== undefined) fields.push({ label: 'Distinct reporters', value: String(distinct), highlight: distinct > 3 ? 'warning' : '' });
+      if (data.lastReportedAt || data.last_reported_at) fields.push({ label: 'Last reported', value: this.formatDate(data.lastReportedAt || data.last_reported_at), highlight: '' });
       return fields.length ? fields : this._fieldsGeneric(d);
     },
 
@@ -380,13 +404,21 @@ document.addEventListener('alpine:init', () => {
       const fields = [];
       if (d.ip_str || d.ip) fields.push({ label: 'IP', value: d.ip_str || d.ip, highlight: '' });
       if (d.org) fields.push({ label: 'Organization', value: d.org, highlight: '' });
+      if (d.isp && d.isp !== d.org) fields.push({ label: 'ISP', value: d.isp, highlight: '' });
       if (d.country_name) fields.push({ label: 'Country', value: `${d.country_name}${d.city ? ', ' + d.city : ''}`, highlight: '' });
       if (d.os) fields.push({ label: 'OS', value: d.os, highlight: '' });
       if (d.ports && d.ports.length) fields.push({ label: 'Open ports', value: d.ports.slice(0, 20).join(', ') + (d.ports.length > 20 ? '…' : ''), highlight: 'warning' });
+      if (d.tags && d.tags.length) fields.push({ label: 'Shodan tags', value: (Array.isArray(d.tags) ? d.tags : [d.tags]).slice(0, 6).join(', '), highlight: '' });
       if (d.vulns && Object.keys(d.vulns).length) {
         const cves = Object.keys(d.vulns).slice(0, 8);
         fields.push({ label: 'CVEs', value: cves.join(', ') + (Object.keys(d.vulns).length > 8 ? '…' : ''), highlight: 'danger' });
       }
+      // Service summary from data array
+      if (d.data && d.data.length) {
+        const products = [...new Set(d.data.map(s => s.product).filter(Boolean))].slice(0, 5);
+        if (products.length) fields.push({ label: 'Products', value: products.join(', '), highlight: '' });
+      }
+      if (d.last_update) fields.push({ label: 'Last seen', value: this.formatDate(d.last_update), highlight: '' });
       return fields.length ? fields : this._fieldsGeneric(d);
     },
 
@@ -458,26 +490,35 @@ document.addEventListener('alpine:init', () => {
         const page = first.page || {};
         if (page.domain) fields.push({ label: 'Domain', value: page.domain, highlight: '' });
         if (page.country) fields.push({ label: 'Country', value: page.country, highlight: '' });
+        if (page.asnname) fields.push({ label: 'ASN', value: page.asnname, highlight: '' });
         const v = (first.verdicts || {}).overall || {};
         if (v.malicious !== undefined) fields.push({ label: 'Verdict', value: v.malicious ? '⚠ Malicious' : 'Clean', highlight: v.malicious ? 'danger' : 'success' });
+        if (v.score) fields.push({ label: 'Score', value: String(v.score), highlight: v.score > 50 ? 'danger' : v.score > 0 ? 'warning' : '' });
+        const task = first.task || {};
+        if (task.time) fields.push({ label: 'Scan date', value: this.formatDate(task.time), highlight: '' });
+        if (first.result) fields.push({ label: 'Report', value: first.result, isLink: true, highlight: '' });
       }
       return fields.length ? fields : this._fieldsGeneric(d);
     },
 
     _fieldsCensys(d) {
       const fields = [];
-      if (d.ip) fields.push({ label: 'IP', value: d.ip, highlight: '' });
-      if (d.location) {
-        const loc = d.location;
+      // Censys v2 wraps data under "result"
+      const data = (d.result && typeof d.result === 'object') ? d.result : d;
+      if (data.ip) fields.push({ label: 'IP', value: data.ip, highlight: '' });
+      if (data.location) {
+        const loc = data.location;
         fields.push({ label: 'Location', value: [loc.city, loc.province, loc.country].filter(Boolean).join(', '), highlight: '' });
       }
-      if (d.autonomous_system) {
-        const as = d.autonomous_system;
-        fields.push({ label: 'ASN', value: `AS${as.asn || ''} ${as.name || ''}`.trim(), highlight: '' });
+      if (data.autonomous_system) {
+        const as = data.autonomous_system;
+        fields.push({ label: 'ASN', value: `AS${as.asn || ''} ${as.name || as.description || ''}`.trim(), highlight: '' });
       }
-      if (d.services && d.services.length) {
-        const ports = d.services.map(s => `${s.port}/${s.transport_protocol || ''}`.trim()).slice(0, 8);
-        fields.push({ label: 'Services', value: ports.join(', '), highlight: '' });
+      if (data.services && data.services.length) {
+        const ports = data.services.map(s => `${s.port}/${(s.transport_protocol || '').toLowerCase()}`.replace(/\/$/, '')).slice(0, 8);
+        fields.push({ label: 'Open ports', value: ports.join(', '), highlight: 'warning' });
+        const names = [...new Set(data.services.map(s => s.service_name).filter(n => n && n !== 'UNKNOWN'))].slice(0, 6);
+        if (names.length) fields.push({ label: 'Services', value: names.join(', '), highlight: '' });
       }
       return fields.length ? fields : this._fieldsGeneric(d);
     },
@@ -487,9 +528,15 @@ document.addEventListener('alpine:init', () => {
       if (d.current_dns) {
         const dns = d.current_dns;
         if (dns.a && dns.a.values) fields.push({ label: 'A records', value: dns.a.values.map(v => v.ip || v).slice(0, 5).join(', '), highlight: '' });
+        if (dns.aaaa && dns.aaaa.values) fields.push({ label: 'AAAA records', value: dns.aaaa.values.map(v => v.ipv6 || v).slice(0, 3).join(', '), highlight: '' });
         if (dns.mx && dns.mx.values) fields.push({ label: 'MX records', value: dns.mx.values.map(v => v.hostname || v).slice(0, 5).join(', '), highlight: '' });
         if (dns.ns && dns.ns.values) fields.push({ label: 'NS records', value: dns.ns.values.map(v => v.nameserver || v).slice(0, 5).join(', '), highlight: '' });
+        if (dns.txt && dns.txt.values) fields.push({ label: 'TXT records', value: dns.txt.values.map(v => (v.value || String(v)).slice(0, 60)).slice(0, 3).join(' | '), highlight: '' });
+        if (dns.cname && dns.cname.values) fields.push({ label: 'CNAME', value: dns.cname.values.map(v => v.hostname || v).slice(0, 3).join(', '), highlight: '' });
       }
+      if (d.hostname) fields.push({ label: 'Hostname', value: d.hostname, highlight: '' });
+      if (d.alexa_rank) fields.push({ label: 'Alexa rank', value: String(d.alexa_rank), highlight: '' });
+      if (d.whois && d.whois.registrar) fields.push({ label: 'Registrar', value: d.whois.registrar, highlight: '' });
       return fields.length ? fields : this._fieldsGeneric(d);
     },
 
@@ -507,11 +554,16 @@ document.addEventListener('alpine:init', () => {
 
     _fieldsIntelX(d) {
       const fields = [];
-      if (d.total !== undefined) fields.push({ label: 'Results', value: String(d.total), highlight: d.total > 0 ? 'warning' : '' });
+      if (d.total !== undefined) fields.push({ label: 'Total results', value: String(d.total), highlight: d.total > 0 ? 'warning' : '' });
       if (d.records && d.records.length) {
-        fields.push({ label: 'Records', value: String(d.records.length), highlight: '' });
+        fields.push({ label: 'Records returned', value: String(d.records.length), highlight: '' });
         const types = [...new Set(d.records.map(r => r.type || '').filter(Boolean))].slice(0, 5);
         if (types.length) fields.push({ label: 'Data types', value: types.join(', '), highlight: '' });
+        const buckets = [...new Set(d.records.map(r => r.bucket || '').filter(Boolean))].slice(0, 5);
+        if (buckets.length) fields.push({ label: 'Buckets', value: buckets.join(', '), highlight: '' });
+        // Most recent record date
+        const dates = d.records.map(r => r.date).filter(Boolean).sort().reverse();
+        if (dates.length) fields.push({ label: 'Latest record', value: this.formatDate(dates[0]), highlight: '' });
       }
       return fields.length ? fields : this._fieldsGeneric(d);
     },
@@ -525,9 +577,13 @@ document.addEventListener('alpine:init', () => {
         const s = samples[0];
         if (s.file_name) fields.push({ label: 'File name', value: s.file_name, highlight: '' });
         if (s.file_type) fields.push({ label: 'File type', value: s.file_type, highlight: '' });
+        if (s.file_size) fields.push({ label: 'File size', value: s.file_size + ' bytes', highlight: '' });
         if (s.signature) fields.push({ label: 'Signature', value: s.signature, highlight: 'danger' });
         if (s.tags && s.tags.length) fields.push({ label: 'Tags', value: s.tags.slice(0, 6).join(', '), highlight: 'warning' });
         if (s.first_seen) fields.push({ label: 'First seen', value: s.first_seen, highlight: '' });
+        if (s.last_seen) fields.push({ label: 'Last seen', value: s.last_seen, highlight: '' });
+        if (s.delivery_method) fields.push({ label: 'Delivery', value: s.delivery_method, highlight: '' });
+        if (samples.length > 1) fields.push({ label: 'Sample count', value: String(samples.length), highlight: '' });
       }
       return fields.length ? fields : this._fieldsGeneric(d);
     },
@@ -539,11 +595,15 @@ document.addEventListener('alpine:init', () => {
       const iocs = d.data;
       if (iocs && iocs.length) {
         const first = iocs[0];
-        if (first.malware) fields.push({ label: 'Malware', value: first.malware, highlight: 'danger' });
+        if (first.malware) fields.push({ label: 'Malware family', value: first.malware, highlight: 'danger' });
+        if (first.malware_alias) fields.push({ label: 'Malware alias', value: first.malware_alias, highlight: '' });
         if (first.ioc_type) fields.push({ label: 'IOC type', value: first.ioc_type, highlight: '' });
-        if (first.confidence_level) fields.push({ label: 'Confidence', value: `${first.confidence_level}%`, highlight: '' });
+        if (first.confidence_level !== undefined) fields.push({ label: 'Confidence', value: `${first.confidence_level}%`, highlight: first.confidence_level >= 75 ? 'danger' : 'warning' });
+        if (first.first_seen) fields.push({ label: 'First seen', value: first.first_seen, highlight: '' });
+        if (first.last_seen) fields.push({ label: 'Last seen', value: first.last_seen, highlight: '' });
         const allTags = iocs.flatMap(i => i.tags || []).filter(Boolean);
         if (allTags.length) fields.push({ label: 'Tags', value: [...new Set(allTags)].slice(0, 6).join(', '), highlight: 'warning' });
+        if (iocs.length > 1) fields.push({ label: 'IOC entries', value: String(iocs.length), highlight: '' });
       }
       return fields.length ? fields : this._fieldsGeneric(d);
     },
@@ -569,6 +629,185 @@ document.addEventListener('alpine:init', () => {
 
     _humanKey(k) {
       return k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    },
+
+    // ── Rich per-source detail helpers (used by Sources tab) ─────────────
+
+    // VirusTotal: list of malicious/suspicious engine results
+    vtEngineDetections(d) {
+      if (!d) return [];
+      // v2 style
+      if (d.scans && typeof d.scans === 'object') {
+        return Object.entries(d.scans)
+          .filter(([, v]) => v && v.detected)
+          .map(([engine, v]) => ({ engine, result: v.result || 'malicious', category: 'antivirus' }))
+          .slice(0, 30);
+      }
+      // v3 style
+      const attrs = (d.data && d.data.attributes) ? d.data.attributes : (d.attributes || {});
+      const results = attrs.last_analysis_results || {};
+      return Object.entries(results)
+        .filter(([, v]) => v && (v.category === 'malicious' || v.category === 'suspicious'))
+        .map(([engine, v]) => ({ engine, result: v.result || v.category, category: v.category }))
+        .slice(0, 30);
+    },
+
+    // AbuseIPDB: list of recent abuse reports
+    abuseRecentReports(d) {
+      const data = (d && d.data) ? d.data : (d || {});
+      const reports = data.reports || [];
+      return reports.slice(0, 10).map(r => ({
+        date: r.reportedAt || r.reported_at || '',
+        comment: (r.comment || '').slice(0, 120),
+        categories: r.categories || [],
+        country: r.reporterCountryCode || '',
+      }));
+    },
+
+    // Shodan: service banners from data array
+    shodanServices(d) {
+      if (!d || !d.data || !Array.isArray(d.data)) return [];
+      return d.data.slice(0, 15).map(svc => ({
+        port: svc.port || '',
+        proto: svc.transport || '',
+        product: svc.product || '',
+        version: svc.version || '',
+        cpe: (svc.cpe || svc.cpe23 || []).slice(0, 2).join(' '),
+        banner: (svc.data || '').slice(0, 100).replace(/\n/g, ' '),
+      }));
+    },
+
+    // URLhaus: list of malicious URLs from response
+    urlhausUrlList(d) {
+      if (!d || !d.urls) return [];
+      return (d.urls || []).slice(0, 15).map(u => ({
+        url: (u.url || '').slice(0, 100),
+        status: u.url_status || u.status || '',
+        threat: u.threat || '',
+        date_added: u.date_added || '',
+        tags: u.tags || [],
+      }));
+    },
+
+    // URLscan: list of scan results
+    urlscanResultList(d) {
+      if (!d || !d.results) return [];
+      return (d.results || []).slice(0, 10).map(r => {
+        const page = r.page || {};
+        const verdict = ((r.verdicts || {}).overall) || {};
+        const task = r.task || {};
+        return {
+          url: (page.url || '').slice(0, 80),
+          domain: page.domain || '',
+          country: page.country || '',
+          malicious: verdict.malicious || false,
+          score: verdict.score || 0,
+          time: task.time || '',
+          report: r.result || '',
+        };
+      });
+    },
+
+    // MalwareBazaar: first sample details
+    mbSampleDetails(d) {
+      if (!d || !d.data || !d.data.length) return null;
+      const s = d.data[0];
+      if (!s || typeof s !== 'object') return null;
+      return {
+        sha256: s.sha256_hash || '',
+        sha1: s.sha1_hash || '',
+        md5: s.md5_hash || '',
+        file_name: s.file_name || '',
+        file_type: s.file_type || '',
+        file_size: s.file_size || '',
+        mime_type: s.mime_type || '',
+        signature: s.signature || '',
+        tags: s.tags || [],
+        first_seen: s.first_seen || '',
+        last_seen: s.last_seen || '',
+        delivery_method: s.delivery_method || '',
+        origin_country: s.origin_country || '',
+        reporter: s.reporter || '',
+      };
+    },
+
+    // ThreatFox: list of IOC entries
+    tfIocEntries(d) {
+      if (!d || !d.data) return [];
+      const items = Array.isArray(d.data) ? d.data : [d.data];
+      return items.slice(0, 10).map(e => ({
+        ioc: e.ioc || '',
+        ioc_type: e.ioc_type || '',
+        malware: e.malware || '',
+        malware_alias: e.malware_alias || '',
+        confidence: e.confidence_level ?? '',
+        first_seen: e.first_seen || '',
+        last_seen: e.last_seen || '',
+        tags: e.tags || [],
+      }));
+    },
+
+    // HIBP: list of breach entries
+    hibpBreachList(d) {
+      if (!Array.isArray(d)) return [];
+      return d.slice(0, 15).map(b => ({
+        name: b.Name || b.name || '',
+        date: b.BreachDate || b.breach_date || '',
+        count: b.PwnCount || b.pwn_count || 0,
+        data_classes: (b.DataClasses || b.data_classes || []).slice(0, 5),
+        domain: b.Domain || b.domain || '',
+      }));
+    },
+
+    // IntelX: list of records
+    intelxRecordList(d) {
+      if (!d || !d.records) return [];
+      return (d.records || []).slice(0, 10).map(r => ({
+        type: r.type ?? '',
+        name: (r.name || '').slice(0, 80),
+        date: r.date || '',
+        bucket: r.bucket || '',
+        size: r.size || 0,
+      }));
+    },
+
+    // Censys: list of services (handle v2 result wrapper)
+    censysServiceList(d) {
+      const data = (d && d.result && typeof d.result === 'object') ? d.result : (d || {});
+      const services = data.services || [];
+      return services.slice(0, 15).map(s => ({
+        port: s.port || '',
+        proto: s.transport_protocol || '',
+        name: s.service_name || '',
+        banner: (s.banner || '').slice(0, 80),
+        software: ((s.software || []).map(sw => sw.product || sw).filter(Boolean)).slice(0, 2).join(', '),
+      }));
+    },
+
+    // SecurityTrails: DNS record breakdown
+    stDnsBreakdown(d) {
+      const dns = (d && d.current_dns) ? d.current_dns : {};
+      const result = [];
+      const types = { a: 'A', aaaa: 'AAAA', mx: 'MX', ns: 'NS', txt: 'TXT', cname: 'CNAME', soa: 'SOA' };
+      for (const [key, label] of Object.entries(types)) {
+        const vals = (dns[key] || {}).values || [];
+        if (!vals.length) continue;
+        const displayVals = vals.slice(0, 8).map(v => {
+          if (typeof v === 'string') return v;
+          return v.ip || v.hostname || v.nameserver || v.value || v.ipv6 || v.name || '(complex value)';
+        });
+        result.push({ type: label, values: displayVals });
+      }
+      return result;
+    },
+
+    // OTX alexa/whois links from raw data
+    otxLinks(d) {
+      if (!d) return [];
+      const links = [];
+      if (d.whois) links.push({ label: 'Whois', url: d.whois });
+      if (d.alexa) links.push({ label: 'Alexa', url: d.alexa });
+      return links;
     },
 
     // ── Threat level helpers (legacy, used by source cards) ───────────────
