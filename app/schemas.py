@@ -304,6 +304,33 @@ class BrandAlertOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Owned / Trusted Domains ───────────────────────────────────────────────────
+class OwnedDomainCreate(BaseModel):
+    domain: str = Field(..., min_length=1, max_length=512)
+    match_subdomains: bool = True
+    notes: str = Field("", max_length=512)
+
+    @field_validator("domain")
+    @classmethod
+    def sanitize_domain(cls, v: str) -> str:
+        return _sanitize(v.strip().lower(), max_length=512)
+
+    @field_validator("notes")
+    @classmethod
+    def sanitize_notes(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=512)
+
+
+class OwnedDomainOut(BaseModel):
+    id: int
+    domain: str
+    match_subdomains: bool
+    notes: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Notifications ─────────────────────────────────────────────────────────────
 class NotificationOut(BaseModel):
     id: int

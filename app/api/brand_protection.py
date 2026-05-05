@@ -35,8 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import get_db
-from app.models import Brand, BrandAlert, User
-from app.schemas import BrandAlertOut, BrandCreate, BrandOut
+from app.models import Brand, BrandAlert, OwnedDomain, User
+from app.schemas import BrandAlertOut, BrandCreate, BrandOut, OwnedDomainCreate, OwnedDomainOut
 from app.utils.sanitize import sanitize_string
 
 router = APIRouter()
@@ -198,6 +198,51 @@ async def resolve_domains(body: dict, _: User = Depends(get_current_user)):
 
 
 # ── New bulk-check endpoints (must come before /{brand_id} dynamic routes) ────
+
+# ── Owned / Trusted Domains endpoints ────────────────────────────────────────
+
+@router.get("/owned-domains", response_model=List[OwnedDomainOut])
+async def list_owned_domains(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Return all owned/trusted domains."""
+    result = await db.execute(select(OwnedDomain).order_by(OwnedDomain.domain))
+    return result.scalars().all()
+
+
+@router.post("/owned-domains", response_model=OwnedDomainOut, status_code=201)
+async def create_owned_domain(
+    data: OwnedDomainCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Add a domain to the owned/trusted list."""
+    existing = await db.execute(
+        select(OwnedDomain).where(OwnedDomain.domain == data.domain)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Domain already in owned list")
+    owned = OwnedDomain(**data.model_dump())
+    db.add(owned)
+    await db.commit()
+    await db.refresh(owned)
+    return owned
+
+
+@router.delete("/owned-domains/{domain_id}", status_code=204)
+async def delete_owned_domain(
+    domain_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Remove a domain from the owned/trusted list."""
+    result = await db.execute(select(OwnedDomain).where(OwnedDomain.id == domain_id))
+    owned = result.scalar_one_or_none()
+    if not owned:
+        raise HTTPException(status_code=404, detail="Not found")
+    await db.delete(owned)
+    await db.commit()
 
 @router.post("/generate-check")
 async def generate_and_check(
