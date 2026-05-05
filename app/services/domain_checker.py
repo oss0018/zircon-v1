@@ -36,19 +36,38 @@ QWERTY_ADJACENT: Dict[str, str] = {
 
 HOMOGLYPHS: Dict[str, str] = {
     "i": "l", "l": "1", "o": "0", "a": "@", "e": "3", "s": "5",
+    "t": "7", "g": "9", "b": "6", "q": "9", "z": "2",
+}
+
+# Extended multi-char homoglyph-like replacements
+HOMOGLYPH_MULTI: Dict[str, List[str]] = {
+    "rn": ["m"],
+    "m": ["rn"],
+    "vv": ["w"],
+    "w": ["vv"],
+    "cl": ["d"],
+    "d": ["cl"],
+    "nn": ["m"],
+    "ii": ["n"],
 }
 
 TLD_SUBSTITUTIONS: List[str] = [
     ".com", ".net", ".org", ".io", ".online", ".shop", ".site",
-    ".info", ".biz", ".co", ".xyz", ".ua",
+    ".info", ".biz", ".co", ".xyz", ".ua", ".ru", ".eu", ".us",
+    ".app", ".dev", ".club", ".live", ".store", ".web", ".pro",
+    ".me", ".cc", ".tv", ".mobi", ".pw",
 ]
 
 COMMON_PREFIXES: List[str] = [
     "login-", "secure-", "my-", "portal-", "account-", "support-", "www-",
+    "auth-", "api-", "web-", "app-", "mail-", "shop-", "pay-", "online-",
+    "mobile-", "m-", "get-", "go-", "help-",
 ]
 
 COMMON_SUFFIXES: List[str] = [
     "-login", "-secure", "-portal", "-account", "-support", "-online",
+    "-app", "-web", "-shop", "-pay", "-service", "-help", "-official",
+    "-inc", "-corp", "-group",
 ]
 
 _TITLE_RE = re.compile(r"<title[^>]*>([^<]{1,256})</title>", re.IGNORECASE | re.DOTALL)
@@ -101,6 +120,11 @@ def _is_safe_external_domain(domain: str) -> bool:
 
 # ── Typosquat Generator ───────────────────────────────────────────────────────
 
+def _canonicalize(domain: str) -> str:
+    """Normalize a domain for deduplication: lowercase, strip trailing dot."""
+    return domain.lower().rstrip(".")
+
+
 def generate_typosquats(domain: str, limit: int = 1000) -> List[str]:
     """
     Generate typosquatting variants for the given domain.
@@ -110,73 +134,204 @@ def generate_typosquats(domain: str, limit: int = 1000) -> List[str]:
     - Character transposition (swap adjacent)
     - Adjacent keyboard key substitution (QWERTY layout)
     - Character duplication
+    - Dot insertion (subdomain-style)
     - Hyphen insertion between characters
     - TLD substitution
     - Common prefix additions
     - Common suffix additions
-    - Homoglyph substitution (i→l, l→1, o→0, a→@, e→3, s→5)
+    - Homoglyph substitution (i→l, l→1, o→0, a→@, e→3, s→5, t→7, …)
+    - Multi-char homoglyph-like replacements (rn→m, m→rn, vv→w, w→vv)
     - Number appending (0–9)
+    - Vowel swaps
 
     Args:
         domain: Base domain (e.g. ``kyivstar.ua``).
-        limit:  Maximum number of variants to return.
+        limit:  Maximum number of variants to return (up to 50,000).
 
     Returns:
         Deduplicated list of variant domains, excluding the original.
     """
+    limit = min(limit, 50_000)
     parts = domain.split(".")
     name = parts[0] if parts else domain
     original_tld = "." + ".".join(parts[1:]) if len(parts) > 1 else ".com"
 
-    candidates: Set[str] = set()
+    seen: Set[str] = {_canonicalize(domain)}
+    candidates: List[str] = []
+
+    def _add(cand: str) -> bool:
+        """Return True if added (new unique candidate)."""
+        if len(candidates) >= limit:
+            return False
+        key = _canonicalize(cand)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(cand)
+            return True
+        return False
 
     # 1. Character deletion
     for i in range(len(name)):
-        candidates.add(name[:i] + name[i + 1:] + original_tld)
+        _add(name[:i] + name[i + 1:] + original_tld)
 
     # 2. Character transposition (swap adjacent)
     for i in range(len(name) - 1):
         t = list(name)
         t[i], t[i + 1] = t[i + 1], t[i]
-        candidates.add("".join(t) + original_tld)
+        _add("".join(t) + original_tld)
 
     # 3. Adjacent keyboard key substitution
     for i, ch in enumerate(name):
         for replacement in QWERTY_ADJACENT.get(ch.lower(), ""):
-            candidates.add(name[:i] + replacement + name[i + 1:] + original_tld)
+            _add(name[:i] + replacement + name[i + 1:] + original_tld)
 
     # 4. Character duplication
     for i in range(len(name)):
-        candidates.add(name[:i] + name[i] + name[i:] + original_tld)
+        _add(name[:i] + name[i] + name[i:] + original_tld)
 
     # 5. Hyphen insertion
     for i in range(1, len(name)):
-        candidates.add(name[:i] + "-" + name[i:] + original_tld)
+        _add(name[:i] + "-" + name[i:] + original_tld)
 
-    # 6. TLD substitution
+    # 6. Dot insertion (subdomain-style split)
+    for i in range(1, len(name)):
+        _add(name[:i] + "." + name[i:] + original_tld)
+
+    # 7. TLD substitution (all TLDs × all homoglyph variants of name)
     for tld in TLD_SUBSTITUTIONS:
-        candidates.add(name + tld)
+        _add(name + tld)
 
-    # 7. Common prefix additions
+    # 8. Common prefix additions
     for prefix in COMMON_PREFIXES:
-        candidates.add(prefix + name + original_tld)
+        _add(prefix + name + original_tld)
+        # Prefix + all TLDs
+        for tld in TLD_SUBSTITUTIONS[:6]:  # top TLDs only to avoid explosion
+            _add(prefix + name + tld)
 
-    # 8. Common suffix additions
+    # 9. Common suffix additions
     for suffix in COMMON_SUFFIXES:
-        candidates.add(name + suffix + original_tld)
+        _add(name + suffix + original_tld)
+        for tld in TLD_SUBSTITUTIONS[:6]:
+            _add(name + suffix + tld)
 
-    # 9. Homoglyph substitution
+    # 10. Homoglyph substitution (single-char)
     for i, ch in enumerate(name):
         if ch in HOMOGLYPHS:
-            candidates.add(name[:i] + HOMOGLYPHS[ch] + name[i + 1:] + original_tld)
+            new_name = name[:i] + HOMOGLYPHS[ch] + name[i + 1:]
+            _add(new_name + original_tld)
+            for tld in TLD_SUBSTITUTIONS[:6]:
+                _add(new_name + tld)
 
-    # 10. Number appending (0–9)
+    # 11. Multi-char homoglyph replacements
+    for src, replacements in HOMOGLYPH_MULTI.items():
+        if src in name:
+            for rep in replacements:
+                # Replace first occurrence
+                idx = name.find(src)
+                while idx != -1:
+                    new_name = name[:idx] + rep + name[idx + len(src):]
+                    _add(new_name + original_tld)
+                    idx = name.find(src, idx + 1)
+
+    # 12. Number appending (0–9)
     for digit in "0123456789":
-        candidates.add(name + digit + original_tld)
+        _add(name + digit + original_tld)
+        _add(name + "-" + digit + original_tld)
 
-    # Remove original domain and apply limit
-    candidates.discard(domain)
-    return list(candidates)[:limit]
+    # 13. Vowel swaps
+    vowels = "aeiou"
+    for i, ch in enumerate(name):
+        if ch.lower() in vowels:
+            for v in vowels:
+                if v != ch.lower():
+                    _add(name[:i] + v + name[i + 1:] + original_tld)
+
+    # 14. Double-homoglyph: apply single homoglyphs to all TLDs
+    if len(candidates) < limit:
+        homoglyph_names: Set[str] = set()
+        for i, ch in enumerate(name):
+            if ch in HOMOGLYPHS:
+                homoglyph_names.add(name[:i] + HOMOGLYPHS[ch] + name[i + 1:])
+        for hname in homoglyph_names:
+            for tld in TLD_SUBSTITUTIONS:
+                if not _add(hname + tld):
+                    if len(candidates) >= limit:
+                        break
+            if len(candidates) >= limit:
+                break
+
+    return candidates
+
+
+def generate_from_brand_name(brand_name: str, tlds: Optional[List[str]] = None, limit: int = 1000) -> List[str]:
+    """
+    Generate candidate domain names from a brand name (no seed domain).
+
+    Takes the brand name, normalises it to a slug, and applies TLD variations
+    plus typo / homoglyph mutations similar to :func:`generate_typosquats`.
+
+    Args:
+        brand_name: Human-readable brand name (e.g. ``"Kyivstar"``).
+        tlds:       List of TLD strings to use; defaults to :data:`TLD_SUBSTITUTIONS`.
+        limit:      Maximum number of unique candidates to return (up to 50,000).
+
+    Returns:
+        Deduplicated list of candidate domains.
+    """
+    import unicodedata
+    import re as _re
+
+    limit = min(limit, 50_000)
+
+    # Slug-ify: lower, keep alnum+hyphen, collapse runs of hyphens
+    slug = unicodedata.normalize("NFKD", brand_name).encode("ascii", "ignore").decode()
+    slug = _re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")
+    if not slug:
+        return []
+
+    tld_list = tlds or TLD_SUBSTITUTIONS
+
+    # Build a synthetic domain and run typosquats against it
+    seed = slug + tld_list[0]
+    base_candidates = generate_typosquats(seed, limit)
+
+    seen: Set[str] = {_canonicalize(seed)}
+    result: List[str] = []
+
+    def _add(cand: str) -> None:
+        if len(result) >= limit:
+            return
+        key = _canonicalize(cand)
+        if key not in seen:
+            seen.add(key)
+            result.append(cand)
+
+    # Start with the slug itself across all TLDs
+    for tld in tld_list:
+        _add(slug + tld)
+
+    # Common variations
+    nohyphen = slug.replace("-", "")
+    dot_version = slug.replace("-", ".")
+    if nohyphen:
+        for tld in tld_list:
+            _add(nohyphen + tld)
+    if "." in dot_version and dot_version != slug + ".":
+        for tld in tld_list:
+            _add(dot_version + tld)
+
+    # Merge in typosquat candidates
+    for c in base_candidates:
+        _add(c)
+
+    # Also run typosquats on the nohyphen slug
+    if nohyphen and nohyphen != slug:
+        for c in generate_typosquats(nohyphen + tld_list[0], limit):
+            _add(c)
+            if len(result) >= limit:
+                break
+
+    return result[:limit]
 
 
 # ── Domain Checker ────────────────────────────────────────────────────────────

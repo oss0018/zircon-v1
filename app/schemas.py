@@ -306,6 +306,7 @@ class BrandAlertOut(BaseModel):
 
 # ── Owned / Trusted Domains ───────────────────────────────────────────────────
 class OwnedDomainCreate(BaseModel):
+    brand_id: int
     domain: str = Field(..., min_length=1, max_length=512)
     match_subdomains: bool = True
     notes: str = Field("", max_length=512)
@@ -323,6 +324,7 @@ class OwnedDomainCreate(BaseModel):
 
 class OwnedDomainOut(BaseModel):
     id: int
+    brand_id: Optional[int]
     domain: str
     match_subdomains: bool
     notes: str

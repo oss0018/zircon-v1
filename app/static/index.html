@@ -1058,27 +1058,36 @@
                           x-show="!showAlerts">
                     View All Alerts <span class="nav-badge" style="position:relative;top:0;right:0;margin-left:4px;" x-show="newAlerts() > 0" x-text="newAlerts()"></span>
                   </button>
-                  <button class="btn btn-secondary" @click="showOwnedDomains = !showOwnedDomains" x-show="!showAlerts">🛡 Owned Domains</button>
                   <button class="btn btn-primary" @click="showModal = true" x-text="t('add_brand')"></button>
                 </div>
               </div>
 
               <!-- Owned Domains Management Panel -->
-              <div x-show="showOwnedDomains && !showAlerts" class="card mb-4" style="padding:16px;">
+              <!-- Per-brand Owned Domains Management Panel -->
+              <div x-show="showOwnedDomainsPanel && !showAlerts" class="card mb-4" style="padding:16px;">
                 <div class="flex justify-between items-center mb-3">
-                  <div class="card-title" style="margin-bottom:0;">🛡 Owned / Trusted Domains</div>
-                  <button class="btn btn-sm btn-secondary" @click="showOwnedDomains = false">✕</button>
+                  <div class="card-title" style="margin-bottom:0;">
+                    🛡 Owned / Trusted Domains
+                    <span x-show="activeBrand" class="text-muted text-sm" style="font-weight:400;" x-text="activeBrand ? ' — ' + activeBrand.name : ''"></span>
+                  </div>
+                  <button class="btn btn-sm btn-secondary" @click="showOwnedDomainsPanel = false">✕</button>
                 </div>
-                <div class="text-xs text-muted mb-3">Domains owned by your organisation. Alerts matching these domains will be marked <strong>Trusted</strong>.</div>
+                <div class="text-xs text-muted mb-3">Domains owned by your organisation for this brand. Alerts matching these domains will be marked <strong>Trusted</strong>.</div>
                 <!-- Add form -->
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;">
-                  <input class="form-input" style="flex:1;min-width:180px;max-width:320px;" placeholder="example.com" x-model="newOwnedDomain.domain" @keyup.enter="addOwnedDomain()" />
-                  <input class="form-input" style="flex:1;min-width:140px;max-width:240px;" placeholder="Notes (optional)" x-model="newOwnedDomain.notes" />
-                  <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+                  <input class="form-input" style="flex:1;min-width:180px;max-width:300px;" placeholder="example.com"
+                         x-model="newOwnedDomain.domain" @keyup.enter="addOwnedDomain()" />
+                  <input class="form-input" style="flex:1;min-width:130px;max-width:220px;" placeholder="Notes (optional)"
+                         x-model="newOwnedDomain.notes" />
+                  <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap;">
                     <input type="checkbox" x-model="newOwnedDomain.match_subdomains" />
                     <span>Match subdomains</span>
                   </label>
                   <button class="btn btn-sm btn-primary" @click="addOwnedDomain()">+ Add</button>
+                  <label class="btn btn-sm btn-secondary" style="cursor:pointer;white-space:nowrap;" title="Import domains from .txt file">
+                    📥 Import .txt
+                    <input type="file" accept=".txt" style="display:none;" @change="importOwnedDomainsFromFile($event)" />
+                  </label>
                 </div>
                 <!-- List -->
                 <div x-show="ownedDomains.length === 0" class="text-xs text-muted">No owned domains defined yet.</div>
@@ -1131,44 +1140,48 @@
                       <div class="flex gap-2 flex-wrap mb-2">
                         <button class="btn btn-sm btn-primary" @click="scanBrand(brand.id)" :disabled="scanning" x-text="t('scan')"></button>
                         <button class="btn btn-sm btn-secondary" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
+                        <button class="btn btn-sm btn-secondary" title="Manage owned/trusted domains" @click="showOwnedDomainsFor(brand)">🛡</button>
                         <button class="btn btn-sm btn-danger" @click="deleteBrand(brand.id)">✕</button>
                       </div>
                       <!-- Advanced check actions -->
                       <div style="margin-top:10px;border-top:1px solid var(--border-color);padding-top:10px;">
                         <div class="text-xs text-muted" style="margin-bottom:8px;font-weight:600;">Advanced Domain Checks</div>
-                        <!-- Generate & Check with limit selector -->
+                        <!-- Row 1: Generate & Check with limit + mode selectors -->
                         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;align-items:center;">
-                          <select class="form-input" style="width:72px;padding:3px 5px;font-size:11px;flex-shrink:0;" x-model="generateLimit">
+                          <select class="form-input" style="width:68px;padding:3px 4px;font-size:11px;flex-shrink:0;" x-model="generateLimit">
                             <option value="1000">1k</option>
-                            <option value="2000">2k</option>
                             <option value="5000">5k</option>
                             <option value="10000">10k</option>
+                            <option value="25000">25k</option>
+                            <option value="50000">50k</option>
+                          </select>
+                          <select class="form-input" style="width:90px;padding:3px 4px;font-size:11px;flex-shrink:0;" x-model="generateMode">
+                            <option value="domain">Domain</option>
+                            <option value="brand_name">Brand name</option>
+                            <option value="both">Both</option>
                           </select>
                           <button class="btn btn-sm btn-primary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
-                                  @click="generateAndCheck(brand.id, brand.url, generateLimit)"
+                                  @click="generateAndCheck(brand.id, brand.url, generateLimit, generateMode)"
                                   :disabled="checkProgress.running">
                             🔍 Generate &amp; Check
                           </button>
                         </div>
+                        <!-- Row 2: File/import/recheck/export — flex-wrap so they never overflow -->
                         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-                          <!-- Check from File (async SSE) -->
                           <label class="btn btn-sm btn-secondary" style="cursor:pointer;font-size:11px;padding:3px 8px;white-space:nowrap;">
                             📄 Check from File
                             <input :id="`file-input-check-${brand.id}`" type="file" accept=".txt"
                                    style="display:none;" @change="checkFromFile(brand.id, $event)" />
                           </label>
-                          <!-- Import .txt (legacy sync) -->
                           <label class="btn btn-sm btn-secondary" style="cursor:pointer;font-size:11px;padding:3px 8px;white-space:nowrap;">
                             📥 Import .txt
                             <input type="file" accept=".txt" style="display:none;" @change="scanFromFile(brand.id, $event)" />
                           </label>
-                          <!-- Re-check alive -->
                           <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="recheckAlive(brand.id)"
                                   :disabled="checkProgress.running">
                             🔄 Re-check
                           </button>
-                          <!-- Export -->
                           <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="activeBrand = brand; exportResults('csv')">
                             ⬇ CSV
@@ -1185,27 +1198,53 @@
 
               <!-- Progress Bar (shown during async check) -->
               <div x-show="checkProgress.running || (checkProgress.total > 0 && !showAlerts)" class="card mt-4" style="padding:16px;">
-                <div class="text-sm" style="margin-bottom:8px;font-weight:600;">
-                  Checking <span x-text="checkProgress.total"></span> domains…
+                <div class="flex justify-between items-center mb-2">
+                  <div class="text-sm" style="font-weight:600;">
+                    <span x-show="checkProgress.running">Checking <span x-text="checkProgress.total"></span> domains…</span>
+                    <span x-show="!checkProgress.running && checkProgress.total > 0">Check complete</span>
+                  </div>
+                  <div class="flex gap-2" x-show="checkProgress.results.length > 0" style="align-items:center;">
+                    <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:2px 7px;" @click="selectAllResults()">All</button>
+                    <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:2px 7px;" @click="selectNoneResults()">None</button>
+                    <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:2px 7px;" @click="invertResultSelection()">Invert</button>
+                    <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:2px 7px;" @click="exportCheckResultsTxt()" title="Export listed domains as .txt">⬇ .txt</button>
+                    <span class="text-xs text-muted" x-text="`${selectedResults.size} selected`"></span>
+                  </div>
                 </div>
-                <div style="font-family:monospace;font-size:13px;color:var(--color-green);">
+                <div style="font-family:monospace;font-size:13px;color:var(--color-green);" x-show="checkProgress.running">
                   [<span x-text="progressBar()"></span>]
                   <span x-text="progressPct()"></span>%
                   (<span x-text="checkProgress.checked"></span>/<span x-text="checkProgress.total"></span>)
                   | Found alive: <span x-text="checkProgress.foundAlive" style="color:var(--color-red);"></span>
                 </div>
-                <!-- Live results from async check -->
-                <div x-show="checkProgress.results.length > 0" style="margin-top:12px;max-height:200px;overflow-y:auto;">
+                <!-- Live results from async check with filter + pagination -->
+                <div x-show="checkProgress.results.length > 0" style="margin-top:12px;">
+                  <!-- Filter + stats row -->
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
+                    <input class="form-input" style="flex:1;min-width:160px;max-width:280px;padding:3px 8px;font-size:12px;"
+                           placeholder="Filter by domain or IP…" x-model="resultFilter" @input="checkProgress.page = 1" />
+                    <span class="text-xs text-muted" x-text="`${filteredCheckResults.length} alive`"></span>
+                  </div>
                   <div class="text-xs text-muted mb-1">🟢 Alive domains found:</div>
-                  <template x-for="r in checkProgress.results" :key="r.domain">
-                    <div style="font-family:monospace;font-size:12px;padding:2px 0;border-bottom:1px solid var(--border-color);">
-                      <span class="text-green" x-text="r.domain"></span>
-                      <span class="text-muted" x-show="r.ip"> → <span x-text="r.ip"></span></span>
-                      <span x-show="r.http_status" class="badge badge-blue" style="margin-left:6px;" x-text="r.http_status"></span>
-                      <span x-show="r.ssl_valid === true" style="margin-left:4px;">✅</span>
-                      <span x-show="r.ssl_valid === false" style="margin-left:4px;">❌</span>
-                    </div>
-                  </template>
+                  <!-- Paginated list -->
+                  <div style="max-height:280px;overflow-y:auto;">
+                    <template x-for="r in pagedCheckResults" :key="r.domain">
+                      <div style="display:flex;align-items:center;gap:6px;font-family:monospace;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border-color);">
+                        <input type="checkbox" :checked="selectedResults.has(r.domain)" @change="toggleResultSelected(r.domain)" style="flex-shrink:0;" />
+                        <span class="text-green" x-text="r.domain" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                        <span class="text-muted" x-show="r.ip" x-text="r.ip" style="flex-shrink:0;"></span>
+                        <span x-show="r.http_status" class="badge badge-blue" style="margin-left:2px;flex-shrink:0;" x-text="r.http_status"></span>
+                        <span x-show="r.ssl_valid === true" style="margin-left:2px;flex-shrink:0;">✅</span>
+                        <span x-show="r.ssl_valid === false" style="margin-left:2px;flex-shrink:0;">❌</span>
+                      </div>
+                    </template>
+                  </div>
+                  <!-- Pagination controls -->
+                  <div x-show="checkResultsTotalPages() > 1" style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;">
+                    <button class="btn btn-sm btn-secondary" style="padding:2px 7px;" @click="prevResultsPage()" :disabled="checkProgress.page <= 1">‹ Prev</button>
+                    <span x-text="`${checkProgress.page} / ${checkResultsTotalPages()}`" class="text-muted"></span>
+                    <button class="btn btn-sm btn-secondary" style="padding:2px 7px;" @click="nextResultsPage()" :disabled="checkProgress.page >= checkResultsTotalPages()">Next ›</button>
+                  </div>
                 </div>
               </div>
 
@@ -1332,7 +1371,7 @@
 
               <!-- Add Brand Modal -->
               <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">
-                <div class="modal">
+                <div class="modal" style="max-width:540px;">
                   <div class="modal-title" x-text="t('add_brand')"></div>
                   <div class="form-group">
                     <label class="form-label" x-text="t('brand_name')"></label>
@@ -1356,8 +1395,39 @@
                       <span class="form-label" style="margin-bottom:0;" x-text="t('monitoring_enabled')"></span>
                     </label>
                   </div>
+                  <!-- Owned / Legitimate Domains section -->
+                  <div class="form-group" style="border-top:1px solid var(--border-color);padding-top:12px;margin-top:4px;">
+                    <label class="form-label">🛡 Owned / Legitimate Domains</label>
+                    <div class="text-xs text-muted mb-2">Add domains that belong to your organisation. Alerts matching these will be marked <strong>Trusted</strong>.</div>
+                    <!-- Add domain row -->
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px;">
+                      <input class="form-input" style="flex:1;min-width:160px;" placeholder="example.com"
+                             x-model="modalNewOwnedDomain" @keyup.enter="addModalOwnedDomain()" />
+                      <button class="btn btn-sm btn-secondary" @click="addModalOwnedDomain()" type="button">+ Add</button>
+                      <label class="btn btn-sm btn-secondary" style="cursor:pointer;white-space:nowrap;" title="Import from .txt (one domain per line)">
+                        📥 .txt
+                        <input type="file" accept=".txt" style="display:none;" @change="importModalOwnedDomains($event)" />
+                      </label>
+                    </div>
+                    <!-- Trust subdomains toggle -->
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:8px;">
+                      <input type="checkbox" x-model="modalTrustSubdomains" />
+                      <span>Trust subdomains (e.g. <code>*.example.com</code> if <code>example.com</code> is owned)</span>
+                    </label>
+                    <!-- List of domains -->
+                    <div x-show="modalOwnedDomains.length === 0" class="text-xs text-muted">No domains added yet.</div>
+                    <div x-show="modalOwnedDomains.length > 0" style="max-height:150px;overflow-y:auto;border:1px solid var(--border-color);border-radius:4px;padding:4px;">
+                      <template x-for="d in modalOwnedDomains" :key="d">
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 6px;font-size:12px;font-family:monospace;">
+                          <span x-text="d"></span>
+                          <button class="btn btn-sm btn-danger" style="padding:1px 6px;font-size:10px;" @click="removeModalOwnedDomain(d)" type="button">✕</button>
+                        </div>
+                      </template>
+                      <div x-show="modalOwnedDomains.length > 0" class="text-xs text-muted" style="padding:2px 6px;" x-text="`${modalOwnedDomains.length} domain(s)`"></div>
+                    </div>
+                  </div>
                   <div class="modal-footer">
-                    <button class="btn btn-secondary" @click="showModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-secondary" @click="showModal = false; modalOwnedDomains = []; modalNewOwnedDomain = ''" x-text="t('cancel')"></button>
                     <button class="btn btn-primary" @click="createBrand()" x-text="t('save')"></button>
                   </div>
                 </div>
