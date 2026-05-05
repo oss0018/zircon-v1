@@ -14,10 +14,14 @@ Existing endpoints (unchanged):
   POST /resolve-domains          — resolve IPs for a list of domains
 
 New endpoints (added in this version):
-  POST /generate-check           — generate typosquats + async DNS/HTTP check (SSE)
-  POST /check-from-file          — upload .txt (250k domains), async check (SSE)
-  POST /{target_id}/recheck-alive — re-check all alive domains for a brand
-  GET  /results/{target_id}/export — export results as CSV or JSON
+  POST /generate-check                  — generate typosquats + async DNS/HTTP check (SSE)
+  POST /check-from-file                 — upload .txt (250k domains), async check (SSE)
+  POST /{target_id}/recheck-alive       — re-check all alive domains for a brand
+  GET  /results/{target_id}/export      — export results as CSV or JSON
+  GET  /{brand_id}/owned-domains        — list per-brand owned/trusted domains
+  POST /{brand_id}/owned-domains        — add owned domain to brand
+  DELETE /{brand_id}/owned-domains/{id} — remove owned domain from brand
+  POST /{brand_id}/owned-domains/import — bulk import owned domains from .txt
 """
 
 import csv
@@ -43,6 +47,10 @@ router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
+# Pre-compiled FQDN pattern used for owned domain validation/import
+_FQDN_RE = re.compile(
+    r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+)
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
@@ -199,31 +207,42 @@ async def resolve_domains(body: dict, _: User = Depends(get_current_user)):
 
 # ── New bulk-check endpoints (must come before /{brand_id} dynamic routes) ────
 
-# ── Owned / Trusted Domains endpoints ────────────────────────────────────────
+# ── DEPRECATED global owned-domain endpoints kept for backward-compat ─────────
+# These now delegate to the per-brand versions (brand_id=None means legacy global)
 
 @router.get("/owned-domains", response_model=List[OwnedDomainOut])
-async def list_owned_domains(
+async def list_owned_domains_global(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """Return all owned/trusted domains."""
+    """Return all owned/trusted domains across all brands (legacy global endpoint)."""
     result = await db.execute(select(OwnedDomain).order_by(OwnedDomain.domain))
     return result.scalars().all()
 
 
 @router.post("/owned-domains", response_model=OwnedDomainOut, status_code=201)
-async def create_owned_domain(
-    data: OwnedDomainCreate,
+async def create_owned_domain_global(
+    data: dict,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """Add a domain to the owned/trusted list."""
+    """Add a domain to the global owned list (legacy endpoint, brand_id optional)."""
+    raw_domain = sanitize_string(str(data.get("domain", "")).strip().lower(), max_length=512)
+    if not raw_domain:
+        raise HTTPException(status_code=400, detail="domain is required")
+    brand_id = data.get("brand_id")
+    match_subdomains = bool(data.get("match_subdomains", True))
+    notes = sanitize_string(str(data.get("notes", "")).strip(), max_length=512)
+
     existing = await db.execute(
-        select(OwnedDomain).where(OwnedDomain.domain == data.domain)
+        select(OwnedDomain).where(
+            OwnedDomain.domain == raw_domain,
+            OwnedDomain.brand_id == brand_id,
+        )
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Domain already in owned list")
-    owned = OwnedDomain(**data.model_dump())
+    owned = OwnedDomain(domain=raw_domain, brand_id=brand_id, match_subdomains=match_subdomains, notes=notes)
     db.add(owned)
     await db.commit()
     await db.refresh(owned)
@@ -231,12 +250,12 @@ async def create_owned_domain(
 
 
 @router.delete("/owned-domains/{domain_id}", status_code=204)
-async def delete_owned_domain(
+async def delete_owned_domain_global(
     domain_id: int,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """Remove a domain from the owned/trusted list."""
+    """Remove a domain from the owned list (legacy global endpoint)."""
     result = await db.execute(select(OwnedDomain).where(OwnedDomain.id == domain_id))
     owned = result.scalar_one_or_none()
     if not owned:
@@ -251,43 +270,84 @@ async def generate_and_check(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Generate typosquatting variants for a domain and check them asynchronously.
+    Generate typosquatting variants for a domain and/or brand name and check them asynchronously.
 
-    Body: {"domain": "example.com", "target_id": 1, "limit": 1000}
+    Body: {
+        "domain": "example.com",      # seed domain (optional if brand_name provided)
+        "brand_name": "Acme Corp",    # brand name (optional if domain provided)
+        "mode": "domain",             # "domain" | "brand_name" | "both" (default: "domain")
+        "target_id": 1,               # brand ID for saving results (optional)
+        "limit": 1000,                # max variants (up to 50000)
+    }
     Returns SSE stream (text/event-stream) of check results.
     """
-    from app.services.domain_checker import check_domains_async, generate_typosquats
+    from app.services.domain_checker import (
+        check_domains_async,
+        generate_from_brand_name,
+        generate_typosquats,
+    )
 
+    mode = str(body.get("mode", "domain")).strip().lower()
     raw_domain = sanitize_string(body.get("domain", "").strip(), max_length=253)
-    if not raw_domain:
-        raise HTTPException(status_code=400, detail="domain is required")
-    base_domain = _extract_base_domain(raw_domain)
+    raw_brand = sanitize_string(body.get("brand_name", "").strip(), max_length=200)
     target_id: Optional[int] = body.get("target_id")
     try:
-        limit = min(int(body.get("limit", 1000)), 10000)
+        limit = min(int(body.get("limit", 1000)), 50_000)
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="limit must be an integer")
 
-    brand_name = base_domain
+    if mode not in ("domain", "brand_name", "both"):
+        mode = "domain"
+
+    # Resolve brand name from DB if target_id provided
+    brand_name_resolved = raw_brand
+    base_domain = _extract_base_domain(raw_domain) if raw_domain else ""
     if target_id:
         res = await db.execute(select(Brand).where(Brand.id == target_id))
         brand = res.scalar_one_or_none()
         if brand:
-            brand_name = brand.name
+            if not brand_name_resolved:
+                brand_name_resolved = brand.name
+            if not base_domain:
+                base_domain = _extract_base_domain(brand.url)
 
-    domains = generate_typosquats(base_domain, limit)
+    if mode in ("domain", "both") and not base_domain:
+        raise HTTPException(status_code=400, detail="domain is required for mode 'domain' or 'both'")
+    if mode in ("brand_name", "both") and not brand_name_resolved:
+        raise HTTPException(status_code=400, detail="brand_name is required for mode 'brand_name' or 'both'")
+
+    # Generate candidates with deduplication across modes
+    seen: set = set()
+    domains: List[str] = []
+
+    def _add_unique(lst: List[str]) -> None:
+        for d in lst:
+            key = d.lower().rstrip(".")
+            if key not in seen:
+                seen.add(key)
+                domains.append(d)
+            if len(domains) >= limit:
+                break
+
+    if mode in ("domain", "both"):
+        _add_unique(generate_typosquats(base_domain, limit))
+    if mode in ("brand_name", "both") and brand_name_resolved:
+        remaining = limit - len(domains)
+        if remaining > 0:
+            _add_unique(generate_from_brand_name(brand_name_resolved, limit=remaining))
+
     total = len(domains)
 
     async def _sse_stream():
         found_alive = 0
         checked = 0
-        async for result in check_domains_async(domains, brand_name):
+        async for result in check_domains_async(domains, brand_name_resolved or base_domain):
             checked += 1
             if result.get("alive"):
                 found_alive += 1
                 if target_id:
                     try:
-                        await _save_check_result(db, target_id, base_domain, result)
+                        await _save_check_result(db, target_id, base_domain or brand_name_resolved, result)
                     except Exception as exc:
                         logger.warning("Failed to save check result for %s: %s", result.get("domain"), exc)
             payload = {**result, "checked": checked, "total": total, "found_alive": found_alive}
@@ -681,3 +741,155 @@ async def get_brand_alerts(brand_id: int, db: AsyncSession = Depends(get_db),
         select(BrandAlert).where(BrandAlert.brand_id == brand_id).order_by(BrandAlert.created_at.desc())
     )
     return result.scalars().all()
+
+
+# ── Per-brand Owned / Trusted Domains ────────────────────────────────────────
+
+@router.get("/{brand_id}/owned-domains", response_model=List[OwnedDomainOut])
+async def list_brand_owned_domains(
+    brand_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Return owned/trusted domains for a specific brand."""
+    result = await db.execute(
+        select(OwnedDomain)
+        .where(OwnedDomain.brand_id == brand_id)
+        .order_by(OwnedDomain.domain)
+    )
+    return result.scalars().all()
+
+
+@router.post("/{brand_id}/owned-domains", response_model=OwnedDomainOut, status_code=201)
+async def create_brand_owned_domain(
+    brand_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Add a domain to the owned/trusted list for a specific brand."""
+    # Verify brand exists
+    brand_res = await db.execute(select(Brand).where(Brand.id == brand_id))
+    if not brand_res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    raw_domain = sanitize_string(str(data.get("domain", "")).strip().lower(), max_length=512)
+    if not raw_domain:
+        raise HTTPException(status_code=400, detail="domain is required")
+    match_subdomains = bool(data.get("match_subdomains", True))
+    notes = sanitize_string(str(data.get("notes", "")).strip(), max_length=512)
+
+    existing = await db.execute(
+        select(OwnedDomain).where(
+            OwnedDomain.brand_id == brand_id,
+            OwnedDomain.domain == raw_domain,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Domain already in owned list for this brand")
+
+    owned = OwnedDomain(
+        brand_id=brand_id,
+        domain=raw_domain,
+        match_subdomains=match_subdomains,
+        notes=notes,
+    )
+    db.add(owned)
+    await db.commit()
+    await db.refresh(owned)
+    return owned
+
+
+@router.delete("/{brand_id}/owned-domains/{domain_id}", status_code=204)
+async def delete_brand_owned_domain(
+    brand_id: int,
+    domain_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Remove a domain from the owned/trusted list for a specific brand."""
+    result = await db.execute(
+        select(OwnedDomain).where(
+            OwnedDomain.id == domain_id,
+            OwnedDomain.brand_id == brand_id,
+        )
+    )
+    owned = result.scalar_one_or_none()
+    if not owned:
+        raise HTTPException(status_code=404, detail="Not found")
+    await db.delete(owned)
+    await db.commit()
+
+
+@router.post("/{brand_id}/owned-domains/import", status_code=200)
+async def import_brand_owned_domains(
+    brand_id: int,
+    file: UploadFile = File(...),
+    match_subdomains: bool = Query(True),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Bulk-import owned domains from a .txt file (one domain per line).
+    Normalises each line: lowercase, strip scheme/path/port.
+    Skips blank lines and comment lines starting with '#'.
+    Returns counts of added/skipped/invalid domains.
+    """
+    # Verify brand exists
+    brand_res = await db.execute(select(Brand).where(Brand.id == brand_id))
+    if not brand_res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8", errors="replace")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cannot decode file")
+
+    # Fetch existing domains for this brand to speed up duplicate check
+    existing_res = await db.execute(
+        select(OwnedDomain.domain).where(OwnedDomain.brand_id == brand_id)
+    )
+    existing_set = {row[0] for row in existing_res.all()}
+
+    added = 0
+    skipped_dup = 0
+    skipped_invalid = 0
+    MAX_IMPORT = 10_000
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Strip scheme
+        if "://" in line:
+            line = line.split("://", 1)[1]
+        # Strip path/query/port
+        line = line.split("/")[0].split("?")[0].split("#")[0]
+        # Strip port
+        if ":" in line:
+            line = line.split(":")[0]
+        line = line.strip().lower().rstrip(".")
+
+        if not line:
+            continue
+        if not _FQDN_RE.match(line):
+            skipped_invalid += 1
+            continue
+        if line in existing_set:
+            skipped_dup += 1
+            continue
+        if added >= MAX_IMPORT:
+            break
+
+        owned = OwnedDomain(
+            brand_id=brand_id,
+            domain=line,
+            match_subdomains=match_subdomains,
+        )
+        db.add(owned)
+        existing_set.add(line)
+        added += 1
+
+    await db.commit()
+    return {"added": added, "skipped_duplicate": skipped_dup, "skipped_invalid": skipped_invalid}

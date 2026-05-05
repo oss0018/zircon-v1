@@ -122,16 +122,22 @@ class Brand(Base):
     monitoring_enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=_utcnow)
     alerts = relationship("BrandAlert", back_populates="brand")
+    owned_domains = relationship("OwnedDomain", back_populates="brand", cascade="all, delete-orphan")
 
 
 class OwnedDomain(Base):
-    """Domains owned/trusted by the organisation (used to mark alerts as trusted)."""
+    """Domains owned/trusted by the organisation (used to mark alerts as trusted).
+
+    Scoped per Brand: each monitoring profile has its own list of owned domains.
+    """
     __tablename__ = "owned_domains"
     id = Column(Integer, primary_key=True)
-    domain = Column(String(512), unique=True, nullable=False)
+    brand_id = Column(Integer, ForeignKey("brands.id"), nullable=True)
+    domain = Column(String(512), nullable=False)
     match_subdomains = Column(Boolean, default=True)
     notes = Column(String(512), default="")
     created_at = Column(DateTime, default=_utcnow)
+    brand = relationship("Brand", back_populates="owned_domains")
 
 
 class BrandAlert(Base):

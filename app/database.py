@@ -54,9 +54,29 @@ def _migrate_brand_alerts(conn) -> None:
         logger.warning("Could not migrate brand_alerts: %s", exc)
 
 
+def _migrate_owned_domains(conn) -> None:
+    """Add brand_id column to owned_domains table if it is missing."""
+    from sqlalchemy import inspect, text
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+        if "owned_domains" not in tables:
+            return
+        existing_cols = {c["name"] for c in inspector.get_columns("owned_domains")}
+        if "brand_id" not in existing_cols:
+            conn.execute(
+                text("ALTER TABLE owned_domains ADD COLUMN brand_id INTEGER REFERENCES brands(id)")
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate owned_domains: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # Add new columns to existing brand_alerts tables (non-destructive migration)
         await conn.run_sync(_migrate_brand_alerts)
+        # Add brand_id to owned_domains if upgrading from older version
+        await conn.run_sync(_migrate_owned_domains)

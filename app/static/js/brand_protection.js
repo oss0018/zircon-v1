@@ -14,17 +14,23 @@ document.addEventListener('alpine:init', () => {
     fileScanResults: [],
     showFileScanResults: false,
     // Progress state for async checks
-    checkProgress: { running: false, checked: 0, total: 0, foundAlive: 0, results: [] },
+    checkProgress: { running: false, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 },
+    // Generate mode: 'domain' | 'brand_name' | 'both'
+    generateMode: 'domain',
     // Filter state
     filterStatus: 'all',
     filterSimilarity: 0,
     filterQuery: '',
+    // Filter for live check results
+    resultFilter: '',
     // Limit selector for generate-check
     generateLimit: 1000,
-    // Owned / Trusted domains
+    // Per-brand owned / trusted domains
     ownedDomains: [],
-    showOwnedDomains: false,
+    showOwnedDomainsPanel: false,
     newOwnedDomain: { domain: '', notes: '', match_subdomains: true },
+    // Checklist for results selection
+    selectedResults: new Set(),
     newBrand: {
       name: '',
       url: '',
@@ -32,11 +38,22 @@ document.addEventListener('alpine:init', () => {
       similarity_threshold: 0.8,
       monitoring_enabled: true,
     },
+    // Owned domains section inside Add Brand modal
+    modalOwnedDomains: [],
+    modalNewOwnedDomain: '',
+    modalTrustSubdomains: true,
+
+    /** Normalise a raw domain string: strip scheme, path, port, trailing dot, lowercase. */
+    _normalizeDomain(raw) {
+      return raw.trim().toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .split('/')[0].split('?')[0].split(':')[0]
+        .replace(/\.$/, '');
+    },
 
     async init() {
       await this.loadBrands();
       await this.loadAllAlerts();
-      await this.loadOwnedDomains();
     },
 
     async loadBrands() {
@@ -61,6 +78,8 @@ document.addEventListener('alpine:init', () => {
       this.showAlerts = true;
       try {
         this.alerts = await api.get(`/brands/${brand.id}/alerts`);
+        // Load owned domains for this brand so trusted badges work
+        await this.loadOwnedDomains(brand.id);
       } catch (e) {
         showToast(e.message, 'error');
       }
@@ -68,14 +87,60 @@ document.addEventListener('alpine:init', () => {
 
     async createBrand() {
       try {
-        await api.post('/brands/', this.newBrand);
+        const created = await api.post('/brands/', this.newBrand);
+        // Save owned domains that were entered in the modal
+        for (const od of this.modalOwnedDomains) {
+          try {
+            await api.post(`/brands/${created.id}/owned-domains`, {
+              domain: od,
+              match_subdomains: this.modalTrustSubdomains,
+            });
+          } catch (e) { /* skip duplicates */ }
+        }
         await this.loadBrands();
-        this.showModal = false;
-        this.newBrand = { name: '', url: '', keywords: '', similarity_threshold: 0.8, monitoring_enabled: true };
+        this._resetBrandModal();
         showToast('Brand added', 'success');
       } catch (e) {
         showToast(e.message, 'error');
       }
+    },
+
+    _resetBrandModal() {
+      this.showModal = false;
+      this.newBrand = { name: '', url: '', keywords: '', similarity_threshold: 0.8, monitoring_enabled: true };
+      this.modalOwnedDomains = [];
+      this.modalNewOwnedDomain = '';
+    },
+
+    addModalOwnedDomain() {
+      const d = this._normalizeDomain(this.modalNewOwnedDomain);
+      if (!d) return;
+      if (!this.modalOwnedDomains.includes(d)) {
+        this.modalOwnedDomains.push(d);
+      }
+      this.modalNewOwnedDomain = '';
+    },
+
+    removeModalOwnedDomain(domain) {
+      this.modalOwnedDomains = this.modalOwnedDomains.filter(d => d !== domain);
+    },
+
+    async importModalOwnedDomains(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      let added = 0;
+      for (const line of text.split(/\r?\n/)) {
+        if (line.trim().startsWith('#')) continue;
+        const d = this._normalizeDomain(line);
+        if (!d) continue;
+        if (!this.modalOwnedDomains.includes(d)) {
+          this.modalOwnedDomains.push(d);
+          added++;
+        }
+      }
+      showToast(`${added} domains loaded from file`, 'success');
+      event.target.value = '';
     },
 
     async scanBrand(id) {
@@ -120,19 +185,30 @@ document.addEventListener('alpine:init', () => {
      * Generate typosquatting variants for a brand domain and check them via SSE.
      * @param {number} brandId  - Brand ID (for saving results)
      * @param {string} domain   - Domain to generate variants for
-     * @param {number} limit    - Max variants (1000 | 2000 | 5000 | 10000)
+     * @param {number} limit    - Max variants
+     * @param {string} mode     - 'domain' | 'brand_name' | 'both'
      */
-    async generateAndCheck(brandId, domain, limit) {
-      if (!domain) {
-        showToast('Brand has no URL configured', 'error');
+    async generateAndCheck(brandId, domain, limit, mode) {
+      if (mode === 'domain' && !domain) {
+        showToast('Domain is required for domain-based generation (brand has no URL configured)', 'error');
         return;
       }
-      this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [] };
+      const brand = this.brands.find(b => b.id === brandId);
+      const brandName = brand ? brand.name : '';
+
+      this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
+      this.selectedResults = new Set();
       this.showAlerts = true;
-      showToast(`Generating ${limit} variants for ${domain}…`, 'info');
+      showToast(`Generating up to ${limit} variants…`, 'info');
 
       const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
-      const body = JSON.stringify({ domain, target_id: brandId, limit: Number(limit) });
+      const body = JSON.stringify({
+        domain,
+        brand_name: brandName,
+        mode: mode || 'domain',
+        target_id: brandId,
+        limit: Number(limit),
+      });
 
       try {
         const resp = await fetch('/api/v1/brands/generate-check', {
@@ -161,7 +237,7 @@ document.addEventListener('alpine:init', () => {
                 this.checkProgress.total = data.total || 0;
                 this.checkProgress.foundAlive = data.found_alive || 0;
                 if (data.alive) {
-                  this.checkProgress.results.unshift(data);
+                  this.checkProgress.results.push(data);
                 }
               } catch (parseErr) { console.warn('SSE parse error:', parseErr); }
             } else if (line.startsWith('event: done')) {
@@ -201,7 +277,8 @@ document.addEventListener('alpine:init', () => {
       const file = event.target.files[0];
       if (!file) return;
 
-      this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [] };
+      this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
+      this.selectedResults = new Set();
       showToast(`Uploading ${file.name}…`, 'info');
 
       const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
@@ -237,7 +314,7 @@ document.addEventListener('alpine:init', () => {
                 this.checkProgress.total = data.total || 0;
                 this.checkProgress.foundAlive = data.found_alive || 0;
                 if (data.alive) {
-                  this.checkProgress.results.unshift(data);
+                  this.checkProgress.results.push(data);
                 }
               } catch (parseErr) { console.warn('SSE parse error:', parseErr); }
             } else if (line.startsWith('event: done')) {
@@ -264,7 +341,7 @@ document.addEventListener('alpine:init', () => {
      * @param {number} brandId
      */
     async recheckAlive(brandId) {
-      this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [] };
+      this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
       showToast('Re-checking alive domains…', 'info');
 
       const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
@@ -342,6 +419,24 @@ document.addEventListener('alpine:init', () => {
     },
 
     /**
+     * Export alive check results (from current session) as .txt
+     */
+    exportCheckResultsTxt() {
+      const results = this.filteredCheckResults;
+      if (!results.length) {
+        showToast('No results to export', 'info');
+        return;
+      }
+      const txt = results.map(r => r.domain).join('\n');
+      const blob = new Blob([txt], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'check_results.txt';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    },
+
+    /**
      * Client-side filter on the loaded alerts array.
      * Filters by status, minimum similarity %, and a text query.
      */
@@ -357,6 +452,58 @@ document.addEventListener('alpine:init', () => {
         }
         return true;
       });
+    },
+
+    /** Filter live check results (alive domains from current SSE session) */
+    get filteredCheckResults() {
+      if (!this.resultFilter) return this.checkProgress.results;
+      const q = this.resultFilter.toLowerCase();
+      return this.checkProgress.results.filter(r =>
+        r.domain.toLowerCase().includes(q) || (r.ip || '').includes(q)
+      );
+    },
+
+    /** Paginated slice of filteredCheckResults */
+    get pagedCheckResults() {
+      const f = this.filteredCheckResults;
+      const start = (this.checkProgress.page - 1) * this.checkProgress.pageSize;
+      return f.slice(start, start + this.checkProgress.pageSize);
+    },
+
+    checkResultsTotalPages() {
+      return Math.max(1, Math.ceil(this.filteredCheckResults.length / this.checkProgress.pageSize));
+    },
+
+    nextResultsPage() {
+      if (this.checkProgress.page < this.checkResultsTotalPages()) this.checkProgress.page++;
+    },
+
+    prevResultsPage() {
+      if (this.checkProgress.page > 1) this.checkProgress.page--;
+    },
+
+    toggleResultSelected(domain) {
+      if (this.selectedResults.has(domain)) {
+        this.selectedResults.delete(domain);
+      } else {
+        this.selectedResults.add(domain);
+      }
+      // Trigger Alpine reactivity
+      this.selectedResults = new Set(this.selectedResults);
+    },
+
+    selectAllResults() {
+      this.selectedResults = new Set(this.filteredCheckResults.map(r => r.domain));
+    },
+
+    selectNoneResults() {
+      this.selectedResults = new Set();
+    },
+
+    invertResultSelection() {
+      const all = new Set(this.filteredCheckResults.map(r => r.domain));
+      const inv = new Set([...all].filter(d => !this.selectedResults.has(d)));
+      this.selectedResults = inv;
     },
 
     similarityColor(score) {
@@ -431,33 +578,72 @@ document.addEventListener('alpine:init', () => {
       return '—';
     },
 
-    // ── Owned / Trusted Domains ───────────────────────────────────────────────
+    // ── Per-brand Owned / Trusted Domains ────────────────────────────────────
 
-    async loadOwnedDomains() {
+    async loadOwnedDomains(brandId) {
+      if (!brandId) {
+        this.ownedDomains = [];
+        return;
+      }
       try {
-        this.ownedDomains = await api.get('/brands/owned-domains');
+        this.ownedDomains = await api.get(`/brands/${brandId}/owned-domains`);
       } catch (e) {
         console.warn('Could not load owned domains:', e.message);
+        this.ownedDomains = [];
       }
     },
 
+    async showOwnedDomainsFor(brand) {
+      this.activeBrand = brand;
+      this.showOwnedDomainsPanel = true;
+      await this.loadOwnedDomains(brand.id);
+    },
+
     async addOwnedDomain() {
+      if (!this.activeBrand) return;
       const domain = this.newOwnedDomain.domain.trim();
       if (!domain) return;
       try {
-        await api.post('/brands/owned-domains', { ...this.newOwnedDomain, domain });
+        await api.post(`/brands/${this.activeBrand.id}/owned-domains`, {
+          ...this.newOwnedDomain,
+          domain,
+        });
         this.newOwnedDomain = { domain: '', notes: '', match_subdomains: true };
-        await this.loadOwnedDomains();
+        await this.loadOwnedDomains(this.activeBrand.id);
         showToast(`${domain} added to owned domains`, 'success');
       } catch (e) {
         showToast(e.message || 'Failed to add domain', 'error');
       }
     },
 
-    async deleteOwnedDomain(id) {
+    async importOwnedDomainsFromFile(event) {
+      if (!this.activeBrand) return;
+      const file = event.target.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      const matchSubs = this.newOwnedDomain.match_subdomains !== false;
       try {
-        await api.delete(`/brands/owned-domains/${id}`);
-        await this.loadOwnedDomains();
+        const r = await api.upload(
+          `/brands/${this.activeBrand.id}/owned-domains/import?match_subdomains=${matchSubs}`,
+          fd
+        );
+        await this.loadOwnedDomains(this.activeBrand.id);
+        showToast(
+          `Imported: ${r.added} added, ${r.skipped_duplicate} duplicates, ${r.skipped_invalid} invalid`,
+          'success'
+        );
+      } catch (e) {
+        showToast(e.message || 'Import failed', 'error');
+      }
+      event.target.value = '';
+    },
+
+    async deleteOwnedDomain(id) {
+      if (!this.activeBrand) return;
+      try {
+        await api.delete(`/brands/${this.activeBrand.id}/owned-domains/${id}`);
+        await this.loadOwnedDomains(this.activeBrand.id);
         showToast('Owned domain removed', 'success');
       } catch (e) {
         showToast(e.message || 'Failed to remove domain', 'error');
@@ -466,6 +652,7 @@ document.addEventListener('alpine:init', () => {
 
     /**
      * Check if a given domain matches any owned domain (including subdomain matching).
+     * Uses the currently-loaded per-brand ownedDomains list.
      * @param {string} domain
      * @returns {boolean}
      */
