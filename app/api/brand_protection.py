@@ -47,6 +47,10 @@ router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
+# Pre-compiled FQDN pattern used for owned domain validation/import
+_FQDN_RE = re.compile(
+    r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+)
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
@@ -831,8 +835,6 @@ async def import_brand_owned_domains(
     Skips blank lines and comment lines starting with '#'.
     Returns counts of added/skipped/invalid domains.
     """
-    import re as _re
-
     # Verify brand exists
     brand_res = await db.execute(select(Brand).where(Brand.id == brand_id))
     if not brand_res.scalar_one_or_none():
@@ -843,10 +845,6 @@ async def import_brand_owned_domains(
         text = content.decode("utf-8", errors="replace")
     except Exception:
         raise HTTPException(status_code=400, detail="Cannot decode file")
-
-    _FQDN_RE = _re.compile(
-        r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
-    )
 
     # Fetch existing domains for this brand to speed up duplicate check
     existing_res = await db.execute(

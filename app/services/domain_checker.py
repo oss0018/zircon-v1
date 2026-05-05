@@ -222,16 +222,14 @@ def generate_typosquats(domain: str, limit: int = 1000) -> List[str]:
             for tld in TLD_SUBSTITUTIONS[:6]:
                 _add(new_name + tld)
 
-    # 11. Multi-char homoglyph replacements
+    # 11. Multi-char homoglyph replacements (first occurrence only to avoid near-duplicates)
     for src, replacements in HOMOGLYPH_MULTI.items():
         if src in name:
-            for rep in replacements:
-                # Replace first occurrence
-                idx = name.find(src)
-                while idx != -1:
+            idx = name.find(src)
+            if idx != -1:
+                for rep in replacements:
                     new_name = name[:idx] + rep + name[idx + len(src):]
                     _add(new_name + original_tld)
-                    idx = name.find(src, idx + 1)
 
     # 12. Number appending (0–9)
     for digit in "0123456789":
@@ -286,7 +284,8 @@ def generate_from_brand_name(brand_name: str, tlds: Optional[List[str]] = None, 
     # Slug-ify: lower, keep alnum+hyphen, collapse runs of hyphens
     slug = unicodedata.normalize("NFKD", brand_name).encode("ascii", "ignore").decode()
     slug = _re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")
-    if not slug:
+    if not slug or len(slug) < 2:
+        # Brand name produced no usable ASCII slug (e.g. purely non-Latin brand)
         return []
 
     tld_list = tlds or TLD_SUBSTITUTIONS

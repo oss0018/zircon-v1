@@ -43,6 +43,14 @@ document.addEventListener('alpine:init', () => {
     modalNewOwnedDomain: '',
     modalTrustSubdomains: true,
 
+    /** Normalise a raw domain string: strip scheme, path, port, trailing dot, lowercase. */
+    _normalizeDomain(raw) {
+      return raw.trim().toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .split('/')[0].split('?')[0].split(':')[0]
+        .replace(/\.$/, '');
+    },
+
     async init() {
       await this.loadBrands();
       await this.loadAllAlerts();
@@ -90,20 +98,22 @@ document.addEventListener('alpine:init', () => {
           } catch (e) { /* skip duplicates */ }
         }
         await this.loadBrands();
-        this.showModal = false;
-        this.newBrand = { name: '', url: '', keywords: '', similarity_threshold: 0.8, monitoring_enabled: true };
-        this.modalOwnedDomains = [];
-        this.modalNewOwnedDomain = '';
+        this._resetBrandModal();
         showToast('Brand added', 'success');
       } catch (e) {
         showToast(e.message, 'error');
       }
     },
 
+    _resetBrandModal() {
+      this.showModal = false;
+      this.newBrand = { name: '', url: '', keywords: '', similarity_threshold: 0.8, monitoring_enabled: true };
+      this.modalOwnedDomains = [];
+      this.modalNewOwnedDomain = '';
+    },
+
     addModalOwnedDomain() {
-      const d = this.modalNewOwnedDomain.trim().toLowerCase()
-        .replace(/^https?:\/\//, '')  // strip scheme
-        .split('/')[0].split('?')[0].split(':')[0].replace(/\.$/, '');
+      const d = this._normalizeDomain(this.modalNewOwnedDomain);
       if (!d) return;
       if (!this.modalOwnedDomains.includes(d)) {
         this.modalOwnedDomains.push(d);
@@ -121,10 +131,9 @@ document.addEventListener('alpine:init', () => {
       const text = await file.text();
       let added = 0;
       for (const line of text.split(/\r?\n/)) {
-        let d = line.trim().toLowerCase()
-          .replace(/^https?:\/\//, '')
-          .split('/')[0].split('?')[0].split(':')[0].replace(/\.$/, '');
-        if (!d || d.startsWith('#')) continue;
+        if (line.trim().startsWith('#')) continue;
+        const d = this._normalizeDomain(line);
+        if (!d) continue;
         if (!this.modalOwnedDomains.includes(d)) {
           this.modalOwnedDomains.push(d);
           added++;
@@ -181,7 +190,7 @@ document.addEventListener('alpine:init', () => {
      */
     async generateAndCheck(brandId, domain, limit, mode) {
       if (mode === 'domain' && !domain) {
-        showToast('Brand has no URL configured', 'error');
+        showToast('Domain is required for domain-based generation (brand has no URL configured)', 'error');
         return;
       }
       const brand = this.brands.find(b => b.id === brandId);
@@ -580,6 +589,7 @@ document.addEventListener('alpine:init', () => {
         this.ownedDomains = await api.get(`/brands/${brandId}/owned-domains`);
       } catch (e) {
         console.warn('Could not load owned domains:', e.message);
+        this.ownedDomains = [];
       }
     },
 
