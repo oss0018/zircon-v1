@@ -62,7 +62,9 @@ document.addEventListener('alpine:init', () => {
         this.tiStats = stats;
         this.tiHistory = Array.isArray(history) ? history : [];
         this.tiIntegrations = Array.isArray(integrations) ? integrations : [];
-        // Render charts after DOM update
+        // Double $nextTick: first tick lets Alpine update x-show bindings,
+        // second tick ensures canvases are fully laid out before Chart.js init.
+        await this.$nextTick();
         await this.$nextTick();
         this.renderCharts();
       } finally {
@@ -70,9 +72,13 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    selectDashboard(d) {
+    async selectDashboard(d) {
       this.currentDashboard = d;
-      this.$nextTick(() => this.renderCharts());
+      // Double $nextTick: first tick lets Alpine update x-show bindings,
+      // second tick ensures canvases are fully laid out before Chart.js init.
+      await this.$nextTick();
+      await this.$nextTick();
+      this.renderCharts();
     },
 
     // ── Grid layout helpers ───────────────────────────────────────
@@ -237,6 +243,11 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ── Stat helpers ──────────────────────────────────────────────
+
+    /** Returns true when there is at least one source with lookups in the past 7 days. */
+    hasTiSourceStats() {
+      return !!(this.tiStats && this.tiStats.service_stats && this.tiStats.service_stats.some(s => s.total > 0));
+    },
 
     statValue(key) {
       if (key === 'active_sources') {

@@ -282,20 +282,20 @@
                   <div x-show="loading" style="padding:20px 0;text-align:center;">
                     <span class="spinner" style="width:18px;height:18px;"></span>
                   </div>
+                  <!-- Error state -->
+                  <div x-show="!loading && loadError" style="padding:20px 0;text-align:center;">
+                    <p class="text-muted text-sm">Failed to load data.</p>
+                    <button class="btn btn-sm btn-secondary" style="margin-top:8px;" @click="load()">Retry</button>
+                  </div>
                   <!-- Empty state -->
-                  <div x-show="!loading && (!stats || Object.keys(stats.file_types || {}).length === 0)"
+                  <div x-show="!loading && !loadError && (!stats || Object.keys(stats.file_types || {}).length === 0)"
                        style="padding:20px 0;text-align:center;">
                     <p class="text-muted text-sm" x-text="t('no_data')"></p>
                   </div>
-                  <!-- File types list -->
-                  <div x-show="!loading && stats && Object.keys(stats.file_types || {}).length > 0"
-                       style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 0;min-height:40px;">
-                    <template x-for="[ext, count] in Object.entries(stats ? stats.file_types : {}).sort((a,b) => b[1]-a[1])" :key="ext">
-                      <span class="badge badge-gray"
-                            style="font-family:'JetBrains Mono',monospace;font-size:12px;padding:4px 10px;">
-                        <span x-text="ext"></span><span style="opacity:0.65;margin-left:4px;" x-text="'('+count+')'"></span>
-                      </span>
-                    </template>
+                  <!-- File types donut chart (canvas always in DOM; x-show keeps it hidden until data arrives) -->
+                  <div x-show="!loading && !loadError && stats && Object.keys(stats.file_types || {}).length > 0"
+                       style="height:200px;position:relative;">
+                    <canvas id="file-types-chart"></canvas>
                   </div>
                 </div>
               </div>
@@ -2289,24 +2289,44 @@
               </div>
 
               <!-- Dashboard charts row -->
-              <template x-if="stats && stats.service_stats && stats.service_stats.length > 0">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
-                  <!-- Source distribution doughnut -->
-                  <div class="card">
-                    <div class="card-title">🍩 Lookups by Source (7 days)</div>
-                    <div style="height:200px;position:relative;">
-                      <canvas id="ti-summary-chart"></canvas>
-                    </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
+                <!-- Source distribution doughnut -->
+                <div class="card">
+                  <div class="card-title">🍩 Lookups by Source (7 days)</div>
+                  <!-- Loading -->
+                  <div x-show="statsLoading" style="height:200px;display:flex;align-items:center;justify-content:center;">
+                    <span class="spinner" style="width:22px;height:22px;"></span>
                   </div>
-                  <!-- Top sources bar -->
-                  <div class="card">
-                    <div class="card-title">📊 Top Sources (7 days)</div>
-                    <div style="height:200px;position:relative;">
-                      <canvas id="ti-top-sources-bar"></canvas>
-                    </div>
+                  <!-- Empty -->
+                  <div x-show="!statsLoading && !hasSourceStats()"
+                       style="height:200px;display:flex;align-items:center;justify-content:center;">
+                    <p class="text-muted text-sm">No lookups in the past 7 days.</p>
+                  </div>
+                  <!-- Chart canvas (always in DOM; only visible when data exists) -->
+                  <div x-show="!statsLoading && hasSourceStats()"
+                       style="height:200px;position:relative;">
+                    <canvas id="ti-summary-chart"></canvas>
                   </div>
                 </div>
-              </template>
+                <!-- Top sources bar -->
+                <div class="card">
+                  <div class="card-title">📊 Top Sources (7 days)</div>
+                  <!-- Loading -->
+                  <div x-show="statsLoading" style="height:200px;display:flex;align-items:center;justify-content:center;">
+                    <span class="spinner" style="width:22px;height:22px;"></span>
+                  </div>
+                  <!-- Empty -->
+                  <div x-show="!statsLoading && !hasSourceStats()"
+                       style="height:200px;display:flex;align-items:center;justify-content:center;">
+                    <p class="text-muted text-sm">No source data for the past 7 days.</p>
+                  </div>
+                  <!-- Chart canvas (always in DOM; only visible when data exists) -->
+                  <div x-show="!statsLoading && hasSourceStats()"
+                       style="height:200px;position:relative;">
+                    <canvas id="ti-top-sources-bar"></canvas>
+                  </div>
+                </div>
+              </div>
 
               <!-- ── IOC SEARCH FORM ─────────────────────────── -->
               <div class="card" style="margin-bottom:16px;">
@@ -3475,16 +3495,20 @@
                           <template x-if="widget.type === 'ti_source_distribution'">
                             <div class="ti-widget-card">
                               <div class="ti-widget-title" x-text="widget.title || 'Lookups by Source (7d)'"></div>
-                              <template x-if="tiStats && tiStats.service_stats && tiStats.service_stats.filter(s=>s.total>0).length > 0">
-                                <div style="height:220px;position:relative;">
-                                  <canvas :id="'tid-chart-' + widget.id"></canvas>
-                                </div>
-                              </template>
-                              <template x-if="!tiStats || !tiStats.service_stats || tiStats.service_stats.filter(s=>s.total>0).length === 0">
-                                <div class="text-muted text-sm text-center" style="padding:24px 0;">
-                                  No source data for the past 7 days.
-                                </div>
-                              </template>
+                              <!-- Loading -->
+                              <div x-show="dataLoading" style="height:220px;display:flex;align-items:center;justify-content:center;">
+                                <span class="spinner" style="width:22px;height:22px;"></span>
+                              </div>
+                              <!-- Empty -->
+                              <div x-show="!dataLoading && !hasTiSourceStats()"
+                                   class="text-muted text-sm text-center" style="height:220px;display:flex;align-items:center;justify-content:center;">
+                                No source data for the past 7 days.
+                              </div>
+                              <!-- Chart canvas (always in DOM) -->
+                              <div x-show="!dataLoading && hasTiSourceStats()"
+                                   style="height:220px;position:relative;">
+                                <canvas :id="'tid-chart-' + widget.id"></canvas>
+                              </div>
                             </div>
                           </template>
 
@@ -3492,16 +3516,20 @@
                           <template x-if="widget.type === 'ti_top_sources'">
                             <div class="ti-widget-card">
                               <div class="ti-widget-title" x-text="widget.title || 'Top Sources (7d)'"></div>
-                              <template x-if="tiStats && tiStats.service_stats && tiStats.service_stats.filter(s=>s.total>0).length > 0">
-                                <div style="height:220px;position:relative;">
-                                  <canvas :id="'tid-chart-' + widget.id"></canvas>
-                                </div>
-                              </template>
-                              <template x-if="!tiStats || !tiStats.service_stats || tiStats.service_stats.filter(s=>s.total>0).length === 0">
-                                <div class="text-muted text-sm text-center" style="padding:24px 0;">
-                                  No source data for the past 7 days.
-                                </div>
-                              </template>
+                              <!-- Loading -->
+                              <div x-show="dataLoading" style="height:220px;display:flex;align-items:center;justify-content:center;">
+                                <span class="spinner" style="width:22px;height:22px;"></span>
+                              </div>
+                              <!-- Empty -->
+                              <div x-show="!dataLoading && !hasTiSourceStats()"
+                                   class="text-muted text-sm text-center" style="height:220px;display:flex;align-items:center;justify-content:center;">
+                                No source data for the past 7 days.
+                              </div>
+                              <!-- Chart canvas (always in DOM) -->
+                              <div x-show="!dataLoading && hasTiSourceStats()"
+                                   style="height:220px;position:relative;">
+                                <canvas :id="'tid-chart-' + widget.id"></canvas>
+                              </div>
                             </div>
                           </template>
 

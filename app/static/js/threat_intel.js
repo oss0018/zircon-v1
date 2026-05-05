@@ -34,9 +34,11 @@ document.addEventListener('alpine:init', () => {
     // Stats / charts
     stats: null,
     statsLoading: false,
+    statsError: false,
     _charts: {},
     _summaryChart: null,
     _severityChart: null,
+    _topSourcesChart: null,
 
     // History filter
     historyFilter: { type: '', source: '', date: '' },
@@ -90,17 +92,28 @@ document.addEventListener('alpine:init', () => {
 
     async loadStats() {
       this.statsLoading = true;
+      this.statsError = false;
       try {
         this.stats = await api.get('/ti/stats');
-        this.$nextTick(() => this._renderCharts());
+        // Double $nextTick: first tick lets Alpine update x-show bindings,
+        // second tick ensures canvases are fully laid out and measurable.
+        await this.$nextTick();
+        await this.$nextTick();
+        this._renderCharts();
       } catch (e) {
         this.stats = null;
+        this.statsError = true;
       } finally {
         this.statsLoading = false;
       }
     },
 
     // ── Chart rendering ────────────────────────────────────────────────────
+
+    /** Returns true when there is at least one source with lookups in the past 7 days. */
+    hasSourceStats() {
+      return !!(this.stats && this.stats.service_stats && this.stats.service_stats.some(s => s.total > 0));
+    },
 
     _renderCharts() {
       this._renderSummaryDoughnut();
