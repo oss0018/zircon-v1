@@ -174,3 +174,35 @@ class TILookupHistory(Base):
     results_json = Column(Text, default="{}")        # Full JSON results keyed by service type
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=_utcnow)
+
+
+# ── TI Dashboard (Variant B) ──────────────────────────────────────────────
+
+class TIDashboard(Base):
+    """Manifest-driven Threat Intelligence dashboard."""
+    __tablename__ = "ti_dashboards"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    slug = Column(String(100), unique=True, nullable=False)
+    scope = Column(String(20), default="global")   # "user" | "global"
+    is_default = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    widgets = relationship(
+        "TIWidget",
+        back_populates="dashboard",
+        cascade="all, delete-orphan",
+        order_by="TIWidget.id",
+    )
+
+
+class TIWidget(Base):
+    """Widget placed on a TI dashboard."""
+    __tablename__ = "ti_widgets"
+    id = Column(Integer, primary_key=True)
+    dashboard_id = Column(Integer, ForeignKey("ti_dashboards.id"), nullable=False)
+    type = Column(String(50), nullable=False)          # e.g. "ti_stats", "ti_recent_lookups"
+    title = Column(String(200), nullable=False, default="")
+    params_json = Column(Text, default="{}")            # JSON widget parameters
+    layout_json = Column(Text, default='{"x":0,"y":0,"w":12,"h":2}')  # JSON {x,y,w,h}
+    dashboard = relationship("TIDashboard", back_populates="widgets")
