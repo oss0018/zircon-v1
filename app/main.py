@@ -11,8 +11,64 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards
 from app.middleware.security_headers import SecurityHeadersMiddleware
+
+
+async def seed_ti_default_dashboard():
+    """Seed a default 'Threat Intelligence Overview' dashboard if none exists."""
+    import json
+    from app.database import AsyncSessionLocal
+    from app.models import TIDashboard, TIWidget
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(TIDashboard).limit(1))
+        if result.scalar_one_or_none():
+            return  # Already seeded
+
+        dashboard = TIDashboard(
+            name="Threat Intelligence Overview",
+            slug="ti-overview",
+            scope="global",
+            is_default=True,
+        )
+        db.add(dashboard)
+        await db.flush()  # get dashboard.id without committing
+
+        widgets = [
+            TIWidget(
+                dashboard_id=dashboard.id,
+                type="ti_stats",
+                title="Overview",
+                params_json="{}",
+                layout_json=json.dumps({"x": 0, "y": 0, "w": 12, "h": 1}),
+            ),
+            TIWidget(
+                dashboard_id=dashboard.id,
+                type="ti_quick_search",
+                title="Quick IOC Search",
+                params_json="{}",
+                layout_json=json.dumps({"x": 0, "y": 1, "w": 12, "h": 2}),
+            ),
+            TIWidget(
+                dashboard_id=dashboard.id,
+                type="ti_recent_lookups",
+                title="Recent Lookups",
+                params_json=json.dumps({"limit": 10}),
+                layout_json=json.dumps({"x": 0, "y": 2, "w": 7, "h": 3}),
+            ),
+            TIWidget(
+                dashboard_id=dashboard.id,
+                type="ti_source_distribution",
+                title="Lookups by Source (7d)",
+                params_json="{}",
+                layout_json=json.dumps({"x": 7, "y": 2, "w": 5, "h": 3}),
+            ),
+        ]
+        db.add_all(widgets)
+        await db.commit()
+        print("[init] Default TI dashboard seeded: 'Threat Intelligence Overview'")
 
 
 async def create_default_admin():
@@ -72,6 +128,7 @@ def start_http_redirect(http_port: int, https_port: int):
 async def lifespan(app: FastAPI):
     await init_db()
     await create_default_admin()
+    await seed_ti_default_dashboard()
 
     from app.services.search_engine import search_engine
     search_engine.init_index()
@@ -133,6 +190,7 @@ app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboar
 app.include_router(cve.router, prefix="/api/v1/cve", tags=["cve"])
 app.include_router(deep_search.router, prefix="/api/v1/deep-search", tags=["deep-search"])
 app.include_router(threat_intel.router, prefix="/api/v1/ti", tags=["threat-intel"])
+app.include_router(ti_dashboards.router, prefix="/api/v1/ti-dashboards", tags=["ti-dashboards"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)

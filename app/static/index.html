@@ -24,6 +24,7 @@
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/deep_search.js"></script>
   <script src="/static/js/threat_intel.js"></script>
+  <script src="/static/js/ti_dashboard.js"></script>
 
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container"></div>
@@ -159,6 +160,12 @@
                   </svg>
                   <span>Threat Intelligence</span>
                 </div>
+                <div class="nav-sub-item" :class="page === 'ti-dashboard' ? 'active' : ''" @click="navigate('ti-dashboard')">
+                  <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                  </svg>
+                  <span>TI Dashboard</span>
+                </div>
               </div>
             </template>
 
@@ -207,7 +214,7 @@
           <div class="topbar">
             <div class="topbar-title">
               <span class="pulse" style="margin-right:8px;"></span>
-              <span x-text="page === 'brands' ? 'Automation › ' + t('brand_protection') : page === 'monitoring' ? 'Automation › ' + t('monitoring') : page === 'watchlist' ? 'Automation › ' + t('watchlist') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : t(page)"></span>
+              <span x-text="page === 'brands' ? 'Automation › ' + t('brand_protection') : page === 'monitoring' ? 'Automation › ' + t('monitoring') : page === 'watchlist' ? 'Automation › ' + t('watchlist') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : t(page)"></span>
             </div>
             <div class="topbar-actions">
               <span class="text-muted text-sm" x-text="new Date().toLocaleDateString()"></span>
@@ -3164,6 +3171,227 @@
               </template>
 
             </div><!-- /threat-intel -->
+
+            <!-- ── TI DASHBOARD (Variant B) ──────────────────────── -->
+            <div x-show="page === 'ti-dashboard'" x-data="tiDashboardPage" x-init="init()">
+
+              <!-- Breadcrumbs -->
+              <div class="flex items-center gap-1 mb-4 text-sm" style="color:var(--text-muted);">
+                <span>CSINT</span>
+                <span style="margin:0 4px;">›</span>
+                <span style="color:var(--accent-green);">TI Dashboard</span>
+                <span x-show="dataLoading" class="spinner" style="width:12px;height:12px;margin-left:8px;"></span>
+              </div>
+
+              <!-- Loading dashboards -->
+              <template x-if="loading">
+                <div class="card text-center" style="color:var(--text-muted);padding:40px;">
+                  <div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;"></div>
+                  <div>Loading dashboards…</div>
+                </div>
+              </template>
+
+              <!-- No dashboards -->
+              <template x-if="!loading && dashboards.length === 0">
+                <div class="card text-center" style="color:var(--text-muted);padding:40px;">
+                  <div style="font-size:32px;margin-bottom:12px;">📊</div>
+                  <div>No dashboards found.</div>
+                </div>
+              </template>
+
+              <!-- Dashboard selector (visible only when multiple dashboards exist) -->
+              <template x-if="!loading && dashboards.length > 1">
+                <div class="ti-db-selector">
+                  <template x-for="d in dashboards" :key="d.id">
+                    <button class="ti-db-tab"
+                            :class="currentDashboard && currentDashboard.id === d.id ? 'active' : ''"
+                            @click="selectDashboard(d)"
+                            x-text="d.name"></button>
+                  </template>
+                </div>
+              </template>
+
+              <!-- Dashboard grid -->
+              <template x-if="!loading && currentDashboard">
+                <div>
+                  <!-- Render rows (grouped by y coordinate) -->
+                  <template x-for="(row, rowIdx) in widgetRows()" :key="rowIdx">
+                    <div class="ti-dashboard-row">
+                      <template x-for="widget in row" :key="widget.id">
+                        <div :style="`grid-column: span ${widget._layout.w}`">
+
+                          <!-- ── Widget: ti_stats ─────────────────── -->
+                          <template x-if="widget.type === 'ti_stats'">
+                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+                              <div class="stat-card" style="cursor:default;">
+                                <div class="stat-label">🔌 Active Sources</div>
+                                <div class="stat-value text-green" x-text="statValue('active_sources')"></div>
+                              </div>
+                              <div class="stat-card" style="cursor:default;">
+                                <div class="stat-label">🔎 Lookups (7d)</div>
+                                <div class="stat-value" x-text="statValue('lookups_7d')"></div>
+                              </div>
+                              <div class="stat-card" style="cursor:default;">
+                                <div class="stat-label">📋 History</div>
+                                <div class="stat-value" x-text="statValue('history')"></div>
+                              </div>
+                              <div class="stat-card" style="cursor:default;">
+                                <div class="stat-label">🆓 Free Sources</div>
+                                <div class="stat-value text-green" x-text="statValue('free_connectors')"></div>
+                              </div>
+                            </div>
+                          </template>
+
+                          <!-- ── Widget: ti_quick_search ─────────── -->
+                          <template x-if="widget.type === 'ti_quick_search'">
+                            <div class="ti-widget-card">
+                              <div class="ti-widget-title" x-text="widget.title || 'Quick IOC Search'"></div>
+                              <div class="flex gap-2 flex-wrap">
+                                <input class="form-input" type="text" x-model="qsIoc"
+                                       placeholder="IP, domain, hash, URL, email…"
+                                       style="flex:3;min-width:180px;" maxlength="512"
+                                       @keyup.enter="runQuickSearch()" />
+                                <select class="form-select" x-model="qsIocType" style="width:115px;">
+                                  <template x-for="tp in iocTypes" :key="tp">
+                                    <option :value="tp" x-text="tp.charAt(0).toUpperCase() + tp.slice(1)"></option>
+                                  </template>
+                                </select>
+                                <button class="btn btn-primary" @click="runQuickSearch()"
+                                        :disabled="qsLoading || !qsIoc.trim()" style="min-width:96px;">
+                                  <span x-show="qsLoading" class="spinner" style="width:13px;height:13px;"></span>
+                                  <span x-text="qsLoading ? 'Searching…' : '🔍 Search'"></span>
+                                </button>
+                                <button class="btn btn-secondary" x-show="qsResult || qsError"
+                                        @click="clearQuickSearch()">✕ Clear</button>
+                              </div>
+                              <div x-show="qsError" class="alert alert-error text-sm mt-3" x-text="qsError"></div>
+                              <!-- Quick result summary -->
+                              <template x-if="qsResult && qsResult.normalized">
+                                <div class="ti-qs-result">
+                                  <div class="flex items-center gap-3">
+                                    <div style="font-size:28px;line-height:1;" x-text="verdictIcon(qsResult.normalized.verdict)"></div>
+                                    <div>
+                                      <div style="font-weight:700;font-size:14px;" x-text="qsResult.ioc"></div>
+                                      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+                                        <span class="ti-threat-badge"
+                                              :class="'ti-threat-' + (qsResult.normalized.verdict || 'none')"
+                                              x-text="(qsResult.normalized.verdict || 'unknown').toUpperCase()"></span>
+                                        <span class="badge badge-gray" x-text="qsResult.ioc_type"></span>
+                                      </div>
+                                    </div>
+                                    <template x-if="confidencePct(qsResult.normalized.confidence) !== null">
+                                      <div style="margin-left:auto;text-align:right;">
+                                        <div style="font-size:11px;color:var(--text-muted);">Confidence</div>
+                                        <div style="font-weight:700;" x-text="confidencePct(qsResult.normalized.confidence) + '%'"></div>
+                                      </div>
+                                    </template>
+                                  </div>
+                                  <div x-show="qsResult.normalized.summary"
+                                       class="text-sm mt-2"
+                                       style="color:var(--text-secondary);"
+                                       x-text="qsResult.normalized.summary"></div>
+                                  <div class="mt-2">
+                                    <button class="btn btn-sm btn-secondary" @click="navigate('threat-intel')">
+                                      Open in TI Lookup →
+                                    </button>
+                                  </div>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- ── Widget: ti_recent_lookups ───────── -->
+                          <template x-if="widget.type === 'ti_recent_lookups'">
+                            <div class="ti-widget-card">
+                              <div class="ti-widget-title flex items-center justify-between">
+                                <span x-text="widget.title || 'Recent Lookups'"></span>
+                                <button class="btn btn-sm btn-secondary" @click="loadData()"
+                                        title="Refresh" style="padding:2px 8px;">↺</button>
+                              </div>
+                              <template x-if="tiHistory.length === 0">
+                                <div class="text-muted text-sm text-center" style="padding:20px 0;">
+                                  No lookups yet — use TI Lookup or Quick Search to start.
+                                </div>
+                              </template>
+                              <template x-if="tiHistory.length > 0">
+                                <table class="table" style="font-size:12px;">
+                                  <thead>
+                                    <tr>
+                                      <th>IOC</th>
+                                      <th>Type</th>
+                                      <th>Sources</th>
+                                      <th>When</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <template x-for="row in tiHistory.slice(0, parseParams(widget).limit || 10)" :key="row.id">
+                                      <tr class="cursor-pointer" @click="navigate('threat-intel')" title="Open TI Lookup">
+                                        <td class="text-green font-mono"
+                                            style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                                            x-text="row.ioc_value"></td>
+                                        <td><span class="badge badge-gray" x-text="row.ioc_type"></span></td>
+                                        <td class="text-muted" x-text="(row.sources || []).length + ' src'"></td>
+                                        <td class="text-muted" x-text="formatDate(row.created_at)"></td>
+                                      </tr>
+                                    </template>
+                                  </tbody>
+                                </table>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- ── Widget: ti_source_distribution ──── -->
+                          <template x-if="widget.type === 'ti_source_distribution'">
+                            <div class="ti-widget-card">
+                              <div class="ti-widget-title" x-text="widget.title || 'Lookups by Source (7d)'"></div>
+                              <template x-if="tiStats && tiStats.service_stats && tiStats.service_stats.filter(s=>s.total>0).length > 0">
+                                <div style="height:220px;position:relative;">
+                                  <canvas :id="'tid-chart-' + widget.id"></canvas>
+                                </div>
+                              </template>
+                              <template x-if="!tiStats || !tiStats.service_stats || tiStats.service_stats.filter(s=>s.total>0).length === 0">
+                                <div class="text-muted text-sm text-center" style="padding:24px 0;">
+                                  No source data for the past 7 days.
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- ── Widget: ti_top_sources ───────────── -->
+                          <template x-if="widget.type === 'ti_top_sources'">
+                            <div class="ti-widget-card">
+                              <div class="ti-widget-title" x-text="widget.title || 'Top Sources (7d)'"></div>
+                              <template x-if="tiStats && tiStats.service_stats && tiStats.service_stats.filter(s=>s.total>0).length > 0">
+                                <div style="height:220px;position:relative;">
+                                  <canvas :id="'tid-chart-' + widget.id"></canvas>
+                                </div>
+                              </template>
+                              <template x-if="!tiStats || !tiStats.service_stats || tiStats.service_stats.filter(s=>s.total>0).length === 0">
+                                <div class="text-muted text-sm text-center" style="padding:24px 0;">
+                                  No source data for the past 7 days.
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- ── Widget: unknown type fallback ────── -->
+                          <template x-if="!isKnownType(widget.type)">
+                            <div class="ti-widget-card">
+                              <div class="ti-widget-title" x-text="widget.title || widget.type"></div>
+                              <div class="text-muted text-sm">
+                                Widget type "<span x-text="widget.type"></span>" is not yet implemented.
+                              </div>
+                            </div>
+                          </template>
+
+                        </div><!-- /widget column -->
+                      </template>
+                    </div><!-- /row -->
+                  </template>
+                </div>
+              </template>
+
+            </div><!-- /ti-dashboard -->
 
           </div><!-- /page-content (moved closing tag) -->
         </main>

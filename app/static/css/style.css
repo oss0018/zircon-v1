@@ -1283,3 +1283,72 @@ mark.highlight {
   color: var(--text-muted);
   font-size: 10px;
 }
+
+/* ── TI Dashboard Grid (Variant B) ──────────────────────────────── */
+.ti-dashboard-row {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+  align-items: start;
+}
+
+.ti-widget-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 16px;
+  min-height: 60px;
+  transition: border-color 0.2s;
+}
+
+.ti-widget-card:hover {
+  border-color: var(--border-hover);
+}
+
+.ti-widget-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+}
+
+.ti-db-selector {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.ti-db-tab {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+
+.ti-db-tab:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.ti-db-tab.active {
+  background: rgba(0, 255, 157, 0.1);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.ti-qs-result {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}

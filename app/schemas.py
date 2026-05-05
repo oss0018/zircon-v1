@@ -359,6 +359,55 @@ class DeepSearchResponse(BaseModel):
     total_matches: int
 
 
+# ── TI Dashboards (Variant B) ─────────────────────────────────────────────────
+class TIWidgetCreate(BaseModel):
+    type: str
+    title: str = ""
+    params_json: str = "{}"
+    layout_json: str = '{"x":0,"y":0,"w":12,"h":2}'
+
+    @field_validator("type", "title")
+    @classmethod
+    def sanitize_fields(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=200)
+
+
+class TIWidgetOut(BaseModel):
+    id: int
+    dashboard_id: int
+    type: str
+    title: str
+    params_json: str
+    layout_json: str
+
+    model_config = {"from_attributes": True}
+
+
+class TIDashboardCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    slug: str = Field(..., min_length=1, max_length=100)
+    scope: str = "global"
+    is_default: bool = False
+
+    @field_validator("name", "slug")
+    @classmethod
+    def sanitize_fields(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=200)
+
+
+class TIDashboardOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    scope: str
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+    widgets: List[TIWidgetOut] = []
+
+    model_config = {"from_attributes": True}
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 class DashboardStats(BaseModel):
     total_files: int

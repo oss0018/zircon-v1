@@ -4,3 +4,5 @@ __pycache__/
 cert.pem
 key.pem
 .venv/
+data/db/
+data/index/
