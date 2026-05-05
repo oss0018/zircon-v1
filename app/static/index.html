@@ -278,12 +278,23 @@
 
                 <div class="card">
                   <div class="card-title" x-text="t('file_types')"></div>
-                  <div style="height:200px;display:flex;align-items:center;justify-content:center;">
-                    <template x-if="stats && Object.keys(stats.file_types).length > 0">
-                      <canvas id="fileTypeChart"></canvas>
-                    </template>
-                    <template x-if="!stats || Object.keys(stats.file_types || {}).length === 0">
-                      <p class="text-muted text-sm" x-text="t('no_data')"></p>
+                  <!-- Loading state -->
+                  <div x-show="loading" style="padding:20px 0;text-align:center;">
+                    <span class="spinner" style="width:18px;height:18px;"></span>
+                  </div>
+                  <!-- Empty state -->
+                  <div x-show="!loading && (!stats || Object.keys(stats.file_types || {}).length === 0)"
+                       style="padding:20px 0;text-align:center;">
+                    <p class="text-muted text-sm" x-text="t('no_data')"></p>
+                  </div>
+                  <!-- File types list -->
+                  <div x-show="!loading && stats && Object.keys(stats.file_types || {}).length > 0"
+                       style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 0;min-height:40px;">
+                    <template x-for="[ext, count] in Object.entries(stats ? stats.file_types : {}).sort((a,b) => b[1]-a[1])" :key="ext">
+                      <span class="badge badge-gray"
+                            style="font-family:'JetBrains Mono',monospace;font-size:12px;padding:4px 10px;">
+                        <span x-text="ext"></span><span style="opacity:0.65;margin-left:4px;" x-text="'('+count+')'"></span>
+                      </span>
                     </template>
                   </div>
                 </div>
