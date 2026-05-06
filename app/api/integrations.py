@@ -25,6 +25,7 @@ KNOWN_SERVICES = [
     {"type": "securitytrails", "name": "SecurityTrails", "url": "https://securitytrails.com"},
     {"type": "abuseipdb", "name": "AbuseIPDB", "url": "https://abuseipdb.com"},
     {"type": "alienvault", "name": "AlienVault OTX", "url": "https://otx.alienvault.com"},
+    {"type": "opensquat", "name": "openSquat", "url": "https://opensquat.com"},
 ]
 
 
