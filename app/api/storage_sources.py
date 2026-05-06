@@ -183,8 +183,12 @@ async def test_storage_source(
         connector = get_connector(source.source_type, config)
         loop = asyncio.get_event_loop()
         test_result = await loop.run_in_executor(None, connector.test_connection)
-    except Exception as exc:
+    except ValueError as exc:
+        # Invalid source type — safe to surface
         test_result = {"ok": False, "message": str(exc)}
+    except Exception:
+        logger.exception("Error testing storage source %d", source_id)
+        test_result = {"ok": False, "message": "Connection test failed — check server logs for details"}
 
     return test_result
 

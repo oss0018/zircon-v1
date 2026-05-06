@@ -9,20 +9,20 @@ Limits (defaults; per-source overrides via StorageSource.max_file_size_mb):
 """
 import asyncio
 import hashlib
-import io
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
 from app.models import StorageSource, StorageFileCatalog
 from app.services.connectors import get_connector, FileEntry
-from app.services.file_parsers import extract_text, MAX_INDEX_BYTES
+from app.services.file_parsers import extract_text
 from app.services.search_engine import search_engine
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,23 @@ logger = logging.getLogger(__name__)
 MAX_FILES_SCANNED = 100_000
 MAX_FILES_INDEXED = 10_000
 RUN_TIMEOUT_SEC = 900  # 15 minutes
+
+
+@dataclass
+class _CatalogUpdate:
+    """Carries the result of processing a single file back to the async layer."""
+    path: str
+    size: int
+    mtime: Optional[datetime]
+    etag: str
+    content_hash: str
+    status: str   # indexed | error | skipped
+    error: str
+    doc_id: str
+    doc_filename: str
+    doc_text: str
+    doc_file_type: str
+    doc_project: str
 
 
 def _doc_id(source_id: int, path: str) -> str:
@@ -58,6 +75,7 @@ def _extract_text_from_bytes(data: bytes, filename: str) -> str:
     """Extract text from raw bytes using existing file_parsers (via tmp file)."""
     import tempfile
     suffix = Path(filename).suffix.lower()
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(data)
@@ -67,11 +85,130 @@ def _extract_text_from_bytes(data: bytes, filename: str) -> str:
         logger.warning("[storage_indexer] extract_text failed for %s: %s", filename, exc)
         text = ""
     finally:
-        try:
-            Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
     return text
+
+
+def _sync_index_source(
+    source_id: int,
+    source_type: str,
+    config: dict,
+    recursive: bool,
+    max_file_size_bytes: int,
+    existing_catalog: dict,  # path → StorageFileCatalog-like namedtuple
+    start_time: float,
+) -> tuple[list[_CatalogUpdate], int, int, int, str]:
+    """
+    Purely synchronous worker: lists files, downloads, extracts, indexes.
+    Returns (catalog_updates, scanned, indexed, errors, error_msg).
+    This function runs in a thread pool executor with no running event loop.
+    """
+    scanned = 0
+    indexed = 0
+    errors = 0
+    error_msg = ""
+    updates: list[_CatalogUpdate] = []
+
+    try:
+        connector = get_connector(source_type, config)
+        file_entries = list(
+            connector.list_files(
+                path="",
+                recursive=recursive,
+                max_files=MAX_FILES_SCANNED,
+            )
+        )
+    except Exception as exc:
+        logger.error("[storage_indexer] list_files failed for source %d: %s", source_id, exc)
+        return [], 0, 0, 1, str(exc)
+
+    for entry in file_entries:
+        if time.monotonic() - start_time > RUN_TIMEOUT_SEC:
+            logger.warning("[storage_indexer] run timeout reached for source %d", source_id)
+            break
+        if entry.size > max_file_size_bytes:
+            scanned += 1
+            continue
+        if indexed >= MAX_FILES_INDEXED:
+            break
+
+        scanned += 1
+
+        # Check if up to date using in-memory catalog snapshot
+        existing = existing_catalog.get(entry.path)
+        if existing and not _needs_reindex(existing, entry):
+            continue  # up to date
+
+        # Download file
+        try:
+            data = connector.get_file_bytes(entry.path, max_bytes=max_file_size_bytes)
+        except Exception as exc:
+            logger.warning("[storage_indexer] download failed %s: %s", entry.path, exc)
+            errors += 1
+            updates.append(_CatalogUpdate(
+                path=entry.path, size=entry.size, mtime=entry.mtime, etag=entry.etag or "",
+                content_hash="", status="error", error=str(exc)[:512],
+                doc_id="", doc_filename="", doc_text="", doc_file_type="", doc_project="",
+            ))
+            continue
+
+        # Compute content hash
+        content_hash = hashlib.sha256(data).hexdigest()
+
+        # Skip unchanged content
+        if existing and existing.content_hash and existing.content_hash == content_hash:
+            updates.append(_CatalogUpdate(
+                path=entry.path, size=entry.size, mtime=entry.mtime, etag=entry.etag or "",
+                content_hash=content_hash, status="indexed", error="",
+                doc_id="", doc_filename="", doc_text="", doc_file_type="", doc_project="",
+            ))
+            continue
+
+        # Extract text
+        filename = Path(entry.path).name
+        text = _extract_text_from_bytes(data, filename)
+        if not text.strip():
+            updates.append(_CatalogUpdate(
+                path=entry.path, size=entry.size, mtime=entry.mtime, etag=entry.etag or "",
+                content_hash=content_hash, status="skipped", error="",
+                doc_id="", doc_filename="", doc_text="", doc_file_type="", doc_project="",
+            ))
+            continue
+
+        # Index into Whoosh
+        doc_id = _doc_id(source_id, entry.path)
+        file_type = Path(entry.path).suffix.lstrip(".")
+        project = f"storage_source_{source_id}"
+        try:
+            search_engine.index_document(
+                doc_id=doc_id,
+                filename=filename,
+                content=text,
+                file_type=file_type,
+                project=project,
+                path=entry.path,
+            )
+            updates.append(_CatalogUpdate(
+                path=entry.path, size=entry.size, mtime=entry.mtime, etag=entry.etag or "",
+                content_hash=content_hash, status="indexed", error="",
+                doc_id=doc_id, doc_filename=filename, doc_text=text,
+                doc_file_type=file_type, doc_project=project,
+            ))
+            indexed += 1
+        except Exception as exc:
+            logger.warning("[storage_indexer] index_document failed %s: %s", entry.path, exc)
+            errors += 1
+            updates.append(_CatalogUpdate(
+                path=entry.path, size=entry.size, mtime=entry.mtime, etag=entry.etag or "",
+                content_hash=content_hash, status="error", error=str(exc)[:512],
+                doc_id="", doc_filename="", doc_text="", doc_file_type="", doc_project="",
+            ))
+
+    return updates, scanned, indexed, errors, error_msg
 
 
 async def run_source_indexing(source_id: int) -> dict:
@@ -98,111 +235,56 @@ async def run_source_indexing(source_id: int) -> dict:
     errors = 0
     error_msg = ""
 
-    max_file_size_bytes = (source.max_file_size_mb or 25) * 1024 * 1024
-
     try:
         # Decrypt and parse config
         from app.services.crypto import decrypt
         import json
         config = json.loads(decrypt(source.config_encrypted) or "{}")
 
-        connector = get_connector(source.source_type, config)
+        max_file_size_bytes = (source.max_file_size_mb or 25) * 1024 * 1024
 
-        # Run listing + indexing in an executor (connectors are sync)
+        # Load existing catalog into memory for the sync worker
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(StorageFileCatalog).where(StorageFileCatalog.source_id == source_id)
+            )
+            existing_catalog = {e.path: e for e in result.scalars().all()}
+
+        # Run sync listing/indexing in a thread pool executor
         loop = asyncio.get_event_loop()
+        updates, scanned, indexed, errors, error_msg = await loop.run_in_executor(
+            None,
+            _sync_index_source,
+            source_id,
+            source.source_type,
+            config,
+            source.recursive,
+            max_file_size_bytes,
+            existing_catalog,
+            start_time,
+        )
 
-        def _do_index() -> tuple[int, int, int, str]:
-            nonlocal scanned, indexed, errors, error_msg
-            _scanned = 0
-            _indexed = 0
-            _errors = 0
-            _error_msg = ""
+        # Apply catalog updates back in the async layer (no nested asyncio.run)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        async with AsyncSessionLocal() as db:
+            for upd in updates:
+                catalog = existing_catalog.get(upd.path)
+                if catalog is None:
+                    catalog = StorageFileCatalog(source_id=source_id, path=upd.path)
+                    db.add(catalog)
+                    # Reload from DB next time via refresh; for now build fresh
+                catalog.size = upd.size
+                catalog.mtime = upd.mtime
+                catalog.etag = upd.etag
+                if upd.content_hash:
+                    catalog.content_hash = upd.content_hash
+                catalog.status = upd.status
+                catalog.error = upd.error
+                if upd.status == "indexed":
+                    catalog.last_indexed_at = now
+                catalog.updated_at = now
+            await db.commit()
 
-            try:
-                file_entries = list(
-                    connector.list_files(
-                        path="",
-                        recursive=source.recursive,
-                        max_files=MAX_FILES_SCANNED,
-                    )
-                )
-            except Exception as exc:
-                logger.error("[storage_indexer] list_files failed for source %d: %s", source_id, exc)
-                return 0, 0, 1, str(exc)
-
-            for entry in file_entries:
-                if time.monotonic() - start_time > RUN_TIMEOUT_SEC:
-                    logger.warning("[storage_indexer] run timeout reached for source %d", source_id)
-                    break
-                if entry.size > max_file_size_bytes:
-                    _scanned += 1
-                    continue
-                if _indexed >= MAX_FILES_INDEXED:
-                    break
-
-                _scanned += 1
-
-                # Check catalog (synchronous DB call via new session)
-                import asyncio as _asyncio
-                catalog = None
-                try:
-                    catalog = _asyncio.run(_get_catalog_entry(source_id, entry.path))
-                except Exception:
-                    pass  # proceed without catalog info
-
-                if catalog and not _needs_reindex(catalog, entry):
-                    continue  # up to date
-
-                # Download file
-                try:
-                    data = connector.get_file_bytes(entry.path, max_bytes=max_file_size_bytes)
-                except Exception as exc:
-                    logger.warning("[storage_indexer] download failed %s: %s", entry.path, exc)
-                    _errors += 1
-                    _asyncio.run(_upsert_catalog(source_id, entry, status="error", error=str(exc)[:512]))
-                    continue
-
-                # Compute content hash
-                content_hash = hashlib.sha256(data).hexdigest()
-
-                # Skip unchanged content even if mtime/etag differ
-                if catalog and catalog.content_hash and catalog.content_hash == content_hash:
-                    _asyncio.run(_upsert_catalog(source_id, entry, status="indexed",
-                                                  content_hash=content_hash))
-                    continue
-
-                # Extract text
-                filename = Path(entry.path).name
-                text = _extract_text_from_bytes(data, filename)
-                if not text.strip():
-                    _asyncio.run(_upsert_catalog(source_id, entry, status="skipped",
-                                                  content_hash=content_hash))
-                    continue
-
-                # Index into Whoosh
-                doc_id = _doc_id(source_id, entry.path)
-                try:
-                    search_engine.index_document(
-                        doc_id=doc_id,
-                        filename=filename,
-                        content=text,
-                        file_type=Path(entry.path).suffix.lstrip("."),
-                        project=f"storage_source_{source_id}",
-                        path=entry.path,
-                    )
-                except Exception as exc:
-                    logger.warning("[storage_indexer] index_document failed %s: %s", entry.path, exc)
-                    _errors += 1
-                    _asyncio.run(_upsert_catalog(source_id, entry, status="error", error=str(exc)[:512]))
-                    continue
-
-                _asyncio.run(_upsert_catalog(source_id, entry, status="indexed",
-                                              content_hash=content_hash))
-                _indexed += 1
-
-            return _scanned, _indexed, _errors, _error_msg
-
-        scanned, indexed, errors, error_msg = await loop.run_in_executor(None, _do_index)
         status = "error" if errors and not indexed else "ok"
 
     except Exception as exc:
@@ -236,49 +318,3 @@ async def run_source_indexing(source_id: int) -> dict:
         "elapsed_sec": round(elapsed, 1),
         "status": status,
     }
-
-
-async def _get_catalog_entry(source_id: int, path: str) -> Optional[StorageFileCatalog]:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(StorageFileCatalog).where(
-                StorageFileCatalog.source_id == source_id,
-                StorageFileCatalog.path == path,
-            )
-        )
-        return result.scalar_one_or_none()
-
-
-async def _upsert_catalog(
-    source_id: int,
-    entry: FileEntry,
-    status: str = "indexed",
-    content_hash: str = "",
-    error: str = "",
-) -> None:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(StorageFileCatalog).where(
-                StorageFileCatalog.source_id == source_id,
-                StorageFileCatalog.path == entry.path,
-            )
-        )
-        catalog = result.scalar_one_or_none()
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        if catalog is None:
-            catalog = StorageFileCatalog(
-                source_id=source_id,
-                path=entry.path,
-            )
-            db.add(catalog)
-
-        catalog.size = entry.size
-        catalog.mtime = entry.mtime
-        catalog.etag = entry.etag or ""
-        catalog.content_hash = content_hash or catalog.content_hash
-        catalog.status = status
-        catalog.error = error
-        if status == "indexed":
-            catalog.last_indexed_at = now
-        catalog.updated_at = now
-        await db.commit()

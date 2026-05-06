@@ -82,7 +82,7 @@ def start_scheduler():
         replace_existing=True,
     )
     _scheduler.start()
-    print("[scheduler] Started. Watched folder scan every 5 minutes. Storage sources checked every 10 minutes.")
+    print("[scheduler] Started. Watched folder scan every 5 minutes. Storage sources schedule evaluated every 10 minutes.")
 
 
 def _is_source_due(source) -> bool:

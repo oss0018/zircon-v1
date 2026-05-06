@@ -1139,7 +1139,7 @@
                           </select>
                         </template>
                         <template x-if="field.type !== 'textarea' && field.type !== 'select'">
-                          <input class="form-input" :type="field.key === 'password' || field.key === 'secret_key' || field.key === 'token' ? 'text' : field.type"
+                          <input class="form-input" :type="field.type"
                                  x-model="editConfig[field.key]"
                                  :placeholder="field.placeholder || ''"
                                  autocomplete="off" />

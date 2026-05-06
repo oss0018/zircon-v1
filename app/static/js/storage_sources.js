@@ -1,6 +1,6 @@
 /**
  * Zircon FRT — Storage Sources page
- * System → API & Integrations → Storage Sources
+ * System → Storage Sources
  */
 document.addEventListener('alpine:init', () => {
   Alpine.data('storageSourcesPage', () => ({
