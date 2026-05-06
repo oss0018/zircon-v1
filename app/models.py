@@ -48,6 +48,7 @@ class Integration(Base):
     name = Column(String(100), nullable=False)
     service_type = Column(String(50), nullable=False, unique=True)
     api_key_encrypted = Column(Text, default="")
+    base_url = Column(String(512), default="")
     is_active = Column(Boolean, default=False)
     rate_limit = Column(Integer, default=60)
     cache_ttl = Column(Integer, default=3600)

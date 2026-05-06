@@ -136,6 +136,24 @@ def _migrate_storage_sources(conn) -> None:
         logger.warning("Could not migrate storage tables: %s", exc)
 
 
+def _migrate_integrations(conn) -> None:
+    """Add base_url column to integrations table if it is missing."""
+    from sqlalchemy import inspect, text
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+        if "integrations" not in tables:
+            return
+        existing_cols = {c["name"] for c in inspector.get_columns("integrations")}
+        if "base_url" not in existing_cols:
+            conn.execute(
+                text("ALTER TABLE integrations ADD COLUMN base_url VARCHAR(512) DEFAULT ''")
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate integrations: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -149,3 +167,5 @@ async def init_db():
         # Add storage_sources and storage_file_catalog tables (no-op if they already exist)
         # create_all handles this; migration below handles columns added later
         await conn.run_sync(_migrate_storage_sources)
+        # Add base_url to integrations if upgrading from older version
+        await conn.run_sync(_migrate_integrations)

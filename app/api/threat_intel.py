@@ -157,23 +157,23 @@ async def ti_lookup(
     # Build source list: configured integrations + free sources
     # Free sources are always included unless specific sources are requested
     configured_types = {i.service_type for i in integrations}
-    sources_to_query: list[tuple[str, str]] = []  # (service_type, api_key)
+    sources_to_query: list[tuple[str, str, str]] = []  # (service_type, api_key, base_url)
 
     for i in integrations:
         if requested_sources is None or i.service_type in requested_sources:
             api_key = decrypt(i.api_key_encrypted) if i.api_key_encrypted else ""
-            sources_to_query.append((i.service_type, api_key))
+            sources_to_query.append((i.service_type, api_key, i.base_url or ""))
 
     for svc in sorted(TI_FREE_SOURCES):
         if svc not in configured_types:
             if requested_sources is None or svc in requested_sources:
-                sources_to_query.append((svc, ""))
+                sources_to_query.append((svc, "", ""))
 
     if not sources_to_query:
         raise HTTPException(status_code=400, detail="No active TI integrations configured")
 
-    async def _query(svc_type: str, api_key: str) -> tuple[str, dict]:
-        client = get_client(svc_type, api_key)
+    async def _query(svc_type: str, api_key: str, base_url: str) -> tuple[str, dict]:
+        client = get_client(svc_type, api_key, base_url=base_url)
         if not client:
             return svc_type, {"error": "Client not available"}
         try:
@@ -182,7 +182,7 @@ async def ti_lookup(
         except Exception as exc:
             return svc_type, {"error": str(exc)}
 
-    pairs = await asyncio.gather(*[_query(svc, key) for svc, key in sources_to_query])
+    pairs = await asyncio.gather(*[_query(svc, key, url) for svc, key, url in sources_to_query])
     results = {svc: data for svc, data in pairs}
 
     # Persist to history
@@ -262,23 +262,23 @@ async def ti_search(
     integrations = db_result.scalars().all()
 
     configured_types = {i.service_type for i in integrations}
-    sources_to_query: list[tuple[str, str]] = []
+    sources_to_query: list[tuple[str, str, str]] = []
 
     for i in integrations:
         if requested_sources is None or i.service_type in requested_sources:
             api_key = decrypt(i.api_key_encrypted) if i.api_key_encrypted else ""
-            sources_to_query.append((i.service_type, api_key))
+            sources_to_query.append((i.service_type, api_key, i.base_url or ""))
 
     for svc in sorted(TI_FREE_SOURCES):
         if svc not in configured_types:
             if requested_sources is None or svc in requested_sources:
-                sources_to_query.append((svc, ""))
+                sources_to_query.append((svc, "", ""))
 
     if not sources_to_query:
         raise HTTPException(status_code=400, detail="No active TI integrations configured")
 
-    async def _query(svc_type: str, api_key: str) -> tuple[str, dict]:
-        client = get_client(svc_type, api_key)
+    async def _query(svc_type: str, api_key: str, base_url: str) -> tuple[str, dict]:
+        client = get_client(svc_type, api_key, base_url=base_url)
         if not client:
             return svc_type, {"error": "Client not available"}
         try:
@@ -287,7 +287,7 @@ async def ti_search(
         except Exception as exc:
             return svc_type, {"error": str(exc)}
 
-    pairs = await asyncio.gather(*[_query(svc, key) for svc, key in sources_to_query])
+    pairs = await asyncio.gather(*[_query(svc, key, url) for svc, key, url in sources_to_query])
     raw_results = {svc: data for svc, data in pairs}
 
     # Normalize results

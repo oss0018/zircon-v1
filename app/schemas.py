@@ -95,11 +95,26 @@ class FileUpdate(BaseModel):
         return _sanitize(v.strip(), max_length=255)
 
 
+def _validate_base_url(v: Optional[str]) -> Optional[str]:
+    """Validate that base_url, if provided, starts with http:// or https://."""
+    if v is None:
+        return v
+    v = v.strip()[:512]
+    if v and not v.startswith(("http://", "https://")):
+        from pydantic_core import PydanticCustomError
+        raise PydanticCustomError(
+            "invalid_url_scheme",
+            "Base URL must start with http:// or https://",
+        )
+    return v
+
+
 # ── Integrations ──────────────────────────────────────────────────────────────
 class IntegrationCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     service_type: str
     api_key: str = ""
+    base_url: str = ""
     rate_limit: int = 60
     cache_ttl: int = 3600
 
@@ -108,11 +123,17 @@ class IntegrationCreate(BaseModel):
     def sanitize_fields(cls, v: str) -> str:
         return _sanitize(v.strip(), max_length=200)
 
+    @field_validator("base_url")
+    @classmethod
+    def sanitize_base_url(cls, v: str) -> str:
+        return _validate_base_url(v) or ""
+
 
 class IntegrationOut(BaseModel):
     id: int
     name: str
     service_type: str
+    base_url: str
     is_active: bool
     rate_limit: int
     cache_ttl: int
@@ -124,9 +145,15 @@ class IntegrationOut(BaseModel):
 class IntegrationUpdate(BaseModel):
     name: Optional[str] = None
     api_key: Optional[str] = None
+    base_url: Optional[str] = None
     rate_limit: Optional[int] = None
     cache_ttl: Optional[int] = None
     is_active: Optional[bool] = None
+
+    @field_validator("base_url")
+    @classmethod
+    def sanitize_base_url(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_base_url(v)
 
 
 # ── Search ───────────────────────────────────────────────────────────────────
