@@ -8,8 +8,9 @@ class IntelXClient(BaseOSINTClient):
 
     def __init__(self, api_key: str = "", base_url: str = "", **kwargs):
         super().__init__(api_key=api_key, **kwargs)
-        # Use provided base_url (stripped, no trailing slash) or fall back to default
-        self.base_url = (base_url or INTELX_DEFAULT_BASE_URL).strip().rstrip("/") or INTELX_DEFAULT_BASE_URL
+        # Strip whitespace and trailing slash; fall back to default if empty
+        stripped = (base_url or "").strip().rstrip("/")
+        self.base_url = stripped if stripped else INTELX_DEFAULT_BASE_URL
 
     async def test_connection(self):
         """Verify the API key by calling /authenticate/info (no credits consumed)."""

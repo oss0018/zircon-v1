@@ -51,7 +51,11 @@ class BaseOSINTClient:
             return {"error": str(e)}
 
     async def test_connection(self) -> Dict[str, Any]:
-        """Test connectivity. Subclasses should override with a lightweight endpoint."""
+        """Test connectivity. Subclasses should override with a lightweight endpoint.
+
+        A not_found (HTTP 404) response is treated as ok=True because it means
+        the service is reachable and returned a valid response for the test query.
+        """
         result = await self.search("test", "general")
         ok = "error" not in result or result.get("not_found", False)
         return {"ok": ok, "result": result}
