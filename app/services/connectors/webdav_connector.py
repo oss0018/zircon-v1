@@ -218,7 +218,8 @@ class WebDAVConnector(StorageConnector):
                 for chunk in resp.iter_bytes(chunk_size=65536):
                     total += len(chunk)
                     if total > max_bytes:
-                        chunks.append(chunk[: max_bytes - (total - len(chunk))])
+                        remaining = max_bytes - (total - len(chunk))
+                        chunks.append(chunk[:remaining])
                         break
                     chunks.append(chunk)
         return b"".join(chunks)

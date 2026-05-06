@@ -54,7 +54,7 @@ def start_scheduler():
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
                     select(StorageSource).where(
-                        StorageSource.is_enabled == True,  # noqa: E712
+                        StorageSource.is_enabled.is_(True),
                     )
                 )
                 sources = result.scalars().all()
