@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Zircon FRT — OSINT Portal</title>
+  <title>ZIRCON — OSINT Portal</title>
   <link rel="stylesheet" href="/static/css/style.css" />
   <!-- CDN Dependencies -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -37,7 +37,7 @@
       <div class="login-card">
         <div class="login-logo">
           <h1>⬡ ZIRCON</h1>
-          <p>FRT · OSINT Intelligence Portal</p>
+          <p>OSINT Intelligence Portal</p>
         </div>
 
         <div x-show="loginError" class="alert alert-error" x-text="loginError"></div>
@@ -79,7 +79,7 @@
         <!-- ── SIDEBAR ─────────────────────────────────────────── -->
         <aside class="sidebar">
           <div class="sidebar-logo">
-            <h1>⬡ ZIRCON FRT</h1>
+            <h1>⬡ ZIRCON</h1>
             <p>OSINT Intelligence Portal</p>
           </div>
 
@@ -106,9 +106,9 @@
 
             <div class="nav-section">OSINT</div>
 
-            <div class="nav-item" :class="page === 'integrations' ? 'active' : ''" @click="navigate('integrations')">
-              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-              <span x-text="t('integrations')"></span>
+            <div class="nav-item" :class="page === 'infrastructure-intelligence' ? 'active' : ''" @click="navigate('infrastructure-intelligence')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+              <span x-text="t('infrastructure_intelligence')"></span>
             </div>
 
             <!-- ── Brand Protection Section (collapsible) ── -->
@@ -181,6 +181,11 @@
 
             <div class="nav-section">System</div>
 
+            <div class="nav-item" :class="page === 'integrations' ? 'active' : ''" @click="navigate('integrations')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <span x-text="t('integrations')"></span>
+            </div>
+
             <div class="nav-item" :class="page === 'notifications' ? 'active' : ''" @click="navigate('notifications'); loadStats()">
               <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
               <span x-text="t('notifications')"></span>
@@ -224,7 +229,7 @@
           <div class="topbar">
             <div class="topbar-title">
               <span class="pulse" style="margin-right:8px;"></span>
-              <span x-text="page === 'brands' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : t(page)"></span>
+              <span x-text="page === 'brands' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
             </div>
             <div class="topbar-actions">
               <span class="text-muted text-sm" x-text="new Date().toLocaleDateString()"></span>
@@ -3725,6 +3730,41 @@
             </div><!-- /impersonation-monitoring -->
 
             <!-- ── LOGO & CONTENT MISUSE ───────────────────────────── -->
+            <div x-show="page === 'infrastructure-intelligence'">
+              <div class="flex justify-between items-center mb-4">
+                <div>
+                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;"
+                      x-text="t('infrastructure_intelligence')"></h2>
+                </div>
+              </div>
+
+              <!-- Breadcrumbs -->
+              <div class="flex items-center gap-1 mb-4 text-sm" style="color:var(--text-muted);">
+                <span>OSINT</span>
+                <span style="margin:0 4px;">›</span>
+                <span style="color:var(--accent-green);" x-text="t('infrastructure_intelligence')"></span>
+              </div>
+
+              <div class="card" style="padding:60px 40px;text-align:center;max-width:560px;margin:40px auto;">
+                <div style="margin-bottom:20px;">
+                  <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                       style="display:block;margin:0 auto;opacity:0.35;">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                          d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+                  </svg>
+                </div>
+                <div style="font-size:1.3rem;font-weight:700;color:var(--text-primary);margin-bottom:10px;">
+                  In Development
+                </div>
+                <div class="text-muted" style="font-size:0.9rem;line-height:1.6;margin-bottom:24px;">
+                  Infrastructure Intelligence is currently under development.<br>
+                  This module will provide deep visibility into target infrastructure,
+                  including network topology, exposed services, and asset discovery.
+                </div>
+                <span class="badge badge-yellow" style="font-size:0.8rem;padding:6px 14px;">🚧 Coming Soon</span>
+              </div>
+            </div><!-- /infrastructure-intelligence -->
+
             <div x-show="page === 'logo-content-misuse'">
               <div class="flex justify-between items-center mb-4">
                 <div>
