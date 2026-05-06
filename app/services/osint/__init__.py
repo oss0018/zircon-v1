@@ -33,8 +33,8 @@ OSINT_CLIENTS = {
 }
 
 
-def get_client(service_type: str, api_key: str = ""):
+def get_client(service_type: str, api_key: str = "", **kwargs):
     cls = OSINT_CLIENTS.get(service_type)
     if cls is None:
         return None
-    return cls(api_key=api_key)
+    return cls(api_key=api_key, **kwargs)

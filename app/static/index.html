@@ -893,6 +893,11 @@
                     <label class="form-label" x-text="t('api_key')"></label>
                     <input class="form-input" type="password" x-model="newIntegration.api_key" placeholder="Enter API key" autocomplete="off" />
                   </div>
+                  <div class="form-group" x-show="newIntegration.service_type === 'intelx'">
+                    <label class="form-label">Base URL</label>
+                    <input class="form-input" x-model="newIntegration.base_url" placeholder="https://free.intelx.io" />
+                    <div class="text-xs text-muted" style="margin-top:4px;">Leave default for free tier. Use your plan's endpoint for paid subscriptions.</div>
+                  </div>
                   <div class="grid-2">
                     <div class="form-group">
                       <label class="form-label">Rate Limit (req/min)</label>
@@ -921,6 +926,11 @@
                   <div class="form-group">
                     <label class="form-label" x-text="t('api_key') + ' (leave empty to keep current)'"></label>
                     <input class="form-input" type="password" x-model="editIntegration.api_key" placeholder="Enter new API key or leave empty" autocomplete="off" />
+                  </div>
+                  <div class="form-group" x-show="editIntegration && editIntegration.service_type === 'intelx'">
+                    <label class="form-label">Base URL</label>
+                    <input class="form-input" x-model="editIntegration.base_url" placeholder="https://free.intelx.io" />
+                    <div class="text-xs text-muted" style="margin-top:4px;">Leave default for free tier. Use your plan's endpoint for paid subscriptions.</div>
                   </div>
                   <div class="form-group">
                     <label class="form-label">Active</label>

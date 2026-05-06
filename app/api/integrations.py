@@ -49,10 +49,11 @@ async def create_integration(data: IntegrationCreate, db: AsyncSession = Depends
     integration = Integration(
         name=data.name,
         service_type=data.service_type,
-        api_key_encrypted=encrypt(data.api_key),
+        api_key_encrypted=encrypt(data.api_key.strip()),
+        base_url=data.base_url,
         rate_limit=data.rate_limit,
         cache_ttl=data.cache_ttl,
-        is_active=bool(data.api_key),
+        is_active=bool(data.api_key.strip()),
     )
     db.add(integration)
     await db.commit()
@@ -70,8 +71,10 @@ async def update_integration(integration_id: int, data: IntegrationUpdate,
     if data.name is not None:
         integration.name = data.name
     if data.api_key is not None:
-        integration.api_key_encrypted = encrypt(data.api_key)
-        integration.is_active = bool(data.api_key)
+        integration.api_key_encrypted = encrypt(data.api_key.strip())
+        integration.is_active = bool(data.api_key.strip())
+    if data.base_url is not None:
+        integration.base_url = data.base_url
     if data.rate_limit is not None:
         integration.rate_limit = data.rate_limit
     if data.cache_ttl is not None:
@@ -103,14 +106,12 @@ async def test_integration(integration_id: int, db: AsyncSession = Depends(get_d
     if not integration:
         raise HTTPException(status_code=404, detail="Not found")
     api_key = decrypt(integration.api_key_encrypted)
-    client = get_client(integration.service_type, api_key)
+    client = get_client(integration.service_type, api_key,
+                        base_url=integration.base_url or "")
     if not client:
         return {"ok": False, "error": "Unknown service type"}
     try:
-        # Use a harmless test query
-        result_data = await client.search("test", "general")
-        ok = "error" not in result_data or result_data.get("not_found", False)
-        return {"ok": ok, "result": result_data}
+        return await client.test_connection()
     except Exception:
         return {"ok": False, "error": "Integration test failed"}
 
@@ -123,7 +124,8 @@ async def query_integration(integration_id: int, body: dict,
     if not integration:
         raise HTTPException(status_code=404, detail="Not found")
     api_key = decrypt(integration.api_key_encrypted)
-    client = get_client(integration.service_type, api_key)
+    client = get_client(integration.service_type, api_key,
+                        base_url=integration.base_url or "")
     if not client:
         raise HTTPException(status_code=400, detail="Unknown service type")
     query = body.get("query", "")

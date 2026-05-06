@@ -15,6 +15,7 @@ document.addEventListener('alpine:init', () => {
       service_type: '',
       name: '',
       api_key: '',
+      base_url: '',
       rate_limit: 60,
       cache_ttl: 3600,
     },
@@ -52,6 +53,10 @@ document.addEventListener('alpine:init', () => {
     selectService(svc) {
       this.newIntegration.service_type = svc.type;
       this.newIntegration.name = svc.name;
+      // Pre-fill default base URL for IntelX
+      if (svc.type === 'intelx' && !this.newIntegration.base_url) {
+        this.newIntegration.base_url = 'https://free.intelx.io';
+      }
     },
 
     async createIntegration() {
@@ -59,7 +64,7 @@ document.addEventListener('alpine:init', () => {
         await api.post('/integrations/', this.newIntegration);
         await this.loadIntegrations();
         this.showModal = false;
-        this.newIntegration = { service_type: '', name: '', api_key: '', rate_limit: 60, cache_ttl: 3600 };
+        this.newIntegration = { service_type: '', name: '', api_key: '', base_url: '', rate_limit: 60, cache_ttl: 3600 };
         showToast('Integration added', 'success');
       } catch (e) {
         showToast(e.message, 'error');
@@ -78,6 +83,7 @@ document.addEventListener('alpine:init', () => {
       try {
         const patch = {
           name: this.editIntegration.name,
+          base_url: this.editIntegration.base_url || '',
           rate_limit: this.editIntegration.rate_limit,
           cache_ttl: this.editIntegration.cache_ttl,
           is_active: this.editIntegration.is_active,

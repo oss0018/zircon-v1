@@ -1,9 +1,29 @@
 from app.services.osint.base import BaseOSINTClient
 
+INTELX_DEFAULT_BASE_URL = "https://free.intelx.io"
+
 
 class IntelXClient(BaseOSINTClient):
     service_name = "intelx"
-    base_url = "https://2.intelx.io"
+
+    def __init__(self, api_key: str = "", base_url: str = "", **kwargs):
+        super().__init__(api_key=api_key, **kwargs)
+        # Use provided base_url (stripped, no trailing slash) or fall back to default
+        raw = (base_url or INTELX_DEFAULT_BASE_URL).strip().rstrip("/")
+        self.base_url = raw if raw else INTELX_DEFAULT_BASE_URL
+
+    async def test_connection(self):
+        """Verify the API key by calling /authenticate/info (no credits consumed)."""
+        if not self.api_key:
+            return {"ok": False, "error": "API key not configured"}
+        result = await self._request(
+            "GET",
+            f"{self.base_url}/authenticate/info",
+            headers={"x-key": self.api_key},
+        )
+        if "error" in result:
+            return {"ok": False, "error": result["error"]}
+        return {"ok": True, "result": result}
 
     async def search(self, query: str, query_type: str = "general") -> dict:
         if not self.api_key:

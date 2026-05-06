@@ -10,8 +10,8 @@ class BaseOSINTClient:
     service_name: str = "base"
     base_url: str = ""
 
-    def __init__(self, api_key: str = ""):
-        self.api_key = api_key
+    def __init__(self, api_key: str = "", **kwargs):
+        self.api_key = api_key.strip() if api_key else ""
         self._cache: Dict[str, Dict[str, Any]] = {}
 
     def _cache_key(self, *args) -> str:
@@ -39,6 +39,8 @@ class BaseOSINTClient:
                     return {"not_found": True}
                 elif resp.status_code == 401:
                     return {"error": "Invalid API key"}
+                elif resp.status_code == 403:
+                    return {"error": "Invalid API key or insufficient permissions"}
                 elif resp.status_code == 429:
                     return {"error": "Rate limit exceeded"}
                 else:
@@ -47,6 +49,12 @@ class BaseOSINTClient:
             return {"error": "Request timeout"}
         except Exception as e:
             return {"error": str(e)}
+
+    async def test_connection(self) -> Dict[str, Any]:
+        """Test connectivity. Subclasses should override with a lightweight endpoint."""
+        result = await self.search("test", "general")
+        ok = "error" not in result or result.get("not_found", False)
+        return {"ok": ok, "result": result}
 
     async def search(self, query: str, query_type: str = "general") -> Dict[str, Any]:
         return {"error": "Not implemented"}
