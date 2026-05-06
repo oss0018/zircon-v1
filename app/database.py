@@ -72,6 +72,32 @@ def _migrate_owned_domains(conn) -> None:
         logger.warning("Could not migrate owned_domains: %s", exc)
 
 
+def _migrate_brands(conn) -> None:
+    """Add per-brand generate settings columns to brands table if they are missing."""
+    from sqlalchemy import inspect, text
+    from typing import Dict
+
+    ALLOWED_NEW_COLS: Dict[str, str] = {
+        "generate_mode": "VARCHAR(20) DEFAULT 'domain'",
+        "generate_limit": "INTEGER DEFAULT 1000",
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+        if "brands" not in tables:
+            return
+        existing_cols = {c["name"] for c in inspector.get_columns("brands")}
+        for col_name, col_type in ALLOWED_NEW_COLS.items():
+            if col_name not in existing_cols:
+                # Both col_name and col_type are from a hardcoded whitelist above
+                conn.execute(
+                    text(f"ALTER TABLE brands ADD COLUMN {col_name} {col_type}")
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate brands: %s", exc)
+
+
 def _migrate_storage_sources(conn) -> None:
     """Ensure storage_sources and storage_file_catalog tables have all required columns."""
     from sqlalchemy import inspect, text
@@ -118,6 +144,8 @@ async def init_db():
         await conn.run_sync(_migrate_brand_alerts)
         # Add brand_id to owned_domains if upgrading from older version
         await conn.run_sync(_migrate_owned_domains)
+        # Add per-brand generate settings to brands if upgrading from older version
+        await conn.run_sync(_migrate_brands)
         # Add storage_sources and storage_file_catalog tables (no-op if they already exist)
         # create_all handles this; migration below handles columns added later
         await conn.run_sync(_migrate_storage_sources)

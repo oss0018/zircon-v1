@@ -443,6 +443,43 @@ async def update_alert_status(alert_id: int, body: dict, db: AsyncSession = Depe
 
 # ── Dynamic /{brand_id} routes (must come after static-path routes) ────────────
 
+@router.patch("/{brand_id}/generate-settings")
+async def update_brand_generate_settings(
+    brand_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Persist per-brand Advanced Domain Checks generation settings.
+
+    Body: {
+        "generate_mode": "domain" | "brand_name" | "both",
+        "generate_limit": 1000,
+    }
+    """
+    result = await db.execute(select(Brand).where(Brand.id == brand_id))
+    brand = result.scalar_one_or_none()
+    if not brand:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    raw_mode = str(body.get("generate_mode", brand.generate_mode)).strip().lower()
+    if raw_mode not in ("domain", "brand_name", "both"):
+        raise HTTPException(status_code=400, detail="generate_mode must be 'domain', 'brand_name', or 'both'")
+
+    try:
+        raw_limit = min(int(body.get("generate_limit", brand.generate_limit)), 50_000)
+        if raw_limit < 1:
+            raw_limit = 1
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="generate_limit must be an integer between 1 and 50000")
+
+    brand.generate_mode = raw_mode
+    brand.generate_limit = raw_limit
+    await db.commit()
+    return {"ok": True, "generate_mode": brand.generate_mode, "generate_limit": brand.generate_limit}
+
+
 @router.get("/{brand_id}", response_model=BrandOut)
 async def get_brand(brand_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     result = await db.execute(select(Brand).where(Brand.id == brand_id))

@@ -15,15 +15,13 @@ document.addEventListener('alpine:init', () => {
     showFileScanResults: false,
     // Progress state for async checks
     checkProgress: { running: false, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 },
-    // Generate mode: 'domain' | 'brand_name' | 'both'
-    generateMode: 'domain',
     // Filter state
     filterStatus: 'all',
     filterSimilarity: 0,
     filterQuery: '',
     // Filter for live check results
     resultFilter: '',
-    // Limit selector for generate-check
+    // Limit selector for generate-check (kept for backward compat, superseded by per-brand settings)
     generateLimit: 1000,
     // Per-brand owned / trusted domains
     ownedDomains: [],
@@ -59,7 +57,13 @@ document.addEventListener('alpine:init', () => {
     async loadBrands() {
       this.loading = true;
       try {
-        this.brands = await api.get('/brands/');
+        const brands = await api.get('/brands/');
+        // Normalise per-brand generate settings so x-model select binding works correctly
+        this.brands = brands.map(b => ({
+          ...b,
+          generate_mode: b.generate_mode || 'domain',
+          generate_limit: String(b.generate_limit ?? 1000),
+        }));
       } catch (e) {
         showToast(e.message, 'error');
       } finally {
@@ -178,6 +182,27 @@ document.addEventListener('alpine:init', () => {
         showToast('Deleted', 'success');
       } catch (e) {
         showToast(e.message, 'error');
+      }
+    },
+
+    /**
+     * Persist per-brand Advanced Domain Checks generation settings to the server.
+     * Called automatically when the user changes mode or limit for a brand.
+     * @param {number} brandId
+     */
+    async saveGenerateSettings(brandId) {
+      const brand = this.brands.find(b => b.id === brandId);
+      if (!brand) {
+        console.warn('saveGenerateSettings: brand not found for id', brandId);
+        return;
+      }
+      try {
+        await api.patch(`/brands/${brandId}/generate-settings`, {
+          generate_mode: brand.generate_mode,
+          generate_limit: Number(brand.generate_limit),
+        });
+      } catch (e) {
+        showToast('Failed to save generate settings: ' + e.message, 'error');
       }
     },
 
