@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
 
@@ -192,6 +192,7 @@ app.include_router(deep_search.router, prefix="/api/v1/deep-search", tags=["deep
 app.include_router(threat_intel.router, prefix="/api/v1/ti", tags=["threat-intel"])
 app.include_router(ti_dashboards.router, prefix="/api/v1/ti-dashboards", tags=["ti-dashboards"])
 app.include_router(impersonation.router, prefix="/api/v1/impersonation", tags=["impersonation"])
+app.include_router(storage_sources.router, prefix="/api/v1/storage-sources", tags=["storage-sources"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)

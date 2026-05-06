@@ -437,6 +437,86 @@ class TIDashboardOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+
+# ── Storage Sources ──────────────────────────────────────────────────────────
+
+class StorageSourceCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    source_type: str = Field(..., pattern=r"^(s3|sftp|webdav)$")
+    config: dict = {}                       # raw config dict (secrets will be encrypted)
+    is_enabled: bool = True
+    schedule: str = "@hourly"
+    max_file_size_mb: int = Field(25, ge=1, le=100)
+    recursive: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def sanitize_name(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=100)
+
+    @field_validator("schedule")
+    @classmethod
+    def sanitize_schedule(cls, v: str) -> str:
+        return v.strip()[:50]
+
+
+class StorageSourceUpdate(BaseModel):
+    name: Optional[str] = None
+    config: Optional[dict] = None
+    is_enabled: Optional[bool] = None
+    schedule: Optional[str] = None
+    max_file_size_mb: Optional[int] = Field(None, ge=1, le=100)
+    recursive: Optional[bool] = None
+
+    @field_validator("name")
+    @classmethod
+    def sanitize_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _sanitize(v.strip(), max_length=100)
+
+    @field_validator("schedule")
+    @classmethod
+    def sanitize_schedule(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return v.strip()[:50]
+
+
+class StorageSourceOut(BaseModel):
+    id: int
+    name: str
+    source_type: str
+    is_enabled: bool
+    schedule: str
+    max_file_size_mb: int
+    recursive: bool
+    last_run_at: Optional[datetime] = None
+    last_run_status: str
+    last_run_scanned: int
+    last_run_indexed: int
+    last_run_errors: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class StorageFileCatalogOut(BaseModel):
+    id: int
+    source_id: int
+    path: str
+    size: int
+    mtime: Optional[datetime] = None
+    etag: str
+    last_indexed_at: Optional[datetime] = None
+    status: str
+    error: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 class DashboardStats(BaseModel):
     total_files: int
