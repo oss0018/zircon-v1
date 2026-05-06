@@ -279,6 +279,8 @@ class BrandOut(BaseModel):
     keywords: str
     similarity_threshold: float
     monitoring_enabled: bool
+    generate_mode: str = "domain"
+    generate_limit: int = 1000
     created_at: datetime
 
     model_config = {"from_attributes": True}

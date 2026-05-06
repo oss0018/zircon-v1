@@ -120,6 +120,9 @@ class Brand(Base):
     logo_path = Column(String(512), default="")
     similarity_threshold = Column(Float, default=0.8)
     monitoring_enabled = Column(Boolean, default=True)
+    # Per-brand Advanced Domain Checks settings
+    generate_mode = Column(String(20), default="domain")   # domain | brand_name | both
+    generate_limit = Column(Integer, default=1000)
     created_at = Column(DateTime, default=_utcnow)
     alerts = relationship("BrandAlert", back_populates="brand")
     owned_domains = relationship("OwnedDomain", back_populates="brand", cascade="all, delete-orphan")
