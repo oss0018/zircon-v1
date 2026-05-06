@@ -222,3 +222,50 @@ class TIWidget(Base):
     params_json = Column(Text, default="{}")            # JSON widget parameters
     layout_json = Column(Text, default='{"x":0,"y":0,"w":12,"h":2}')  # JSON {x,y,w,h}
     dashboard = relationship("TIDashboard", back_populates="widgets")
+
+
+# ── External Storage Sources ──────────────────────────────────────────────────
+
+class StorageSource(Base):
+    """External storage connection (S3, SFTP, WebDAV) for Local Index."""
+    __tablename__ = "storage_sources"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    source_type = Column(String(20), nullable=False)   # s3 | sftp | webdav
+    config_encrypted = Column(Text, default="")        # Fernet-encrypted JSON of connection params
+    is_enabled = Column(Boolean, default=True)
+    schedule = Column(String(50), default="@hourly")   # cron expr, @hourly/@daily, or "disabled"
+    max_file_size_mb = Column(Integer, default=25)     # per-source max file size limit
+    recursive = Column(Boolean, default=True)
+    # Last sync status
+    last_run_at = Column(DateTime, nullable=True)
+    last_run_status = Column(String(20), default="")   # ok | error | running
+    last_run_scanned = Column(Integer, default=0)
+    last_run_indexed = Column(Integer, default=0)
+    last_run_errors = Column(Integer, default=0)
+    last_run_error_msg = Column(Text, default="")
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    catalog_entries = relationship(
+        "StorageFileCatalog",
+        back_populates="source",
+        cascade="all, delete-orphan",
+    )
+
+
+class StorageFileCatalog(Base):
+    """File catalog entry for an external storage source (used for incremental indexing)."""
+    __tablename__ = "storage_file_catalog"
+    id = Column(Integer, primary_key=True)
+    source_id = Column(Integer, ForeignKey("storage_sources.id"), nullable=False)
+    path = Column(String(2048), nullable=False)        # file key / remote path
+    size = Column(BigInteger, default=0)
+    mtime = Column(DateTime, nullable=True)
+    etag = Column(String(256), default="")             # ETag / hash if available
+    content_hash = Column(String(64), default="")      # SHA-256 of content
+    last_indexed_at = Column(DateTime, nullable=True)
+    status = Column(String(20), default="pending")     # pending | indexed | error | skipped
+    error = Column(Text, default="")
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    source = relationship("StorageSource", back_populates="catalog_entries")

@@ -25,6 +25,7 @@
   <script src="/static/js/deep_search.js"></script>
   <script src="/static/js/threat_intel.js"></script>
   <script src="/static/js/ti_dashboard.js"></script>
+  <script src="/static/js/storage_sources.js"></script>
 
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container"></div>
@@ -186,6 +187,11 @@
               <span x-text="t('integrations')"></span>
             </div>
 
+            <div class="nav-item" :class="page === 'storage-sources' ? 'active' : ''" @click="navigate('storage-sources')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+              <span x-text="t('storage_sources')"></span>
+            </div>
+
             <div class="nav-item" :class="page === 'notifications' ? 'active' : ''" @click="navigate('notifications'); loadStats()">
               <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
               <span x-text="t('notifications')"></span>
@@ -229,7 +235,7 @@
           <div class="topbar">
             <div class="topbar-title">
               <span class="pulse" style="margin-right:8px;"></span>
-              <span x-text="page === 'brands' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
+              <span x-text="page === 'brands' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'storage-sources' ? 'System › ' + t('storage_sources') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
             </div>
             <div class="topbar-actions">
               <span class="text-muted text-sm" x-text="new Date().toLocaleDateString()"></span>
@@ -951,6 +957,281 @@
                 </div>
               </div>
             </div>
+
+            <!-- ── STORAGE SOURCES ───────────────────────────────── -->
+            <div x-show="page === 'storage-sources'" x-data="storageSourcesPage" x-init="init()">
+
+              <div class="flex justify-between items-center mb-4">
+                <p class="text-sm text-muted" x-text="t('storage_source_hint')"></p>
+                <button class="btn btn-primary" @click="openCreate()" x-text="t('add_storage_source')"></button>
+              </div>
+
+              <!-- Sources table -->
+              <div x-show="loading" class="text-muted text-sm" x-text="t('loading')"></div>
+              <div x-show="!loading">
+                <template x-if="sources.length === 0">
+                  <div class="card text-center" style="color:var(--text-muted);padding:40px;">
+                    <div style="font-size:32px;margin-bottom:12px;">🗄️</div>
+                    <div x-text="t('no_data')"></div>
+                    <div class="text-sm text-muted mt-2">Add an S3, SFTP, or WebDAV source to start indexing remote files.</div>
+                  </div>
+                </template>
+                <template x-if="sources.length > 0">
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th x-text="t('source_name')"></th>
+                          <th x-text="t('source_type')"></th>
+                          <th x-text="t('status')"></th>
+                          <th x-text="t('schedule')"></th>
+                          <th x-text="t('last_indexed')"></th>
+                          <th x-text="t('files_scanned') + ' / ' + t('files_indexed')"></th>
+                          <th x-text="t('actions')"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-for="s in sources" :key="s.id">
+                          <tr>
+                            <td style="font-weight:500;" x-text="s.name"></td>
+                            <td><span class="badge badge-blue" x-text="sourceTypeLabel(s.source_type)"></span></td>
+                            <td>
+                              <span :class="s.is_enabled ? 'badge badge-green' : 'badge badge-gray'"
+                                    x-text="s.is_enabled ? t('active') : t('inactive')"></span>
+                              <span x-show="s.last_run_status"
+                                    :class="statusBadgeClass(s.last_run_status)"
+                                    style="margin-left:4px;"
+                                    x-text="s.last_run_status"></span>
+                            </td>
+                            <td class="text-sm text-muted" x-text="scheduleLabel(s.schedule)"></td>
+                            <td class="text-sm text-muted" x-text="s.last_run_at ? formatDate(s.last_run_at) : '—'"></td>
+                            <td class="text-sm">
+                              <span x-text="s.last_run_scanned"></span>
+                              <span class="text-muted"> / </span>
+                              <span style="color:var(--accent-green);" x-text="s.last_run_indexed"></span>
+                              <span x-show="s.last_run_errors > 0" style="color:var(--accent-red);margin-left:4px;" x-text="'⚠ ' + s.last_run_errors"></span>
+                            </td>
+                            <td>
+                              <div class="flex gap-2 flex-wrap">
+                                <button class="btn btn-sm btn-secondary"
+                                        @click="testSource(s.id)"
+                                        :disabled="indexingStatus[s.id] && indexingStatus[s.id].loading"
+                                        x-text="t('test_connection')"></button>
+                                <button class="btn btn-sm btn-primary"
+                                        @click="indexNow(s.id)"
+                                        :disabled="indexingStatus[s.id] && indexingStatus[s.id].loading || s.last_run_status === 'running'"
+                                        x-text="s.last_run_status === 'running' ? t('loading') : t('index_now')"></button>
+                                <button class="btn btn-sm btn-secondary" @click="openCatalog(s)" x-text="t('view_catalog')"></button>
+                                <button class="btn btn-sm btn-secondary" @click="openEdit(s)">Edit</button>
+                                <button class="btn btn-sm" @click="toggleEnabled(s)"
+                                        :class="s.is_enabled ? 'btn-secondary' : 'btn-primary'"
+                                        x-text="s.is_enabled ? 'Disable' : 'Enable'"></button>
+                                <button class="btn btn-sm btn-danger" @click="deleteSource(s.id)">✕</button>
+                              </div>
+                            </td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Create Modal -->
+              <div x-show="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
+                <div class="modal" style="max-width:560px;">
+                  <div class="modal-title" x-text="t('add_storage_source')"></div>
+
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('source_name')"></label>
+                    <input class="form-input" x-model="newSource.name" placeholder="My S3 bucket" />
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('source_type')"></label>
+                    <select class="form-select" x-model="newSource.source_type">
+                      <template x-for="st in sourceTypes" :key="st.value">
+                        <option :value="st.value" x-text="st.label"></option>
+                      </template>
+                    </select>
+                  </div>
+
+                  <!-- Dynamic config fields -->
+                  <div class="card" style="padding:12px;margin-bottom:12px;">
+                    <div class="card-title text-sm" x-text="t('connection_config')"></div>
+                    <template x-for="field in configFields(newSource.source_type)" :key="field.key">
+                      <div class="form-group">
+                        <label class="form-label" x-text="field.label + (field.required ? ' *' : '')"></label>
+                        <template x-if="field.type === 'textarea'">
+                          <textarea class="form-input" rows="4" x-model="newSource.config[field.key]"
+                                    :placeholder="field.placeholder || ''"></textarea>
+                        </template>
+                        <template x-if="field.type === 'select'">
+                          <select class="form-select" x-model="newSource.config[field.key]">
+                            <template x-for="opt in field.options" :key="opt">
+                              <option :value="opt" x-text="opt"></option>
+                            </template>
+                          </select>
+                        </template>
+                        <template x-if="field.type !== 'textarea' && field.type !== 'select'">
+                          <input class="form-input" :type="field.type" x-model="newSource.config[field.key]"
+                                 :placeholder="field.placeholder || ''" autocomplete="off" />
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('schedule')"></label>
+                      <select class="form-select" x-model="newSource.schedule">
+                        <template x-for="opt in scheduleOptions" :key="opt.value">
+                          <option :value="opt.value" x-text="opt.label"></option>
+                        </template>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('max_file_size')"></label>
+                      <input class="form-input" type="number" x-model="newSource.max_file_size_mb" min="1" max="100" />
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" x-model="newSource.recursive" />
+                      <span x-text="t('recursive') + ' (scan subdirectories)'"></span>
+                    </label>
+                  </div>
+
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showCreateModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="createSource()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Edit Modal -->
+              <div x-show="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
+                <div class="modal" x-show="editSource" style="max-width:560px;">
+                  <div class="modal-title">Edit Storage Source</div>
+
+                  <div class="form-group">
+                    <label class="form-label" x-text="t('source_name')"></label>
+                    <input class="form-input" x-model="editSource.name" />
+                  </div>
+
+                  <!-- Dynamic config fields (with masked secrets) -->
+                  <div class="card" style="padding:12px;margin-bottom:12px;">
+                    <div class="card-title text-sm" x-text="t('connection_config')"></div>
+                    <div class="text-xs text-muted mb-2">Leave secret fields as <code>***</code> to keep existing values.</div>
+                    <template x-for="field in configFields(editSource && editSource.source_type)" :key="field.key">
+                      <div class="form-group">
+                        <label class="form-label" x-text="field.label"></label>
+                        <template x-if="field.type === 'textarea'">
+                          <textarea class="form-input" rows="4" x-model="editConfig[field.key]"
+                                    :placeholder="field.placeholder || ''"></textarea>
+                        </template>
+                        <template x-if="field.type === 'select'">
+                          <select class="form-select" x-model="editConfig[field.key]">
+                            <template x-for="opt in field.options" :key="opt">
+                              <option :value="opt" x-text="opt"></option>
+                            </template>
+                          </select>
+                        </template>
+                        <template x-if="field.type !== 'textarea' && field.type !== 'select'">
+                          <input class="form-input" :type="field.key === 'password' || field.key === 'secret_key' || field.key === 'token' ? 'text' : field.type"
+                                 x-model="editConfig[field.key]"
+                                 :placeholder="field.placeholder || ''"
+                                 autocomplete="off" />
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div class="grid-2">
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('schedule')"></label>
+                      <select class="form-select" x-model="editSource.schedule">
+                        <template x-for="opt in scheduleOptions" :key="opt.value">
+                          <option :value="opt.value" x-text="opt.label"></option>
+                        </template>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('max_file_size')"></label>
+                      <input class="form-input" type="number" x-model="editSource.max_file_size_mb" min="1" max="100" />
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" x-model="editSource.recursive" />
+                      <span x-text="t('recursive')"></span>
+                    </label>
+                  </div>
+
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showEditModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="saveEdit()" x-text="t('save')"></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Catalog Modal -->
+              <div x-show="showCatalogModal" class="modal-overlay" @click.self="showCatalogModal = false">
+                <div class="modal" style="max-width:800px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;">
+                  <div class="modal-title">File Catalog</div>
+                  <div class="flex gap-2 mb-3">
+                    <select class="form-select" style="width:180px;" x-model="catalogFilter" @change="loadCatalog()">
+                      <option value="">All statuses</option>
+                      <option value="indexed">Indexed</option>
+                      <option value="error">Error</option>
+                      <option value="skipped">Skipped</option>
+                      <option value="pending">Pending</option>
+                    </select>
+                    <button class="btn btn-sm btn-secondary" @click="loadCatalog()">🔄 Refresh</button>
+                  </div>
+                  <div x-show="catalogLoading" class="text-muted text-sm" x-text="t('loading')"></div>
+                  <div x-show="!catalogLoading" style="overflow-y:auto;flex:1;">
+                    <template x-if="catalogEntries.length === 0">
+                      <div class="text-center text-muted" style="padding:24px;" x-text="t('no_data')"></div>
+                    </template>
+                    <template x-if="catalogEntries.length > 0">
+                      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead>
+                          <tr style="border-bottom:1px solid var(--border-color);">
+                            <th style="text-align:left;padding:6px;">Path</th>
+                            <th style="text-align:left;padding:6px;">Size</th>
+                            <th style="text-align:left;padding:6px;">Status</th>
+                            <th style="text-align:left;padding:6px;">Last Indexed</th>
+                            <th style="text-align:left;padding:6px;">Error</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-for="e in catalogEntries" :key="e.id">
+                            <tr style="border-bottom:1px solid var(--border-color);">
+                              <td style="padding:6px;word-break:break-all;max-width:300px;" x-text="e.path"></td>
+                              <td style="padding:6px;white-space:nowrap;" x-text="formatFileSize(e.size)"></td>
+                              <td style="padding:6px;">
+                                <span :class="catalogStatusClass(e.status)" x-text="e.status"></span>
+                              </td>
+                              <td style="padding:6px;white-space:nowrap;color:var(--text-muted);"
+                                  x-text="e.last_indexed_at ? formatDate(e.last_indexed_at) : '—'"></td>
+                              <td style="padding:6px;color:var(--accent-red);font-size:11px;max-width:200px;word-break:break-all;"
+                                  x-text="e.error || ''"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </template>
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showCatalogModal = false" x-text="t('cancel')"></button>
+                  </div>
+                </div>
+              </div>
+
+            </div><!-- /storage-sources -->
 
             <!-- ── MONITORING ─────────────────────────────────────── -->
             <div x-show="page === 'monitoring'" x-data="monitoringPage" x-init="init()">

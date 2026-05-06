@@ -72,6 +72,44 @@ def _migrate_owned_domains(conn) -> None:
         logger.warning("Could not migrate owned_domains: %s", exc)
 
 
+def _migrate_storage_sources(conn) -> None:
+    """Ensure storage_sources and storage_file_catalog tables have all required columns."""
+    from sqlalchemy import inspect, text
+    from typing import Dict
+
+    # Columns that may be added in future schema updates (whitelist)
+    SOURCE_COLS: Dict[str, str] = {
+        "last_run_errors": "INTEGER DEFAULT 0",
+        "last_run_error_msg": "TEXT DEFAULT ''",
+        "updated_at": "DATETIME",
+    }
+    CATALOG_COLS: Dict[str, str] = {
+        "updated_at": "DATETIME",
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+
+        if "storage_sources" in tables:
+            existing = {c["name"] for c in inspector.get_columns("storage_sources")}
+            for col_name, col_type in SOURCE_COLS.items():
+                if col_name not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE storage_sources ADD COLUMN {col_name} {col_type}")
+                    )
+
+        if "storage_file_catalog" in tables:
+            existing = {c["name"] for c in inspector.get_columns("storage_file_catalog")}
+            for col_name, col_type in CATALOG_COLS.items():
+                if col_name not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE storage_file_catalog ADD COLUMN {col_name} {col_type}")
+                    )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate storage tables: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -80,3 +118,6 @@ async def init_db():
         await conn.run_sync(_migrate_brand_alerts)
         # Add brand_id to owned_domains if upgrading from older version
         await conn.run_sync(_migrate_owned_domains)
+        # Add storage_sources and storage_file_catalog tables (no-op if they already exist)
+        # create_all handles this; migration below handles columns added later
+        await conn.run_sync(_migrate_storage_sources)
