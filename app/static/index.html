@@ -3859,165 +3859,31 @@
             </div><!-- /ti-dashboard -->
 
             <!-- ── IMPERSONATION MONITORING ───────────────────────── -->
-            <div x-show="page === 'impersonation-monitoring'" x-data="impersonationPage" x-init="init()">
-
-              <!-- Page header -->
+            <div x-show="page === 'impersonation-monitoring'">
               <div class="flex justify-between items-center mb-4">
                 <div>
-                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;">
-                    <span x-text="t('impersonation_monitoring')"></span>
-                  </h2>
-                  <p class="text-muted text-sm" style="margin:0;">
-                    Search for lookalike and impersonating domains using openSquat intelligence.
-                  </p>
+                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;"
+                      x-text="t('impersonation_monitoring')"></h2>
                 </div>
               </div>
 
-              <!-- Integration not configured banner -->
-              <template x-if="!statusLoading && (!integrationConfigured || !integrationActive)">
-                <div class="alert alert-error mb-4" style="display:flex;align-items:center;gap:10px;">
-                  <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 3a9 9 0 100 18A9 9 0 0012 3z"/></svg>
-                  <span>
-                    openSquat integration is not configured.
-                    <strong @click="navigate('integrations')" style="cursor:pointer;text-decoration:underline;">
-                      Go to Integrations
-                    </strong>
-                    to add your API key.
-                  </span>
+              <div class="card" style="padding:60px 40px;text-align:center;max-width:560px;margin:40px auto;">
+                <div style="margin-bottom:20px;">
+                  <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                       style="display:block;margin:0 auto;opacity:0.35;">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                  </svg>
                 </div>
-              </template>
-
-              <!-- Search bar -->
-              <div class="card mb-4" style="padding:20px;">
-                <div class="card-title" style="margin-bottom:12px;">🔍 Domain Impersonation Search</div>
-                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-                  <input
-                    class="form-input"
-                    style="flex:1;min-width:220px;max-width:480px;"
-                    placeholder="Enter brand or domain keyword (e.g. acme, google)"
-                    x-model="searchQuery"
-                    @keyup.enter="runSearch()"
-                    maxlength="253"
-                    :disabled="searching || (!integrationConfigured || !integrationActive)"
-                  />
-                  <button
-                    class="btn btn-primary"
-                    @click="runSearch()"
-                    :disabled="searching || !searchQuery.trim() || (!integrationConfigured || !integrationActive)"
-                  >
-                    <span x-show="!searching">Search</span>
-                    <span x-show="searching" class="spinner" style="width:14px;height:14px;display:inline-block;"></span>
-                    <span x-show="searching"> Searching…</span>
-                  </button>
-                  <button class="btn btn-secondary" @click="clearResults()" x-show="results.length > 0 || searchError">
-                    Clear
-                  </button>
+                <div style="font-size:1.3rem;font-weight:700;color:var(--text-primary);margin-bottom:10px;">
+                  In Development
                 </div>
-                <div x-show="cached" class="text-muted text-xs mt-2" style="margin-top:6px;">
-                  ⚡ Results served from cache
+                <div class="text-muted" style="font-size:0.9rem;line-height:1.6;margin-bottom:24px;">
+                  Impersonation Monitoring is currently under development.<br>
+                  This module will detect and track domains and profiles impersonating your brand across the web.
                 </div>
+                <span class="badge badge-yellow" style="font-size:0.8rem;padding:6px 14px;">🚧 Coming Soon</span>
               </div>
-
-              <!-- Summary widgets (shown when results exist) -->
-              <template x-if="results.length > 0">
-                <div class="stats-grid mb-4" style="margin-bottom:16px;">
-                  <div class="stat-card">
-                    <div class="stat-label">Total Found</div>
-                    <div class="stat-value" x-text="totalFound"></div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label" style="color:var(--accent-red);">High Risk</div>
-                    <div class="stat-value" style="color:var(--accent-red);" x-text="highRiskCount"></div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label" style="color:#f59e0b;">Medium Risk</div>
-                    <div class="stat-value" style="color:#f59e0b;" x-text="mediumRiskCount"></div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label">Unique TLDs</div>
-                    <div class="stat-value" x-text="tldBreakdown.length"></div>
-                  </div>
-                </div>
-              </template>
-
-              <!-- TLD breakdown (shown when results exist) -->
-              <template x-if="tldBreakdown.length > 0">
-                <div class="card mb-4" style="padding:16px;margin-bottom:16px;">
-                  <div class="card-title" style="margin-bottom:10px;">Top TLDs</div>
-                  <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                    <template x-for="item in tldBreakdown" :key="item.tld">
-                      <span class="badge badge-blue" style="font-size:12px;">
-                        <span x-text="item.tld"></span>
-                        <span style="margin-left:4px;opacity:0.75;" x-text="'×' + item.count"></span>
-                      </span>
-                    </template>
-                  </div>
-                </div>
-              </template>
-
-              <!-- Loading state -->
-              <div x-show="searching" class="card" style="padding:40px;text-align:center;">
-                <span class="spinner" style="width:32px;height:32px;display:inline-block;margin-bottom:12px;"></span>
-                <div class="text-muted">Querying openSquat for "<span x-text="searchQuery"></span>"…</div>
-              </div>
-
-              <!-- Error state -->
-              <div x-show="!searching && searchError" class="card" style="padding:24px;">
-                <div class="alert alert-error" style="display:flex;align-items:center;gap:10px;">
-                  <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                  <span x-text="searchError"></span>
-                </div>
-              </div>
-
-              <!-- Empty state (search ran, no results) -->
-              <template x-if="!searching && !searchError && lastSearchedKeyword && results.length === 0">
-                <div class="card" style="padding:40px;text-align:center;">
-                  <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin:0 auto 12px;opacity:0.4;display:block;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  <div class="text-muted">No lookalike domains found for "<span x-text="lastSearchedKeyword"></span>".</div>
-                  <div class="text-muted text-sm" style="margin-top:6px;">This may indicate no active impersonation threats were detected.</div>
-                </div>
-              </template>
-
-              <!-- Results table -->
-              <template x-if="!searching && results.length > 0">
-                <div class="card" style="padding:0;overflow:hidden;">
-                  <div style="padding:16px 16px 0;display:flex;justify-content:space-between;align-items:center;">
-                    <div class="card-title" style="margin-bottom:0;">
-                      Results for "<span x-text="lastSearchedKeyword"></span>"
-                      <span class="badge badge-blue" style="margin-left:8px;" x-text="results.length + ' domains'"></span>
-                    </div>
-                  </div>
-                  <div class="table-wrapper" style="margin-top:12px;">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Domain</th>
-                          <th>TLD</th>
-                          <th>Risk</th>
-                          <th>First Seen</th>
-                          <th>Type / Reason</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <template x-for="(r, idx) in results" :key="idx">
-                          <tr>
-                            <td class="font-mono" style="font-size:13px;" x-text="r.domain"></td>
-                            <td>
-                              <span class="badge badge-blue" x-text="r.tld || '—'"></span>
-                            </td>
-                            <td>
-                              <span :class="'badge ' + riskClass(r.risk)" x-text="riskLabel(r.risk)"></span>
-                            </td>
-                            <td class="text-muted text-sm" x-text="r.first_seen ? formatDate(r.first_seen) : '—'"></td>
-                            <td class="text-muted text-sm" x-text="r.reason || '—'"></td>
-                          </tr>
-                        </template>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </template>
-
             </div><!-- /impersonation-monitoring -->
 
             <!-- ── LOGO & CONTENT MISUSE ───────────────────────────── -->
