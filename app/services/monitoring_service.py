@@ -52,6 +52,9 @@ OSINT_SUMMARY_MAX_CHARS = 500
 RUN_ERROR_MAX_CHARS = 500
 FOLDER_SCAN_QUERY_LIMIT = 25
 BRAND_SCAN_ALERT_LIMIT = 25
+LEGACY_FOLDER_SCAN_WARNING = (
+    "Direct folder paths are deprecated. Re-save the job with Local Index storage sources to keep Folder Scan active."
+)
 
 
 def _utcnow() -> datetime:
@@ -348,7 +351,7 @@ async def _run_folder_scan(
 
     legacy_folder = (check_cfg.get("legacy_folder") or "").strip()
     if legacy_folder:
-        warnings.append("Direct folder paths are deprecated. Folder Scan now uses Local Index storage sources only.")
+        warnings.append(LEGACY_FOLDER_SCAN_WARNING)
 
     path_prefixes = [item.strip() for item in check_cfg.get("path_prefixes", []) if str(item).strip()]
     excluded_terms = [item.lower() for item in exclusions if item]

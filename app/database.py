@@ -157,10 +157,9 @@ def _migrate_integrations(conn) -> None:
 def _migrate_monitoring(conn) -> None:
     """Ensure monitoring tables have the newer runs/findings schema."""
     from sqlalchemy import inspect, text
-    from typing import Dict
 
-    JOB_COLS: Dict[str, str] = {}
-    RUN_COLS: Dict[str, str] = {
+    JOB_COLS: dict[str, str] = {}
+    RUN_COLS: dict[str, str] = {
         "findings_count": "INTEGER DEFAULT 0",
         "preview_count": "INTEGER DEFAULT 0",
         "summary_json": "TEXT DEFAULT '{}'",
@@ -170,7 +169,7 @@ def _migrate_monitoring(conn) -> None:
         "started_at": "DATETIME",
         "completed_at": "DATETIME",
     }
-    FINDING_COLS: Dict[str, str] = {
+    FINDING_COLS: dict[str, str] = {
         "check_type": "VARCHAR(50)",
         "matched_target": "VARCHAR(512)",
         "source": "VARCHAR(512) DEFAULT ''",

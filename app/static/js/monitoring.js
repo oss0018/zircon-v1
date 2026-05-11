@@ -3,6 +3,7 @@
  */
 const MONITORING_CTX_MENU_WIDTH = 220;
 const MONITORING_CTX_MENU_HEIGHT = 160;
+const MONITORING_TARGET_TYPES = ['keyword', 'domain', 'account', 'email', 'url'];
 
 document.addEventListener('alpine:init', () => {
   Alpine.data('monitoringPage', () => ({
@@ -271,7 +272,7 @@ document.addEventListener('alpine:init', () => {
         .filter(Boolean)
         .map(line => {
           const match = line.match(/^([a-z_]+):(.*)$/i);
-          if (match && ['keyword', 'domain', 'account', 'email', 'url'].includes(match[1].toLowerCase())) {
+          if (match && MONITORING_TARGET_TYPES.includes(match[1].toLowerCase())) {
             const value = match[2].trim();
             return value ? { type: match[1].toLowerCase(), value } : null;
           }
