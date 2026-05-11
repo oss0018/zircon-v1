@@ -1,6 +1,9 @@
 /**
  * Zircon FRT — Monitoring page
  */
+const MONITORING_CTX_MENU_WIDTH = 220;
+const MONITORING_CTX_MENU_HEIGHT = 160;
+
 document.addEventListener('alpine:init', () => {
   Alpine.data('monitoringPage', () => ({
     jobs: [],
@@ -137,8 +140,8 @@ document.addEventListener('alpine:init', () => {
     showCtxMenu(e, job) {
       e.preventDefault();
       e.stopPropagation();
-      const x = Math.min(e.clientX, window.innerWidth - 220);
-      const y = Math.min(e.clientY, window.innerHeight - 160);
+      const x = Math.min(e.clientX, window.innerWidth - MONITORING_CTX_MENU_WIDTH);
+      const y = Math.min(e.clientY, window.innerHeight - MONITORING_CTX_MENU_HEIGHT);
       this.ctxMenu = { show: true, x, y, job };
     },
 

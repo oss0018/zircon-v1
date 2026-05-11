@@ -48,9 +48,43 @@ DEFAULT_MONITORING_CONFIG = {
     },
 }
 
+OSINT_SUMMARY_MAX_CHARS = 500
+RUN_ERROR_MAX_CHARS = 500
+FOLDER_SCAN_QUERY_LIMIT = 25
+BRAND_SCAN_ALERT_LIMIT = 25
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _looks_like_domain(value: str) -> bool:
+    text = (value or "").strip().lower()
+    if not text or len(text) > 253 or "." not in text:
+        return False
+
+    labels = text.split(".")
+    tld = labels[-1]
+    if len(tld) < 2 or not tld.isalpha():
+        return False
+
+    for label in labels:
+        if not label or len(label) > 63:
+            return False
+        if not label[0].isalnum() or not label[-1].isalnum():
+            return False
+        if any(not (char.isalnum() or char == "-") for char in label):
+            return False
+
+    return True
+
+
+def _looks_like_email(value: str) -> bool:
+    text = (value or "").strip()
+    if "@" not in text or text.count("@") != 1:
+        return False
+    local_part, domain = text.split("@", 1)
+    return bool(local_part) and _looks_like_domain(domain)
 
 
 def _json_load(value: Any, default: Any) -> Any:
@@ -70,11 +104,11 @@ def infer_target_type(value: str) -> str:
         return "keyword"
     if text.startswith("@"):
         return "account"
-    if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", text):
+    if _looks_like_email(text):
         return "email"
-    if re.match(r"^https?://", text, re.IGNORECASE):
+    if text.lower().startswith(("http://", "https://")):
         return "url"
-    if re.match(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$", text, re.IGNORECASE):
+    if _looks_like_domain(text):
         return "domain"
     return "keyword"
 
@@ -244,7 +278,7 @@ def _target_query_type(target: dict[str, str], override: Optional[str] = None) -
 
 def _extract_osint_summary(result: dict[str, Any]) -> tuple[str, str]:
     interesting = {k: v for k, v in result.items() if k not in {"cached"}}
-    summary = json.dumps(interesting, ensure_ascii=False)[:500]
+    summary = json.dumps(interesting, ensure_ascii=False)[:OSINT_SUMMARY_MAX_CHARS]
     object_ref = ""
 
     for key in ("url", "domain", "host", "ip", "selectorvalue"):
@@ -330,7 +364,7 @@ async def _run_folder_scan(
             raw_hits.extend(
                 search_engine.search(
                     term,
-                    limit=25,
+                    limit=FOLDER_SCAN_QUERY_LIMIT,
                     offset=0,
                     fuzzy=False,
                     fields=["content"],
@@ -516,7 +550,7 @@ async def _run_brand_scan(
                 select(BrandAlert)
                 .where(BrandAlert.brand_id == brand.id)
                 .order_by(desc(BrandAlert.checked_at), desc(BrandAlert.created_at))
-                .limit(25)
+                .limit(BRAND_SCAN_ALERT_LIMIT)
             )
         ).scalars().all()
 
@@ -727,7 +761,7 @@ async def execute_monitoring_job(
         }
     except Exception as exc:
         run.status = "failed"
-        run.error_message = str(exc)[:500]
+        run.error_message = str(exc)[:RUN_ERROR_MAX_CHARS]
         run.completed_at = _utcnow()
         await db.commit()
         raise
