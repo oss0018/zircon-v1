@@ -1986,7 +1986,11 @@
             <!-- ── WATCHLIST ───────────────────────────────────────── -->
             <div x-show="page === 'watchlist'" x-data="{
               items: [], integrations: [], loading: false, showModal: false,
-              checkResult: null, checkLoading: false,
+              checkLoading: false,
+              /* Drawer state */
+              showDrawer: false,
+              drawerReport: null,
+              drawerTabs: {},
               newItem: { type: 'email', value: '', integrations_json: '[]', alert_email: '', alert_telegram: '' },
               itemTypes: ['email', 'domain', 'ip', 'keyword', 'brand'],
               ctxMenu: { show: false, x: 0, y: 0, item: null },
@@ -1994,7 +1998,7 @@
                 await this.load();
                 try { const i = await api.get('/integrations/'); this.integrations = i.filter(x=>x.is_active); } catch {}
                 document.addEventListener('click', () => { this.ctxMenu.show = false; });
-                document.addEventListener('keydown', e => { if(e.key==='Escape') this.ctxMenu.show = false; });
+                document.addEventListener('keydown', e => { if(e.key==='Escape') { this.ctxMenu.show = false; this.showDrawer = false; } });
               },
               async load() {
                 this.loading = true;
@@ -2010,14 +2014,35 @@
                 } catch(e) { showToast(e.message,'error'); }
               },
               async checkItem(id) {
-                this.checkLoading = true; this.checkResult = null;
-                try { this.checkResult = await api.post('/watchlist/' + id + '/check'); showToast('Check complete','success'); }
-                catch(e) { showToast(e.message,'error'); } finally { this.checkLoading = false; }
+                this.checkLoading = true;
+                this.showDrawer = false;
+                this.drawerReport = null;
+                try {
+                  const result = await api.post('/watchlist/' + id + '/check');
+                  this.drawerReport = result;
+                  this.drawerTabs = {};
+                  this.showDrawer = true;
+                  showToast('Check complete', 'success');
+                } catch(e) { showToast(e.message,'error'); } finally { this.checkLoading = false; }
               },
               async deleteItem(id) {
                 if(!confirm(t('confirm_delete'))) return;
                 try { await api.delete('/watchlist/' + id); this.items = this.items.filter(i=>i.id!==id); showToast('Deleted','success'); }
                 catch(e) { showToast(e.message,'error'); }
+              },
+              /* Drawer helpers */
+              closeDrawer() { this.showDrawer = false; },
+              getTab(src) { return this.drawerTabs[src] || 'summary'; },
+              setTab(src, tab) { this.drawerTabs = Object.assign({}, this.drawerTabs, {[src]: tab}); },
+              verdictClass(v) {
+                const m = { malicious:'scan-drawer-verdict-malicious', suspicious:'scan-drawer-verdict-suspicious', clean:'scan-drawer-verdict-clean', pending:'scan-drawer-verdict-pending' };
+                return 'scan-drawer-verdict-badge ' + (m[v] || 'scan-drawer-verdict-unknown');
+              },
+              copyRawJSON() {
+                const text = JSON.stringify(this.drawerReport, null, 2);
+                navigator.clipboard.writeText(text)
+                  .then(() => showToast('Copied to clipboard', 'success'))
+                  .catch(() => showToast('Failed to copy', 'error'));
               },
               selectedIntegrations: [],
               toggleInteg(t) { const i=this.selectedIntegrations.indexOf(t); if(i>=0) this.selectedIntegrations.splice(i,1); else this.selectedIntegrations.push(t); },
@@ -2089,16 +2114,292 @@
                 </table>
               </div>
 
-              <!-- Check Result -->
-              <div x-show="checkResult" class="card mt-4">
-                <div class="card-title">Check Results for <span x-text="checkResult && checkResult.value"></span></div>
-                <template x-for="r in (checkResult ? checkResult.results : [])" :key="r.source">
-                  <div class="result-card">
-                    <div class="result-source" x-text="r.source"></div>
-                    <div class="json-viewer" x-text="formatJSON(r.data)"></div>
+              <!-- ── Scan Report Drawer ─────────────────────────────────── -->
+              <!-- Overlay -->
+              <div x-show="showDrawer" class="scan-drawer-overlay" @click="closeDrawer()"></div>
+
+              <!-- Drawer Panel -->
+              <div x-show="showDrawer" class="scan-drawer" @click.stop="">
+
+                <!-- Header -->
+                <div class="scan-drawer-header">
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="badge badge-blue" x-text="drawerReport && drawerReport.type"></span>
+                      <span class="font-mono" style="font-size:13px;color:var(--text-primary);word-break:break-all;" x-text="drawerReport && drawerReport.value"></span>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" style="flex-shrink:0;padding:2px 10px;margin-left:8px;" @click="closeDrawer()">✕</button>
                   </div>
-                </template>
-              </div>
+
+                  <!-- Timestamp + source count -->
+                  <div class="flex items-center gap-2 mb-3" style="font-size:11px;color:var(--text-muted);">
+                    <span x-text="drawerReport && formatDate(drawerReport.checked_at)"></span>
+                    <span>·</span>
+                    <span x-text="(drawerReport && drawerReport.results && drawerReport.results.length || 0) + ' source(s)'"></span>
+                  </div>
+
+                  <!-- Action buttons -->
+                  <div class="flex gap-2 flex-wrap">
+                    <template x-for="r in (drawerReport ? drawerReport.results : [])" :key="'action-' + r.source">
+                      <template x-if="r.normalized && r.normalized.provider_url">
+                        <a :href="r.normalized.provider_url" target="_blank" rel="noopener noreferrer"
+                           class="btn btn-sm btn-secondary" style="text-decoration:none;">
+                          ↗ Open in <span x-text="r.source" style="text-transform:capitalize;"></span>
+                        </a>
+                      </template>
+                    </template>
+                    <button class="btn btn-sm btn-secondary" @click="copyRawJSON()">📋 Copy JSON</button>
+                  </div>
+                </div>
+
+                <!-- Body -->
+                <div class="scan-drawer-body">
+
+                  <!-- Empty state -->
+                  <template x-if="!drawerReport || !drawerReport.results || drawerReport.results.length === 0">
+                    <div style="text-align:center;color:var(--text-muted);padding:48px 20px;">
+                      <div style="font-size:32px;margin-bottom:10px;">🔍</div>
+                      <div>No results found for this item</div>
+                    </div>
+                  </template>
+
+                  <!-- Per-source result sections -->
+                  <template x-for="r in (drawerReport ? drawerReport.results : [])" :key="r.source">
+                    <div class="scan-source-section">
+
+                      <!-- Source header: name + verdict badge -->
+                      <div class="flex items-center justify-between mb-3">
+                        <div class="result-source" x-text="r.source.toUpperCase()" style="margin-bottom:0;"></div>
+                        <div class="flex items-center gap-2">
+                          <template x-if="r.normalized && r.normalized.verdict">
+                            <span :class="verdictClass(r.normalized.verdict)"
+                                  x-text="r.normalized.verdict"></span>
+                          </template>
+                          <template x-if="r.normalized && r.normalized.verdict_score !== null && r.normalized.verdict_score !== undefined">
+                            <span class="badge badge-gray" style="font-size:9px;" x-text="'Score: ' + r.normalized.verdict_score"></span>
+                          </template>
+                        </div>
+                      </div>
+
+                      <!-- Non-success status -->
+                      <template x-if="r.normalized && r.normalized.status !== 'success'">
+                        <div>
+                          <template x-if="r.normalized.status === 'rate_limited'">
+                            <div class="alert alert-warning" style="margin-bottom:8px;">⚠️ Rate limited — please try again later</div>
+                          </template>
+                          <template x-if="r.normalized.status === 'failed'">
+                            <div class="alert alert-error" style="margin-bottom:8px;">❌ Request failed</div>
+                          </template>
+                          <template x-if="r.normalized.status === 'no_data'">
+                            <div style="color:var(--text-muted);font-size:13px;padding:8px 0;">No scan data found for this target</div>
+                          </template>
+                          <template x-if="r.normalized.status === 'pending'">
+                            <div class="alert alert-info" style="margin-bottom:8px;">⏳ Scan submitted — check back shortly</div>
+                          </template>
+                        </div>
+                      </template>
+
+                      <!-- Success: tab-based content -->
+                      <template x-if="r.normalized && r.normalized.status === 'success'">
+                        <div>
+                          <!-- Tab bar -->
+                          <div class="ti-tabs">
+                            <button class="ti-tab" :class="getTab(r.source) === 'summary' ? 'active' : ''"
+                                    @click="setTab(r.source, 'summary')">Summary</button>
+                            <button class="ti-tab"
+                                    :class="getTab(r.source) === 'indicators' ? 'active' : ''"
+                                    x-show="r.normalized.indicators && r.normalized.indicators.length > 0"
+                                    @click="setTab(r.source, 'indicators')">
+                              Indicators
+                              <span class="ti-tab-badge" x-text="r.normalized.indicators && r.normalized.indicators.length"></span>
+                            </button>
+                            <button class="ti-tab"
+                                    :class="getTab(r.source) === 'http' ? 'active' : ''"
+                                    x-show="r.normalized.http_info"
+                                    @click="setTab(r.source, 'http')">HTTP</button>
+                            <button class="ti-tab"
+                                    :class="getTab(r.source) === 'dns' ? 'active' : ''"
+                                    x-show="r.normalized.dns_info"
+                                    @click="setTab(r.source, 'dns')">DNS</button>
+                            <button class="ti-tab" :class="getTab(r.source) === 'raw' ? 'active' : ''"
+                                    @click="setTab(r.source, 'raw')">Raw</button>
+                          </div>
+
+                          <!-- Tab: Summary -->
+                          <div x-show="getTab(r.source) === 'summary'">
+                            <!-- Screenshot -->
+                            <template x-if="r.normalized.screenshot_url">
+                              <img :src="r.normalized.screenshot_url" alt="Screenshot" class="scan-drawer-screenshot" />
+                            </template>
+
+                            <!-- Multi-scan note -->
+                            <template x-if="r.normalized.multi_scan_summary">
+                              <div class="alert alert-warning" style="margin-bottom:10px;font-size:11px;" x-text="r.normalized.multi_scan_summary"></div>
+                            </template>
+
+                            <!-- Key fields grid -->
+                            <div class="ti-fields-grid">
+                              <template x-if="r.normalized.main_ip">
+                                <div class="ti-field">
+                                  <div class="ti-field-label">Main IP</div>
+                                  <div class="ti-field-value font-mono" x-text="r.normalized.main_ip"></div>
+                                </div>
+                              </template>
+                              <template x-if="r.normalized.asn">
+                                <div class="ti-field">
+                                  <div class="ti-field-label">ASN</div>
+                                  <div class="ti-field-value font-mono" x-text="r.normalized.asn"></div>
+                                </div>
+                              </template>
+                              <template x-if="r.normalized.org">
+                                <div class="ti-field">
+                                  <div class="ti-field-label">Organization</div>
+                                  <div class="ti-field-value" x-text="r.normalized.org"></div>
+                                </div>
+                              </template>
+                              <template x-if="r.normalized.country">
+                                <div class="ti-field">
+                                  <div class="ti-field-label">Country</div>
+                                  <div class="ti-field-value" x-text="r.normalized.country"></div>
+                                </div>
+                              </template>
+                              <template x-if="r.normalized.final_url">
+                                <div class="ti-field">
+                                  <div class="ti-field-label">Final URL</div>
+                                  <div class="ti-field-value">
+                                    <a :href="r.normalized.final_url" target="_blank" rel="noopener noreferrer"
+                                       class="text-green" style="word-break:break-all;font-size:11px;"
+                                       x-text="r.normalized.final_url"></a>
+                                  </div>
+                                </div>
+                              </template>
+                              <template x-if="r.normalized.title">
+                                <div class="ti-field">
+                                  <div class="ti-field-label">Page Title</div>
+                                  <div class="ti-field-value" x-text="r.normalized.title"></div>
+                                </div>
+                              </template>
+                              <template x-if="r.normalized.scan_age">
+                                <div class="ti-field">
+                                  <div class="ti-field-label">Scan Age</div>
+                                  <div class="ti-field-value" x-text="formatDate(r.normalized.scan_age)"></div>
+                                </div>
+                              </template>
+                              <template x-if="r.normalized.total_results">
+                                <div class="ti-field">
+                                  <div class="ti-field-label">Total Scans</div>
+                                  <div class="ti-field-value" x-text="r.normalized.total_results"></div>
+                                </div>
+                              </template>
+                            </div>
+
+                            <!-- Tags -->
+                            <template x-if="r.normalized.tags && r.normalized.tags.length > 0">
+                              <div style="margin-top:12px;">
+                                <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Tags</div>
+                                <div class="flex gap-1 flex-wrap">
+                                  <template x-for="tag in r.normalized.tags" :key="tag">
+                                    <span class="badge badge-gray" style="font-size:10px;" x-text="tag"></span>
+                                  </template>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+
+                          <!-- Tab: Indicators -->
+                          <div x-show="getTab(r.source) === 'indicators'">
+                            <template x-for="(ind, idx) in (r.normalized.indicators || [])" :key="idx">
+                              <div class="ti-detection-row">
+                                <span class="badge badge-gray" style="font-size:9px;text-transform:uppercase;flex-shrink:0;" x-text="ind.type"></span>
+                                <span class="font-mono" style="font-size:11px;flex:1;word-break:break-all;" x-text="ind.value"></span>
+                                <span style="font-size:10px;color:var(--text-muted);flex-shrink:0;" x-text="ind.context || ''"></span>
+                              </div>
+                            </template>
+                          </div>
+
+                          <!-- Tab: HTTP -->
+                          <div x-show="getTab(r.source) === 'http'">
+                            <template x-if="r.normalized.http_info">
+                              <div class="ti-fields-grid">
+                                <template x-if="r.normalized.http_info.status">
+                                  <div class="ti-field">
+                                    <div class="ti-field-label">HTTP Status</div>
+                                    <div class="ti-field-value">
+                                      <span :class="parseInt(r.normalized.http_info.status) < 400 ? 'badge badge-green' : 'badge badge-red'"
+                                            x-text="r.normalized.http_info.status"></span>
+                                    </div>
+                                  </div>
+                                </template>
+                                <template x-if="r.normalized.http_info.server">
+                                  <div class="ti-field">
+                                    <div class="ti-field-label">Server</div>
+                                    <div class="ti-field-value font-mono" x-text="r.normalized.http_info.server"></div>
+                                  </div>
+                                </template>
+                                <template x-if="r.normalized.http_info.mime_type">
+                                  <div class="ti-field">
+                                    <div class="ti-field-label">MIME Type</div>
+                                    <div class="ti-field-value font-mono" x-text="r.normalized.http_info.mime_type"></div>
+                                  </div>
+                                </template>
+                                <template x-if="r.normalized.http_info.final_url">
+                                  <div class="ti-field">
+                                    <div class="ti-field-label">Final URL</div>
+                                    <div class="ti-field-value">
+                                      <a :href="r.normalized.http_info.final_url" target="_blank" rel="noopener noreferrer"
+                                         class="text-green" style="word-break:break-all;font-size:11px;"
+                                         x-text="r.normalized.http_info.final_url"></a>
+                                    </div>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+
+                          <!-- Tab: DNS -->
+                          <div x-show="getTab(r.source) === 'dns'">
+                            <template x-if="r.normalized.dns_info">
+                              <div class="ti-fields-grid">
+                                <template x-if="r.normalized.dns_info.domain">
+                                  <div class="ti-field">
+                                    <div class="ti-field-label">Domain</div>
+                                    <div class="ti-field-value font-mono" x-text="r.normalized.dns_info.domain"></div>
+                                  </div>
+                                </template>
+                                <template x-if="r.normalized.dns_info.apex_domain">
+                                  <div class="ti-field">
+                                    <div class="ti-field-label">Apex Domain</div>
+                                    <div class="ti-field-value font-mono" x-text="r.normalized.dns_info.apex_domain"></div>
+                                  </div>
+                                </template>
+                                <template x-if="r.normalized.dns_info.ptr">
+                                  <div class="ti-field">
+                                    <div class="ti-field-label">PTR</div>
+                                    <div class="ti-field-value font-mono" x-text="r.normalized.dns_info.ptr"></div>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+
+                          <!-- Tab: Raw -->
+                          <div x-show="getTab(r.source) === 'raw'">
+                            <div class="json-viewer" x-text="JSON.stringify(r.data, null, 2)"></div>
+                          </div>
+
+                        </div>
+                      </template>
+
+                      <!-- No normalized data: fall back to raw JSON -->
+                      <template x-if="!r.normalized">
+                        <div class="json-viewer" x-text="formatJSON(r.data)"></div>
+                      </template>
+
+                    </div>
+                  </template>
+
+                </div><!-- /scan-drawer-body -->
+              </div><!-- /scan-drawer -->
 
               <!-- Add Modal -->
               <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">

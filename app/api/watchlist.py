@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,7 @@ from app.models import User, WatchlistItem, Integration
 from app.schemas import WatchlistItemCreate, WatchlistItemOut
 from app.services.crypto import decrypt
 from app.services.osint import get_client
+from app.services.scan_report_normalizer import normalize_scan_report
 
 router = APIRouter()
 
@@ -52,6 +54,7 @@ async def check_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db),
 
     import json
     integrations_list = json.loads(item.integrations_json or "[]")
+    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     results = []
 
     for svc in integrations_list:
@@ -64,8 +67,21 @@ async def check_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db),
         if client:
             try:
                 osint_result = await client.search(item.value, item.type)
-                results.append({"source": svc, "data": osint_result})
+                normalized = normalize_scan_report(
+                    source=svc,
+                    raw=osint_result,
+                    target=item.value,
+                    target_type=item.type,
+                    checked_at=checked_at,
+                )
+                results.append({"source": svc, "data": osint_result, "normalized": normalized})
             except Exception:
-                results.append({"source": svc, "data": {"error": "Integration request failed"}})
+                results.append({"source": svc, "data": {"error": "Integration request failed"}, "normalized": None})
 
-    return {"item_id": item_id, "value": item.value, "type": item.type, "results": results}
+    return {
+        "item_id": item_id,
+        "value": item.value,
+        "type": item.type,
+        "checked_at": checked_at,
+        "results": results,
+    }
