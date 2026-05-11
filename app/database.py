@@ -154,6 +154,58 @@ def _migrate_integrations(conn) -> None:
         logger.warning("Could not migrate integrations: %s", exc)
 
 
+def _migrate_monitoring(conn) -> None:
+    """Ensure monitoring tables have the newer runs/findings schema."""
+    from sqlalchemy import inspect, text
+
+    JOB_COLS: dict[str, str] = {}
+    RUN_COLS: dict[str, str] = {
+        "findings_count": "INTEGER DEFAULT 0",
+        "preview_count": "INTEGER DEFAULT 0",
+        "summary_json": "TEXT DEFAULT '{}'",
+        "error_message": "TEXT DEFAULT ''",
+        "trigger_type": "VARCHAR(20) DEFAULT 'manual'",
+        "status": "VARCHAR(20) DEFAULT 'running'",
+        "started_at": "DATETIME",
+        "completed_at": "DATETIME",
+    }
+    FINDING_COLS: dict[str, str] = {
+        "check_type": "VARCHAR(50)",
+        "matched_target": "VARCHAR(512)",
+        "source": "VARCHAR(512) DEFAULT ''",
+        "evidence_json": "TEXT DEFAULT '{}'",
+        "status": "VARCHAR(20) DEFAULT 'new'",
+        "fingerprint": "VARCHAR(128) DEFAULT ''",
+        "first_seen": "DATETIME",
+        "last_seen": "DATETIME",
+        "created_at": "DATETIME",
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+
+        if "monitoring_jobs" in tables:
+            existing = {c["name"] for c in inspector.get_columns("monitoring_jobs")}
+            for col_name, col_type in JOB_COLS.items():
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE monitoring_jobs ADD COLUMN {col_name} {col_type}"))
+
+        if "monitoring_runs" in tables:
+            existing = {c["name"] for c in inspector.get_columns("monitoring_runs")}
+            for col_name, col_type in RUN_COLS.items():
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE monitoring_runs ADD COLUMN {col_name} {col_type}"))
+
+        if "monitoring_findings" in tables:
+            existing = {c["name"] for c in inspector.get_columns("monitoring_findings")}
+            for col_name, col_type in FINDING_COLS.items():
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE monitoring_findings ADD COLUMN {col_name} {col_type}"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate monitoring tables: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -169,3 +221,5 @@ async def init_db():
         await conn.run_sync(_migrate_storage_sources)
         # Add base_url to integrations if upgrading from older version
         await conn.run_sync(_migrate_integrations)
+        # Add monitoring runs/findings tables/columns if upgrading from older version
+        await conn.run_sync(_migrate_monitoring)

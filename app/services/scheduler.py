@@ -73,6 +73,30 @@ def start_scheduler():
         except Exception as exc:
             print(f"[scheduler] Storage sources scan error: {exc}")
 
+    async def _run_scheduled_monitoring_jobs():
+        """Run enabled monitoring jobs whose schedule is due."""
+        try:
+            from app.database import AsyncSessionLocal
+            from app.models import MonitoringJob
+            from app.services.monitoring_service import execute_monitoring_job, is_monitoring_job_due
+            from sqlalchemy import select
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(MonitoringJob).where(MonitoringJob.is_active.is_(True))
+                )
+                jobs = result.scalars().all()
+
+                for job in jobs:
+                    if not is_monitoring_job_due(job):
+                        continue
+                    try:
+                        await execute_monitoring_job(db, job, trigger_type="scheduled", preview_limit=5)
+                    except Exception as exc:
+                        print(f"[scheduler] Monitoring job {job.id} error: {exc}")
+        except Exception as exc:
+            print(f"[scheduler] Monitoring scheduler error: {exc}")
+
     _scheduler.add_job(_scan_monitored, IntervalTrigger(minutes=15), id="scan_monitored", replace_existing=True)
     _scheduler.add_job(_scan_all_watched_folders, IntervalTrigger(minutes=5), id="scan_watched_folders", replace_existing=True)
     _scheduler.add_job(
@@ -81,8 +105,14 @@ def start_scheduler():
         id="scan_storage_sources",
         replace_existing=True,
     )
+    _scheduler.add_job(
+        _run_scheduled_monitoring_jobs,
+        IntervalTrigger(minutes=5),
+        id="run_monitoring_jobs",
+        replace_existing=True,
+    )
     _scheduler.start()
-    print("[scheduler] Started. Watched folder scan every 5 minutes. Storage sources schedule evaluated every 10 minutes.")
+    print("[scheduler] Started. Watched folder scan every 5 minutes. Storage sources are evaluated every 10 minutes. Monitoring jobs are evaluated every 5 minutes.")
 
 
 def _is_source_due(source) -> bool:

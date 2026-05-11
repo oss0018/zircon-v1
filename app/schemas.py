@@ -208,9 +208,10 @@ class SearchTemplateOut(BaseModel):
 # ── Monitoring ────────────────────────────────────────────────────────────────
 class MonitoringJobCreate(BaseModel):
     name: str
-    type: str
-    config_json: str = "{}"
-    schedule: str = "*/15 * * * *"
+    type: str = "unified"
+    config_json: Any = "{}"
+    schedule: str = "manual"
+    is_active: bool = True
 
     @field_validator("name", "type")
     @classmethod
@@ -230,6 +231,33 @@ class MonitoringJobOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class MonitoringRunOut(BaseModel):
+    id: int
+    job_id: int
+    trigger_type: str
+    status: str
+    findings_count: int
+    preview_count: int
+    summary_json: str
+    error_message: str
+    started_at: datetime
+    completed_at: Optional[datetime]
+
+
+class MonitoringFindingOut(BaseModel):
+    id: int
+    job_id: int
+    run_id: int
+    check_type: str
+    matched_target: str
+    source: str
+    evidence_json: str
+    status: str
+    first_seen: datetime
+    last_seen: datetime
+    created_at: datetime
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
