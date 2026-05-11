@@ -7,7 +7,7 @@ import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 import whoosh.qparser
 from whoosh import index as whoosh_index
@@ -116,10 +116,11 @@ class SearchEngine:
         writer.commit()
 
     def search(self, query_str: str, limit: int = 50, offset: int = 0,
-               fuzzy: bool = True) -> List[Dict[str, Any]]:
+               fuzzy: bool = True, fields: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         results = []
         with self.ix.searcher() as searcher:
-            parser = MultifieldParser(["filename", "content", "path"], self.ix.schema)
+            search_fields = fields or ["filename", "content", "path"]
+            parser = MultifieldParser(search_fields, self.ix.schema)
             parser.add_plugin(whoosh.qparser.WildcardPlugin())
             if fuzzy:
                 parser.add_plugin(whoosh.qparser.FuzzyTermPlugin())

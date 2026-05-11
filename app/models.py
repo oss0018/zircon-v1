@@ -78,6 +78,52 @@ class MonitoringJob(Base):
     last_run = Column(DateTime, nullable=True)
     next_run = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
+    runs = relationship(
+        "MonitoringRun",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="MonitoringRun.started_at.desc()",
+    )
+    findings = relationship(
+        "MonitoringFinding",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="MonitoringFinding.last_seen.desc()",
+    )
+
+
+class MonitoringRun(Base):
+    __tablename__ = "monitoring_runs"
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, ForeignKey("monitoring_jobs.id"), nullable=False)
+    trigger_type = Column(String(20), default="manual")  # manual | scheduled
+    status = Column(String(20), default="running")  # running | completed | failed
+    findings_count = Column(Integer, default=0)
+    preview_count = Column(Integer, default=0)
+    summary_json = Column(Text, default="{}")
+    error_message = Column(Text, default="")
+    started_at = Column(DateTime, default=_utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    job = relationship("MonitoringJob", back_populates="runs")
+    findings = relationship("MonitoringFinding", back_populates="run")
+
+
+class MonitoringFinding(Base):
+    __tablename__ = "monitoring_findings"
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, ForeignKey("monitoring_jobs.id"), nullable=False)
+    run_id = Column(Integer, ForeignKey("monitoring_runs.id"), nullable=False)
+    check_type = Column(String(50), nullable=False)
+    matched_target = Column(String(512), nullable=False)
+    source = Column(String(512), default="")
+    evidence_json = Column(Text, default="{}")
+    status = Column(String(20), default="new")  # new | investigating | resolved
+    fingerprint = Column(String(128), default="")
+    first_seen = Column(DateTime, default=_utcnow)
+    last_seen = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    job = relationship("MonitoringJob", back_populates="findings")
+    run = relationship("MonitoringRun", back_populates="findings")
 
 
 class WatchlistItem(Base):

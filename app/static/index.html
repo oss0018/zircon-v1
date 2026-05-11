@@ -1250,6 +1250,7 @@
                    :style="`left:${ctxMenu.x}px;top:${ctxMenu.y}px;`"
                    @click.stop="">
                 <button class="context-menu-item" @click="ctxMenu.show=false; triggerJob(ctxMenu.job && ctxMenu.job.id)">▶️ Run now</button>
+                <button class="context-menu-item" @click="ctxMenu.show=false; openEditModal(ctxMenu.job)">✏️ Edit</button>
                 <button class="context-menu-item" @click="ctxOpenNewWindow()">🪟 Open in new window</button>
                 <hr class="context-menu-sep">
                 <button class="context-menu-item danger" @click="ctxMenu.show=false; deleteJob(ctxMenu.job && ctxMenu.job.id)">🗑️ Delete</button>
@@ -1263,91 +1264,333 @@
               </div>
 
               <div class="flex justify-between items-center mb-4">
-                <div></div>
-                <button class="btn btn-primary" @click="showModal = true" x-text="t('add_job')"></button>
+                <div class="text-muted" style="max-width:760px;font-size:0.92rem;line-height:1.6;">
+                  Unified monitoring jobs combine Local Index folder scanning, OSINT checks, watchlist matching, and brand scan results in one workflow. Use targets for keywords/domains/accounts, choose checks per job, then review runs and persisted findings below.
+                </div>
+                <button class="btn btn-primary" @click="openCreateModal()" x-text="t('add_job')"></button>
               </div>
 
-              <div class="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th x-text="t('job_name')"></th>
-                      <th x-text="t('job_type')"></th>
-                      <th x-text="t('schedule')"></th>
-                      <th x-text="t('status')"></th>
-                      <th x-text="t('last_run')"></th>
-                      <th x-text="t('actions')"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <template x-if="jobs.length === 0">
-                      <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
-                    </template>
-                    <template x-for="job in jobs" :key="job.id">
-                      <tr @contextmenu.prevent="showCtxMenu($event, job)" style="cursor:context-menu;">
-                        <td x-text="job.name"></td>
-                        <td><span class="badge badge-blue" x-text="jobTypeLabel(job.type)"></span></td>
-                        <td><code class="text-xs" x-text="job.schedule"></code></td>
-                        <td>
-                          <span :class="job.is_active ? 'badge badge-green' : 'badge badge-gray'"
-                                x-text="job.is_active ? t('active') : t('inactive')"></span>
-                        </td>
-                        <td x-text="job.last_run ? formatDate(job.last_run) : '—'"></td>
-                        <td>
-                          <div class="flex gap-2">
-                            <button class="btn btn-sm btn-secondary" @click="toggleJob(job)"
-                                    x-text="job.is_active ? 'Disable' : 'Enable'"></button>
-                            <button class="btn btn-sm btn-primary" @click="triggerJob(job.id)" x-text="t('trigger')"></button>
-                            <button class="btn btn-sm btn-danger" @click="deleteJob(job.id)">✕</button>
-                          </div>
-                        </td>
+              <div class="card mb-4" style="padding:0;">
+                <div class="flex justify-between items-center" style="padding:16px 16px 0;">
+                  <div class="card-title" style="margin-bottom:0;">Jobs</div>
+                  <div class="text-muted text-sm">Jobs → Runs → Findings</div>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th x-text="t('job_name')"></th>
+                        <th>Checks</th>
+                        <th x-text="t('schedule')"></th>
+                        <th x-text="t('status')"></th>
+                        <th x-text="t('last_run')"></th>
+                        <th x-text="t('actions')"></th>
                       </tr>
-                    </template>
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      <template x-if="jobs.length === 0">
+                        <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);" x-text="t('no_data')"></td></tr>
+                      </template>
+                      <template x-for="job in jobs" :key="job.id">
+                        <tr @click="selectJob(job)"
+                            @contextmenu.prevent="showCtxMenu($event, job)"
+                            :style="activeJobId === job.id ? 'background:rgba(52,211,153,0.08);cursor:pointer;' : 'cursor:pointer;'">
+                          <td>
+                            <div style="font-weight:600;" x-text="job.name"></div>
+                            <div class="text-muted text-xs">ID <span x-text="job.id"></span></div>
+                          </td>
+                          <td>
+                            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                              <template x-for="name in enabledChecks(job)" :key="name">
+                                <span class="badge badge-blue" x-text="name"></span>
+                              </template>
+                            </div>
+                          </td>
+                          <td><code class="text-xs" x-text="job.schedule"></code></td>
+                          <td>
+                            <span :class="job.is_active ? 'badge badge-green' : 'badge badge-gray'"
+                                  x-text="job.is_active ? t('active') : t('inactive')"></span>
+                          </td>
+                          <td x-text="job.last_run ? formatDate(job.last_run) : '—'"></td>
+                          <td>
+                            <div class="flex gap-2" @click.stop="">
+                              <button class="btn btn-sm btn-secondary" @click="openEditModal(job)">Edit</button>
+                              <button class="btn btn-sm btn-secondary" @click="toggleJob(job)"
+                                      x-text="job.is_active ? 'Disable' : 'Enable'"></button>
+                              <button class="btn btn-sm btn-primary" @click="triggerJob(job.id)">Run now</button>
+                              <button class="btn btn-sm btn-danger" @click="deleteJob(job.id)">✕</button>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <!-- Trigger Result -->
-              <div x-show="triggerResult" class="card mt-4">
-                <div class="card-title">Trigger Result</div>
-                <div class="json-viewer" x-text="JSON.stringify(triggerResult, null, 2)"></div>
+              <div x-show="triggerResult" class="card mb-4">
+                <div class="flex justify-between items-center mb-3">
+                  <div class="card-title" style="margin-bottom:0;">Run Now preview</div>
+                  <div class="text-muted text-sm">
+                    Run #<span x-text="triggerResult && triggerResult.run ? triggerResult.run.id : '—'"></span>
+                  </div>
+                </div>
+                <div class="text-muted mb-3" style="font-size:0.9rem;">
+                  Showing the first persisted findings so analysts can quickly validate the run without leaving the page.
+                </div>
+                <div x-show="triggerResult && triggerResult.warnings && triggerResult.warnings.length" class="mb-3">
+                  <template x-for="warning in (triggerResult && triggerResult.warnings ? triggerResult.warnings : [])" :key="warning">
+                    <div class="badge badge-yellow" style="margin-right:6px;margin-bottom:6px;" x-text="warning"></div>
+                  </template>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Check</th>
+                        <th>Target</th>
+                        <th>Source</th>
+                        <th>Evidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="!triggerResult || !triggerResult.preview || triggerResult.preview.length === 0">
+                        <tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted);">No preview findings for this run.</td></tr>
+                      </template>
+                      <template x-for="preview in (triggerResult && triggerResult.preview ? triggerResult.preview : [])" :key="preview.id + '-' + preview.source">
+                        <tr>
+                          <td><span class="badge badge-blue" x-text="preview.check_type.replaceAll('_', ' ')"></span></td>
+                          <td x-text="preview.matched_target"></td>
+                          <td x-text="preview.source"></td>
+                          <td class="text-sm" x-text="previewEvidence(preview)"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              <!-- Add Modal -->
+              <div class="grid" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;">
+                <div class="card">
+                  <div class="flex justify-between items-center mb-3">
+                    <div class="card-title" style="margin-bottom:0;">Runs</div>
+                    <div class="text-muted text-sm" x-text="selectedJob() ? selectedJob().name : 'Select a job'"></div>
+                  </div>
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Status</th>
+                          <th>Trigger</th>
+                          <th>Findings</th>
+                          <th>Started</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-if="!selectedJob()">
+                          <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-muted);">Select a job to review runs.</td></tr>
+                        </template>
+                        <template x-if="selectedJob() && runs.length === 0">
+                          <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-muted);">No runs yet.</td></tr>
+                        </template>
+                        <template x-for="run in runs" :key="run.id">
+                          <tr>
+                            <td>#<span x-text="run.id"></span></td>
+                            <td>
+                              <span :class="run.status === 'completed' ? 'badge badge-green' : run.status === 'failed' ? 'badge badge-red' : 'badge badge-yellow'"
+                                    x-text="run.status"></span>
+                            </td>
+                            <td x-text="run.trigger_type"></td>
+                            <td x-text="run.findings_count"></td>
+                            <td x-text="run.started_at ? formatDate(run.started_at) : '—'"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="flex justify-between items-center mb-3">
+                    <div class="card-title" style="margin-bottom:0;">Findings</div>
+                    <div class="text-muted text-sm">Persisted across runs</div>
+                  </div>
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Check</th>
+                          <th>Target</th>
+                          <th>Source</th>
+                          <th>Status</th>
+                          <th>Last seen</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-if="!selectedJob()">
+                          <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-muted);">Select a job to review findings.</td></tr>
+                        </template>
+                        <template x-if="selectedJob() && findings.length === 0">
+                          <tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-muted);">No findings yet.</td></tr>
+                        </template>
+                        <template x-for="finding in findings" :key="finding.id">
+                          <tr>
+                            <td><span :class="badgeClassForCheck(finding.check_type)" x-text="finding.check_type.replaceAll('_', ' ')"></span></td>
+                            <td>
+                              <div x-text="finding.matched_target"></div>
+                              <div class="text-muted text-xs" x-text="findingSummary(finding)"></div>
+                            </td>
+                            <td x-text="finding.source"></td>
+                            <td><span class="badge badge-blue" x-text="finding.status"></span></td>
+                            <td x-text="finding.last_seen ? formatDate(finding.last_seen) : '—'"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Add/Edit Modal -->
               <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">
-                <div class="modal">
-                  <div class="modal-title" x-text="t('add_job')"></div>
+                <div class="modal" style="max-width:960px;">
+                  <div class="modal-title" x-text="modalMode === 'edit' ? 'Edit Job' : t('add_job')"></div>
                   <div class="form-group">
                     <label class="form-label" x-text="t('job_name')"></label>
                     <input class="form-input" x-model="newJob.name" placeholder="My Monitoring Job" />
                   </div>
                   <div class="form-group">
-                    <label class="form-label" x-text="t('job_type')"></label>
-                    <select class="form-select" x-model="newJob.type">
-                      <template x-for="jt in jobTypes" :key="jt.value">
-                        <option :value="jt.value" x-text="jt.label"></option>
-                      </template>
-                    </select>
+                    <label class="form-label">Targets</label>
+                    <textarea class="form-input" x-model="newJob.targetsText" rows="5"
+                              placeholder="keyword:fireage.win&#10;domain:example.com&#10;@telegram_account&#10;just a phrase"></textarea>
+                    <div class="text-muted text-xs" style="margin-top:6px;">
+                      Bulk paste one target per line. Prefix with keyword:, domain:, email:, url:, or account: to override auto-detection.
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Exclusions</label>
+                    <textarea class="form-input" x-model="newJob.exclusionsText" rows="3"
+                              placeholder="internal-only&#10;ignore-this-term"></textarea>
                   </div>
                   <div class="form-group">
                     <label class="form-label" x-text="t('schedule')"></label>
-                    <div class="flex gap-2">
-                      <input class="form-input" x-model="newJob.schedule" placeholder="*/15 * * * *" />
-                    </div>
-                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
                       <template x-for="s in commonSchedules" :key="s.value">
-                        <button class="btn btn-sm btn-secondary" @click="newJob.schedule = s.value" x-text="s.label"></button>
+                        <button class="btn btn-sm"
+                                :class="newJob.schedule === s.value ? 'btn-primary' : 'btn-secondary'"
+                                @click="newJob.schedule = s.value"
+                                x-text="s.label"></button>
+                      </template>
+                    </div>
+                    <label class="flex items-center gap-2 mt-3">
+                      <input type="checkbox" x-model="newJob.is_active" />
+                      <span class="form-label" style="margin-bottom:0;">Enabled</span>
+                    </label>
+                  </div>
+
+                  <div class="card" style="padding:12px;margin-bottom:12px;">
+                    <div class="flex justify-between items-center mb-2">
+                      <div class="card-title" style="margin-bottom:0;">Folder Scan</div>
+                      <label class="flex items-center gap-2">
+                        <input type="checkbox" x-model="newJob.checks.folder_scan.enabled" />
+                        <span class="text-sm">Enabled</span>
+                      </label>
+                    </div>
+                    <div x-show="newJob.checks.folder_scan.enabled">
+                      <div class="text-muted text-xs mb-2">Uses Local Index storage sources only. Text content search, no direct filesystem scan.</div>
+                      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+                        <template x-for="source in options.storage_sources" :key="source.id">
+                          <label class="badge badge-gray" style="display:flex;align-items:center;gap:6px;padding:8px 10px;">
+                            <input type="checkbox" :value="source.id" x-model="newJob.checks.folder_scan.storage_source_ids" />
+                            <span x-text="source.name"></span>
+                          </label>
+                        </template>
+                      </div>
+                      <label class="form-label">Path / prefix filters</label>
+                      <textarea class="form-input" x-model="newJob.checks.folder_scan.path_prefixesText" rows="3"
+                                placeholder="/legal&#10;/public/reports"></textarea>
+                    </div>
+                  </div>
+
+                  <div class="card" style="padding:12px;margin-bottom:12px;">
+                    <div class="flex justify-between items-center mb-2">
+                      <div class="card-title" style="margin-bottom:0;">OSINT Check</div>
+                      <label class="flex items-center gap-2">
+                        <input type="checkbox" x-model="newJob.checks.osint_check.enabled" />
+                        <span class="text-sm">Enabled</span>
+                      </label>
+                    </div>
+                    <div x-show="newJob.checks.osint_check.enabled">
+                      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+                        <template x-for="integration in options.integrations" :key="integration.id">
+                          <label class="badge badge-gray" style="display:flex;align-items:center;gap:6px;padding:8px 10px;">
+                            <input type="checkbox" :value="integration.id" x-model="newJob.checks.osint_check.integration_ids" />
+                            <span x-text="integration.name + ' (' + integration.service_type + ')'"></span>
+                          </label>
+                        </template>
+                      </div>
+                      <div class="text-muted text-xs mb-2">Per-source advanced options are optional JSON blocks keyed per selected integration.</div>
+                      <template x-for="integration in options.integrations.filter(item => (newJob.checks.osint_check.integration_ids || []).map(String).includes(String(item.id)))" :key="'adv-' + integration.id">
+                        <div class="form-group" x-show="ensureAdvancedOption(String(integration.id))">
+                          <label class="form-label" x-text="'Advanced options — ' + integration.name"></label>
+                          <textarea class="form-input"
+                                    x-model="newJob.checks.osint_check.advanced_options[String(integration.id)]"
+                                    rows="3"
+                                    placeholder='{"query_type":"domain"}'></textarea>
+                        </div>
                       </template>
                     </div>
                   </div>
-                  <div class="form-group">
-                    <label class="form-label" x-text="t('config')"></label>
-                    <textarea class="form-input" x-model="newJob.config_json" rows="3"
-                              placeholder='{"folder": "./data/monitored"}'></textarea>
+
+                  <div class="card" style="padding:12px;margin-bottom:12px;">
+                    <div class="flex justify-between items-center mb-2">
+                      <div class="card-title" style="margin-bottom:0;">Watchlist Check</div>
+                      <label class="flex items-center gap-2">
+                        <input type="checkbox" x-model="newJob.checks.watchlist_check.enabled" />
+                        <span class="text-sm">Enabled</span>
+                      </label>
+                    </div>
+                    <div x-show="newJob.checks.watchlist_check.enabled">
+                      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;max-height:160px;overflow:auto;">
+                        <template x-for="item in options.watchlist_items" :key="item.id">
+                          <label class="badge badge-gray" style="display:flex;align-items:center;gap:6px;padding:8px 10px;">
+                            <input type="checkbox" :value="item.id" x-model="newJob.checks.watchlist_check.watchlist_item_ids" />
+                            <span x-text="item.type + ': ' + item.value"></span>
+                          </label>
+                        </template>
+                      </div>
+                      <label class="form-label">Matching mode</label>
+                      <select class="form-select" x-model="newJob.checks.watchlist_check.matching_mode">
+                        <option value="contains">Contains</option>
+                        <option value="exact">Exact</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="card" style="padding:12px;margin-bottom:12px;">
+                    <div class="flex justify-between items-center mb-2">
+                      <div class="card-title" style="margin-bottom:0;">Brand Scan</div>
+                      <label class="flex items-center gap-2">
+                        <input type="checkbox" x-model="newJob.checks.brand_scan.enabled" />
+                        <span class="text-sm">Enabled</span>
+                      </label>
+                    </div>
+                    <div x-show="newJob.checks.brand_scan.enabled">
+                      <div style="display:flex;flex-wrap:wrap;gap:8px;max-height:160px;overflow:auto;">
+                        <template x-for="brand in options.brands" :key="brand.id">
+                          <label class="badge badge-gray" style="display:flex;align-items:center;gap:6px;padding:8px 10px;">
+                            <input type="checkbox" :value="brand.id" x-model="newJob.checks.brand_scan.brand_ids" />
+                            <span x-text="brand.name"></span>
+                          </label>
+                        </template>
+                      </div>
+                    </div>
                   </div>
                   <div class="modal-footer">
                     <button class="btn btn-secondary" @click="showModal = false" x-text="t('cancel')"></button>
-                    <button class="btn btn-primary" @click="createJob()" x-text="t('save')"></button>
+                    <button class="btn btn-primary" @click="saveJob()" x-text="t('save')"></button>
                   </div>
                 </div>
               </div>
