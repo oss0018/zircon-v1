@@ -44,6 +44,15 @@ document.addEventListener('alpine:init', () => {
       }
       document.addEventListener('click', () => { this.ctxMenu.show = false; });
       document.addEventListener('keydown', e => { if (e.key === 'Escape') this.ctxMenu.show = false; });
+      // Deep-link: select job by job_id from URL
+      const urlParams = window._urlParams;
+      if (urlParams) {
+        const jobId = urlParams.get('job_id');
+        if (jobId) {
+          const job = this.jobs.find(j => String(j.id) === String(jobId));
+          if (job) await this.selectJob(job);
+        }
+      }
     },
 
     resetJobForm() {
@@ -148,7 +157,9 @@ document.addEventListener('alpine:init', () => {
 
     ctxOpenNewWindow() {
       this.ctxMenu.show = false;
-      window.open('/?page=monitoring', '_blank');
+      const jobId = this.ctxMenu.job && this.ctxMenu.job.id;
+      const url = jobId ? `/?page=monitoring&job_id=${encodeURIComponent(jobId)}` : '/?page=monitoring';
+      window.open(url, '_blank');
     },
 
     openCreateModal() {
