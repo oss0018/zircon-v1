@@ -1986,11 +1986,13 @@
             <!-- ── WATCHLIST ───────────────────────────────────────── -->
             <div x-show="page === 'watchlist'" x-data="{
               items: [], integrations: [], loading: false, showModal: false,
-              checkLoading: false,
+              checkingById: {},
               /* Drawer state */
               showDrawer: false,
               drawerReport: null,
               drawerTabs: {},
+              modalMode: 'create',
+              editingItemId: null,
               newItem: { type: 'email', value: '', integrations_json: '[]', alert_email: '', alert_telegram: '' },
               itemTypes: ['email', 'domain', 'ip', 'keyword', 'brand'],
               ctxMenu: { show: false, x: 0, y: 0, item: null },
@@ -2004,26 +2006,194 @@
                 this.loading = true;
                 try { this.items = await api.get('/watchlist/'); } catch(e){ showToast(e.message,'error'); } finally { this.loading = false; }
               },
-              async create() {
+              _resetModalForm() {
+                this.newItem = { type: 'email', value: '', integrations_json: '[]', alert_email: '', alert_telegram: '' };
+                this.selectedIntegrations = [];
+                this.editingItemId = null;
+                this.modalMode = 'create';
+              },
+              openCreateModal() {
+                this._resetModalForm();
+                this.showModal = true;
+              },
+              openEditModal(item) {
+                let integrations = [];
+                try { integrations = JSON.parse(item.integrations_json || '[]'); } catch {}
+                this.newItem = {
+                  type: item.type || 'email',
+                  value: item.value || '',
+                  integrations_json: item.integrations_json || '[]',
+                  alert_email: item.alert_email || '',
+                  alert_telegram: item.alert_telegram || '',
+                };
+                this.selectedIntegrations = Array.isArray(integrations) ? integrations : [];
+                this.editingItemId = item.id;
+                this.modalMode = 'edit';
+                this.showModal = true;
+              },
+              closeModal() {
+                this.showModal = false;
+                this._resetModalForm();
+              },
+              async saveItem() {
                 try {
                   this.newItem.integrations_json = JSON.stringify(this.selectedIntegrations || []);
-                  await api.post('/watchlist/', this.newItem);
-                  await this.load(); this.showModal = false;
-                  this.newItem = { type: 'email', value: '', integrations_json: '[]', alert_email: '', alert_telegram: '' };
-                  showToast('Added', 'success');
+                  if (this.modalMode === 'edit' && this.editingItemId) {
+                    await api.put('/watchlist/' + this.editingItemId, this.newItem);
+                    showToast('Updated', 'success');
+                  } else {
+                    await api.post('/watchlist/', this.newItem);
+                    showToast('Added', 'success');
+                  }
+                  await this.load();
+                  this.closeModal();
                 } catch(e) { showToast(e.message,'error'); }
               },
+              isChecking(id) { return !!this.checkingById[id]; },
+              _setItemChecking(id, checking) {
+                const next = Object.assign({}, this.checkingById);
+                if (checking) next[id] = true;
+                else delete next[id];
+                this.checkingById = next;
+              },
+              _hasSummaryData(normalized) {
+                if (!normalized || typeof normalized !== 'object') return false;
+                if (normalized.status && normalized.status !== 'success') return true;
+                const summaryFields = ['main_ip', 'asn', 'org', 'country', 'final_url', 'title', 'provider_url', 'screenshot_url', 'scan_age', 'multi_scan_summary'];
+                if (summaryFields.some(field => normalized[field])) return true;
+                if (normalized.http_info || normalized.dns_info) return true;
+                if (normalized.indicators && normalized.indicators.length) return true;
+                if (normalized.tags && normalized.tags.length) return true;
+                return !!normalized.total_results;
+              },
+              _normalizeUrlscanFromRaw(raw, source, target, targetType, checkedAt) {
+                if (!raw || typeof raw !== 'object') return null;
+                const normalized = {
+                  source: source,
+                  target: target,
+                  target_type: targetType,
+                  checked_at: checkedAt,
+                  status: 'success',
+                  verdict: null,
+                  verdict_score: null,
+                  main_ip: null,
+                  asn: null,
+                  org: null,
+                  country: null,
+                  final_url: null,
+                  title: null,
+                  tags: [],
+                  scan_age: null,
+                  provider_url: null,
+                  screenshot_url: null,
+                  indicators: null,
+                  http_info: null,
+                  dns_info: null,
+                  links: null,
+                  total_results: 0,
+                };
+                if (raw.error) {
+                  const err = String(raw.error).toLowerCase();
+                  normalized.status = (err.includes('rate') || err.includes('429')) ? 'rate_limited' : 'failed';
+                  return normalized;
+                }
+                if (raw.not_found) {
+                  normalized.status = 'no_data';
+                  return normalized;
+                }
+                if (raw.uuid && raw.message) {
+                  normalized.status = 'pending';
+                  normalized.provider_url = raw.result || null;
+                  return normalized;
+                }
+                const results = Array.isArray(raw.results) ? raw.results : [];
+                normalized.total_results = Number(raw.total ?? results.length ?? 0);
+                if (!results.length) {
+                  normalized.status = 'no_data';
+                  return normalized;
+                }
+                const r0 = results[0] || {};
+                const page = r0.page || {};
+                const task = r0.task || {};
+                const verdicts = r0.verdicts || {};
+                const overall = verdicts.overall || {};
+                normalized.main_ip = page.ip || null;
+                normalized.asn = page.asn || null;
+                normalized.org = page.asnname || null;
+                normalized.country = page.country || null;
+                normalized.final_url = page.url || task.url || null;
+                normalized.title = page.title || null;
+                normalized.scan_age = task.time || null;
+                normalized.provider_url = r0.result || task.reportURL || null;
+                normalized.screenshot_url = r0.screenshot || null;
+                const score = Number(overall.score || 0);
+                normalized.verdict_score = score;
+                if (overall.malicious || score >= 70) normalized.verdict = 'malicious';
+                else if (score >= 30) normalized.verdict = 'suspicious';
+                else normalized.verdict = 'clean';
+                const tagSet = new Set();
+                (overall.categories || []).forEach(t => t && tagSet.add(String(t)));
+                (overall.tags || []).forEach(t => t && tagSet.add(String(t)));
+                (overall.brands || []).forEach(t => {
+                  if (!t) return;
+                  if (typeof t === 'object' && t.name) tagSet.add(String(t.name));
+                  else tagSet.add(String(t));
+                });
+                normalized.tags = Array.from(tagSet);
+                const httpStatus = page.status || null;
+                if (httpStatus || page.server || page.mimeType || normalized.final_url) {
+                  normalized.http_info = {
+                    status: httpStatus,
+                    server: page.server || null,
+                    mime_type: page.mimeType || null,
+                    final_url: normalized.final_url,
+                  };
+                }
+                if (page.ptr || page.domain || page.apexDomain) {
+                  normalized.dns_info = {
+                    ptr: page.ptr || null,
+                    domain: page.domain || null,
+                    apex_domain: page.apexDomain || null,
+                  };
+                }
+                const indicators = [];
+                if (normalized.main_ip && (normalized.verdict === 'malicious' || normalized.verdict === 'suspicious')) {
+                  indicators.push({ type: 'ip', value: normalized.main_ip, context: 'Main IP' });
+                }
+                const engines = verdicts.engines || {};
+                const maliciousEngines = Number(engines.malicious || 0);
+                const benignEngines = Number(engines.benign || 0);
+                if (maliciousEngines > 0) {
+                  indicators.push({ type: 'verdict', value: `${maliciousEngines} malicious engine detection(s)`, context: `${benignEngines} benign` });
+                }
+                normalized.indicators = indicators.length ? indicators : null;
+                if (results.length > 1) {
+                  const maliciousCount = results.filter(rx => !!(((rx || {}).verdicts || {}).overall || {}).malicious).length;
+                  if (maliciousCount) normalized.multi_scan_summary = `${maliciousCount}/${results.length} scans flagged as malicious`;
+                }
+                return normalized;
+              },
+              normalizeResultEntry(entry, report) {
+                if (entry.normalized && this._hasSummaryData(entry.normalized)) return entry.normalized;
+                const source = String(entry.source || '').toLowerCase();
+                if (source === 'urlscan' || source === 'urlscan.io') {
+                  return this._normalizeUrlscanFromRaw(entry.data, entry.source, report.value, report.type, report.checked_at);
+                }
+                return entry.normalized || null;
+              },
               async checkItem(id) {
-                this.checkLoading = true;
+                if (!id || this.isChecking(id)) return;
+                this._setItemChecking(id, true);
                 this.showDrawer = false;
                 this.drawerReport = null;
                 try {
                   const result = await api.post('/watchlist/' + id + '/check');
+                  result.results = (result.results || []).map(r => ({ ...r, normalized: this.normalizeResultEntry(r, result) }));
                   this.drawerReport = result;
                   this.drawerTabs = {};
                   this.showDrawer = true;
                   showToast('Check complete', 'success');
-                } catch(e) { showToast(e.message,'error'); } finally { this.checkLoading = false; }
+                } catch(e) { showToast(e.message,'error'); } finally { this._setItemChecking(id, false); }
               },
               async deleteItem(id) {
                 if(!confirm(t('confirm_delete'))) return;
@@ -2062,6 +2232,7 @@
                    :style="`left:${ctxMenu.x}px;top:${ctxMenu.y}px;`"
                    @click.stop="">
                 <button class="context-menu-item" @click="ctxMenu.show=false; checkItem(ctxMenu.item && ctxMenu.item.id)">✅ Check now</button>
+                <button class="context-menu-item" @click="ctxMenu.show=false; if(ctxMenu.item){ openEditModal(ctxMenu.item); }">✏️ Edit</button>
                 <button class="context-menu-item" @click="ctxOpenNewWindow()">🪟 Open in new window</button>
                 <hr class="context-menu-sep">
                 <button class="context-menu-item danger" @click="ctxMenu.show=false; deleteItem(ctxMenu.item && ctxMenu.item.id)">🗑️ Delete</button>
@@ -2076,7 +2247,7 @@
 
               <div class="flex justify-between items-center mb-4">
                 <div></div>
-                <button class="btn btn-primary" @click="showModal = true" x-text="t('add_item')"></button>
+                <button class="btn btn-primary" @click="openCreateModal()" x-text="t('add_item')"></button>
               </div>
 
               <div class="table-wrapper">
@@ -2104,7 +2275,10 @@
                         <td x-text="formatDate(item.created_at)"></td>
                         <td>
                           <div class="flex gap-2">
-                            <button class="btn btn-sm btn-primary" @click="checkItem(item.id)" :disabled="checkLoading" x-text="t('check_now')"></button>
+                            <button class="btn btn-sm btn-secondary" @click="openEditModal(item)">✏️</button>
+                            <button class="btn btn-sm btn-primary" @click="checkItem(item.id)" :disabled="isChecking(item.id)">
+                              <span x-text="isChecking(item.id) ? 'Checking…' : t('check_now')"></span>
+                            </button>
                             <button class="btn btn-sm btn-danger" @click="deleteItem(item.id)">✕</button>
                           </div>
                         </td>
@@ -2402,9 +2576,9 @@
               </div><!-- /scan-drawer -->
 
               <!-- Add Modal -->
-              <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">
+              <div x-show="showModal" class="modal-overlay" @click.self="closeModal()">
                 <div class="modal">
-                  <div class="modal-title" x-text="t('add_item')"></div>
+                  <div class="modal-title" x-text="modalMode === 'edit' ? 'Edit Item' : t('add_item')"></div>
                   <div class="form-group">
                     <label class="form-label" x-text="t('item_type')"></label>
                     <select class="form-select" x-model="newItem.type">
@@ -2439,8 +2613,8 @@
                     <input class="form-input" x-model="newItem.alert_telegram" placeholder="@username or chat_id" />
                   </div>
                   <div class="modal-footer">
-                    <button class="btn btn-secondary" @click="showModal = false" x-text="t('cancel')"></button>
-                    <button class="btn btn-primary" @click="create()" x-text="t('save')"></button>
+                    <button class="btn btn-secondary" @click="closeModal()" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="saveItem()" x-text="t('save')"></button>
                   </div>
                 </div>
               </div>

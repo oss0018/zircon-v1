@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any
 from datetime import datetime
+from pydantic_core import PydanticCustomError
 import html as _html
 
 
@@ -261,12 +262,23 @@ class MonitoringFindingOut(BaseModel):
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
+WATCHLIST_ITEM_TYPES = {"email", "domain", "ip", "keyword", "brand"}
+
+
 class WatchlistItemCreate(BaseModel):
     type: str  # email/domain/keyword/brand/ip
     value: str = Field(..., min_length=1)
     integrations_json: str = "[]"
     alert_email: str = ""
     alert_telegram: str = ""
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        val = (v or "").strip().lower()
+        if val not in WATCHLIST_ITEM_TYPES:
+            raise PydanticCustomError("invalid_watchlist_type", "Invalid watchlist item type")
+        return val
 
     @field_validator("value")
     @classmethod
@@ -278,6 +290,51 @@ class WatchlistItemCreate(BaseModel):
     def sanitize_email(cls, v: str) -> str:
         v = v.strip()[:254]
         return _html.escape(v, quote=True)
+
+    @field_validator("alert_telegram")
+    @classmethod
+    def sanitize_telegram(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=100)
+
+
+class WatchlistItemUpdate(BaseModel):
+    type: Optional[str] = None
+    value: Optional[str] = Field(None, min_length=1)
+    integrations_json: Optional[str] = None
+    alert_email: Optional[str] = None
+    alert_telegram: Optional[str] = None
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        val = v.strip().lower()
+        if val not in WATCHLIST_ITEM_TYPES:
+            raise PydanticCustomError("invalid_watchlist_type", "Invalid watchlist item type")
+        return val
+
+    @field_validator("value")
+    @classmethod
+    def sanitize_value(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _sanitize(v.strip(), max_length=512)
+
+    @field_validator("alert_email")
+    @classmethod
+    def sanitize_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()[:254]
+        return _html.escape(v, quote=True)
+
+    @field_validator("alert_telegram")
+    @classmethod
+    def sanitize_telegram(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _sanitize(v.strip(), max_length=100)
 
 
 class WatchlistItemOut(BaseModel):
