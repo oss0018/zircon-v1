@@ -132,10 +132,21 @@ document.addEventListener('alpine:init', () => {
           window._currentUser = this.currentUser;
           this.authenticated = true;
           this.loadStats();
+          this._applyUrlParams();
         } catch {
           localStorage.removeItem('zircon_token');
         }
       }
+    },
+
+    _applyUrlParams() {
+      const params = new URLSearchParams(window.location.search);
+      const page = params.get('page');
+      if (page) {
+        this.navigate(page);
+      }
+      // Store params for child components
+      window._urlParams = params;
     },
 
     setLang(l) {
@@ -194,6 +205,10 @@ document.addEventListener('alpine:init', () => {
     userInitials() {
       if (!this.currentUser) return '?';
       return this.currentUser.username.substring(0, 2).toUpperCase();
+    },
+
+    openPageInNewWindow(page) {
+      window.open(`/?page=${encodeURIComponent(page)}`, '_blank');
     },
   }));
 });

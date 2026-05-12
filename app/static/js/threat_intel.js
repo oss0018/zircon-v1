@@ -43,6 +43,9 @@ document.addEventListener('alpine:init', () => {
     // History filter
     historyFilter: { type: '', source: '', date: '' },
 
+    // Context menu for history rows
+    ctxMenu: { show: false, x: 0, y: 0, entry: null },
+
     iocTypes: ['ip', 'domain', 'hash', 'url', 'email', 'general'],
 
     async init() {
@@ -51,6 +54,18 @@ document.addEventListener('alpine:init', () => {
         this.loadHistory(),
         this.loadStats(),
       ]);
+      document.addEventListener('click', () => { this.ctxMenu.show = false; });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') this.ctxMenu.show = false; });
+      // Deep-link: pre-fill IOC form from URL params
+      const urlParams = window._urlParams;
+      if (urlParams) {
+        const ioc = urlParams.get('ioc');
+        const iocType = urlParams.get('ioc_type');
+        if (ioc) {
+          this.iocForm.ioc = decodeURIComponent(ioc);
+          if (iocType) this.iocForm.ioc_type = decodeURIComponent(iocType);
+        }
+      }
     },
 
     async loadIntegrations() {
@@ -894,6 +909,45 @@ document.addEventListener('alpine:init', () => {
 
     closeHistoryDetail() {
       this.historyDetailModal = { show: false, entry: null };
+    },
+
+    showCtxMenu(e, entry) {
+      e.preventDefault();
+      e.stopPropagation();
+      const x = Math.min(e.clientX, window.innerWidth - 220);
+      const y = Math.min(e.clientY, window.innerHeight - 130);
+      this.ctxMenu = { show: true, x, y, entry };
+    },
+
+    closeCtxMenu() {
+      this.ctxMenu = { show: false, x: 0, y: 0, entry: null };
+    },
+
+    ctxOpenInNewWindow() {
+      const entry = this.ctxMenu.entry;
+      this.closeCtxMenu();
+      if (!entry) {
+        window.open('/?page=threat-intel', '_blank');
+        return;
+      }
+      const ioc = encodeURIComponent(entry.ioc_value || '');
+      const iocType = encodeURIComponent(entry.ioc_type || 'ip');
+      window.open(`/?page=threat-intel&ioc=${ioc}&ioc_type=${iocType}`, '_blank');
+    },
+
+    ctxCopyIoc() {
+      const entry = this.ctxMenu.entry;
+      this.closeCtxMenu();
+      if (!entry) return;
+      navigator.clipboard.writeText(entry.ioc_value || '')
+        .then(() => showToast('IOC copied to clipboard', 'success'))
+        .catch(() => showToast('Failed to copy', 'error'));
+    },
+
+    ctxOpenDetail() {
+      const entry = this.ctxMenu.entry;
+      this.closeCtxMenu();
+      if (entry) this.openHistoryDetail(entry);
     },
 
     filteredHistory() {

@@ -41,6 +41,9 @@ document.addEventListener('alpine:init', () => {
     modalNewOwnedDomain: '',
     modalTrustSubdomains: true,
 
+    // Context menu for alert rows
+    ctxMenu: { show: false, x: 0, y: 0, alert: null },
+
     /** Normalise a raw domain string: strip scheme, path, port, trailing dot, lowercase. */
     _normalizeDomain(raw) {
       return raw.trim().toLowerCase()
@@ -52,6 +55,8 @@ document.addEventListener('alpine:init', () => {
     async init() {
       await this.loadBrands();
       await this.loadAllAlerts();
+      document.addEventListener('click', () => { this.ctxMenu.show = false; });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') this.ctxMenu.show = false; });
     },
 
     async loadBrands() {
@@ -183,6 +188,39 @@ document.addEventListener('alpine:init', () => {
       } catch (e) {
         showToast(e.message, 'error');
       }
+    },
+
+    showCtxMenu(e, alert) {
+      e.preventDefault();
+      e.stopPropagation();
+      const x = Math.min(e.clientX, window.innerWidth - 220);
+      const y = Math.min(e.clientY, window.innerHeight - 130);
+      this.ctxMenu = { show: true, x, y, alert };
+    },
+
+    closeCtxMenu() {
+      this.ctxMenu = { show: false, x: 0, y: 0, alert: null };
+    },
+
+    ctxOpenInNewWindow() {
+      this.closeCtxMenu();
+      window.open('/?page=brands', '_blank');
+    },
+
+    ctxCopyDomain() {
+      const alert = this.ctxMenu.alert;
+      this.closeCtxMenu();
+      if (!alert) return;
+      navigator.clipboard.writeText(alert.similar_domain || '')
+        .then(() => showToast('Domain copied to clipboard', 'success'))
+        .catch(() => showToast('Failed to copy', 'error'));
+    },
+
+    ctxOpenDomain() {
+      const alert = this.ctxMenu.alert;
+      this.closeCtxMenu();
+      if (!alert || !alert.similar_domain) return;
+      window.open(`https://${alert.similar_domain}`, '_blank', 'noopener,noreferrer');
     },
 
     /**
