@@ -268,6 +268,16 @@ class WatchlistItemCreate(BaseModel):
     alert_email: str = ""
     alert_telegram: str = ""
 
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        allowed = {"email", "domain", "ip", "keyword", "brand"}
+        val = (v or "").strip().lower()
+        if val not in allowed:
+            from pydantic_core import PydanticCustomError
+            raise PydanticCustomError("invalid_watchlist_type", "Invalid watchlist item type")
+        return val
+
     @field_validator("value")
     @classmethod
     def sanitize_value(cls, v: str) -> str:
@@ -291,6 +301,18 @@ class WatchlistItemUpdate(BaseModel):
     integrations_json: Optional[str] = None
     alert_email: Optional[str] = None
     alert_telegram: Optional[str] = None
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        allowed = {"email", "domain", "ip", "keyword", "brand"}
+        val = v.strip().lower()
+        if val not in allowed:
+            from pydantic_core import PydanticCustomError
+            raise PydanticCustomError("invalid_watchlist_type", "Invalid watchlist item type")
+        return val
 
     @field_validator("value")
     @classmethod
