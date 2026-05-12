@@ -52,7 +52,10 @@ async def update_watchlist_item(item_id: int, data: WatchlistItemUpdate, db: Asy
         raise HTTPException(status_code=404, detail="Not found")
 
     payload = data.model_dump(exclude_unset=True)
+    allowed_fields = {"type", "value", "integrations_json", "alert_email", "alert_telegram"}
     for field, value in payload.items():
+        if field not in allowed_fields:
+            continue
         setattr(item, field, value)
 
     await db.commit()
