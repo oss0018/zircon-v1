@@ -60,6 +60,34 @@ def _make_base(source: str, target: str, target_type: str, checked_at: str) -> d
     }
 
 
+def _canonical_source(source: str) -> str:
+    s = (source or "").strip().lower()
+    aliases = {
+        "urlscan.io": "urlscan",
+    }
+    return aliases.get(s, s)
+
+
+def _has_summary_data(report: dict | None) -> bool:
+    if not isinstance(report, dict):
+        return False
+    if report.get("status") and report.get("status") != "success":
+        return True
+    key_fields = (
+        "main_ip", "asn", "org", "country", "final_url", "title",
+        "scan_age", "provider_url", "screenshot_url", "multi_scan_summary",
+    )
+    if any(report.get(k) for k in key_fields):
+        return True
+    if report.get("http_info") or report.get("dns_info"):
+        return True
+    if report.get("indicators"):
+        return True
+    if report.get("tags"):
+        return True
+    return bool(report.get("total_results"))
+
+
 # ---------------------------------------------------------------------------
 # urlscan.io normalizer
 # ---------------------------------------------------------------------------
@@ -246,7 +274,7 @@ def normalize_scan_report(
         base["status"] = "no_data"
         return base
 
-    normalizer = _NORMALIZERS.get(source)
+    normalizer = _NORMALIZERS.get(_canonical_source(source))
     if normalizer is None:
         # Unknown provider — return success base (frontend falls back to raw)
         return base
@@ -256,3 +284,30 @@ def normalize_scan_report(
     except Exception:
         base["status"] = "failed"
         return base
+
+
+def ensure_normalized_scan_report(
+    source: str,
+    raw: dict,
+    target: str,
+    target_type: str,
+    checked_at: str | None = None,
+    existing_normalized: dict | None = None,
+) -> dict | None:
+    """
+    Ensure a scan report has usable normalized data.
+    Falls back to deriving normalized fields from raw payload on-the-fly.
+    """
+    if _has_summary_data(existing_normalized):
+        return existing_normalized
+
+    derived = normalize_scan_report(
+        source=source,
+        raw=raw,
+        target=target,
+        target_type=target_type,
+        checked_at=checked_at,
+    )
+    if _has_summary_data(derived):
+        return derived
+    return existing_normalized or derived

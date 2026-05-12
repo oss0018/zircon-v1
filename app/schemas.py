@@ -279,6 +279,41 @@ class WatchlistItemCreate(BaseModel):
         v = v.strip()[:254]
         return _html.escape(v, quote=True)
 
+    @field_validator("alert_telegram")
+    @classmethod
+    def sanitize_telegram(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=100)
+
+
+class WatchlistItemUpdate(BaseModel):
+    type: Optional[str] = None
+    value: Optional[str] = Field(None, min_length=1)
+    integrations_json: Optional[str] = None
+    alert_email: Optional[str] = None
+    alert_telegram: Optional[str] = None
+
+    @field_validator("value")
+    @classmethod
+    def sanitize_value(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _sanitize(v.strip(), max_length=512)
+
+    @field_validator("alert_email")
+    @classmethod
+    def sanitize_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()[:254]
+        return _html.escape(v, quote=True)
+
+    @field_validator("alert_telegram")
+    @classmethod
+    def sanitize_telegram(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _sanitize(v.strip(), max_length=100)
+
 
 class WatchlistItemOut(BaseModel):
     id: int

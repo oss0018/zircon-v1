@@ -4,7 +4,11 @@ Covers urlscan.io responses and generic edge-cases.
 """
 
 import pytest
-from app.services.scan_report_normalizer import normalize_scan_report, _NORMALIZERS
+from app.services.scan_report_normalizer import (
+    normalize_scan_report,
+    ensure_normalized_scan_report,
+    _NORMALIZERS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +207,12 @@ class TestErrorHandling:
         assert report["status"] == "success"
         assert report["source"] == "unknown_provider"
 
+    def test_urlscan_alias_source_is_supported(self):
+        raw = {"total": 1, "results": [TestURLscanSearch()._make_result()]}
+        report = _norm("urlscan.io", raw)
+        assert report["status"] == "success"
+        assert report["final_url"] == "https://www.example.com/"
+
     def test_normalizer_exception_returns_failed(self, monkeypatch):
         """Internal normalizer errors should be caught and return 'failed'."""
         from app.services import scan_report_normalizer as m
@@ -232,6 +242,27 @@ class TestFieldPreservation:
     def test_source_always_present(self):
         report = _norm("urlscan", {})
         assert report["source"] == "urlscan"
+
+
+class TestEnsureNormalized:
+    def test_derive_from_raw_when_existing_is_empty(self):
+        raw = {"total": 1, "results": [TestURLscanSearch()._make_result()]}
+        existing = {
+            "source": "urlscan",
+            "status": "success",
+            "verdict": None,
+            "total_results": 0,
+        }
+        report = ensure_normalized_scan_report(
+            source="urlscan",
+            raw=raw,
+            target="example.com",
+            target_type="domain",
+            checked_at="2024-01-01T00:00:00Z",
+            existing_normalized=existing,
+        )
+        assert report["status"] == "success"
+        assert report["final_url"] == "https://www.example.com/"
 
 
 # ---------------------------------------------------------------------------

@@ -7,10 +7,10 @@ from sqlalchemy import select
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import User, WatchlistItem, Integration
-from app.schemas import WatchlistItemCreate, WatchlistItemOut
+from app.schemas import WatchlistItemCreate, WatchlistItemOut, WatchlistItemUpdate
 from app.services.crypto import decrypt
 from app.services.osint import get_client
-from app.services.scan_report_normalizer import normalize_scan_report
+from app.services.scan_report_normalizer import ensure_normalized_scan_report
 
 router = APIRouter()
 
@@ -43,6 +43,23 @@ async def delete_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db)
     return {"ok": True}
 
 
+@router.put("/{item_id}", response_model=WatchlistItemOut)
+async def update_watchlist_item(item_id: int, data: WatchlistItemUpdate, db: AsyncSession = Depends(get_db),
+                                _: User = Depends(get_current_user)):
+    result = await db.execute(select(WatchlistItem).where(WatchlistItem.id == item_id))
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    payload = data.model_dump(exclude_unset=True)
+    for field, value in payload.items():
+        setattr(item, field, value)
+
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
 @router.post("/{item_id}/check")
 async def check_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db),
                                 _: User = Depends(get_current_user)):
@@ -67,7 +84,7 @@ async def check_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db),
         if client:
             try:
                 osint_result = await client.search(item.value, item.type)
-                normalized = normalize_scan_report(
+                normalized = ensure_normalized_scan_report(
                     source=svc,
                     raw=osint_result,
                     target=item.value,
