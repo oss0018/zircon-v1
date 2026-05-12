@@ -2107,7 +2107,7 @@
                   return normalized;
                 }
                 const results = Array.isArray(raw.results) ? raw.results : [];
-                normalized.total_results = Number(raw.total ?? results.length ?? 0);
+                normalized.total_results = Number(raw.total ?? results.length);
                 if (!results.length) {
                   normalized.status = 'no_data';
                   return normalized;
