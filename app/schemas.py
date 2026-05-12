@@ -261,6 +261,9 @@ class MonitoringFindingOut(BaseModel):
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
+WATCHLIST_ITEM_TYPES = {"email", "domain", "ip", "keyword", "brand"}
+
+
 class WatchlistItemCreate(BaseModel):
     type: str  # email/domain/keyword/brand/ip
     value: str = Field(..., min_length=1)
@@ -271,9 +274,8 @@ class WatchlistItemCreate(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"email", "domain", "ip", "keyword", "brand"}
         val = (v or "").strip().lower()
-        if val not in allowed:
+        if val not in WATCHLIST_ITEM_TYPES:
             from pydantic_core import PydanticCustomError
             raise PydanticCustomError("invalid_watchlist_type", "Invalid watchlist item type")
         return val
@@ -307,9 +309,8 @@ class WatchlistItemUpdate(BaseModel):
     def validate_type(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
-        allowed = {"email", "domain", "ip", "keyword", "brand"}
         val = v.strip().lower()
-        if val not in allowed:
+        if val not in WATCHLIST_ITEM_TYPES:
             from pydantic_core import PydanticCustomError
             raise PydanticCustomError("invalid_watchlist_type", "Invalid watchlist item type")
         return val
