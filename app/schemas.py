@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any
 from datetime import datetime
+from pydantic_core import PydanticCustomError
 import html as _html
 
 
@@ -276,7 +277,6 @@ class WatchlistItemCreate(BaseModel):
     def validate_type(cls, v: str) -> str:
         val = (v or "").strip().lower()
         if val not in WATCHLIST_ITEM_TYPES:
-            from pydantic_core import PydanticCustomError
             raise PydanticCustomError("invalid_watchlist_type", "Invalid watchlist item type")
         return val
 
@@ -311,7 +311,6 @@ class WatchlistItemUpdate(BaseModel):
             return v
         val = v.strip().lower()
         if val not in WATCHLIST_ITEM_TYPES:
-            from pydantic_core import PydanticCustomError
             raise PydanticCustomError("invalid_watchlist_type", "Invalid watchlist item type")
         return val
 

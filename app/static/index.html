@@ -2059,7 +2059,8 @@
               _hasSummaryData(normalized) {
                 if (!normalized || typeof normalized !== 'object') return false;
                 if (normalized.status && normalized.status !== 'success') return true;
-                if (normalized.main_ip || normalized.asn || normalized.org || normalized.country || normalized.final_url || normalized.title || normalized.provider_url || normalized.screenshot_url || normalized.scan_age || normalized.multi_scan_summary) return true;
+                const summaryFields = ['main_ip', 'asn', 'org', 'country', 'final_url', 'title', 'provider_url', 'screenshot_url', 'scan_age', 'multi_scan_summary'];
+                if (summaryFields.some(field => normalized[field])) return true;
                 if (normalized.http_info || normalized.dns_info) return true;
                 if (normalized.indicators && normalized.indicators.length) return true;
                 if (normalized.tags && normalized.tags.length) return true;
