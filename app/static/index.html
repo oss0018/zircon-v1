@@ -1999,7 +1999,6 @@
             <!-- ── WATCHLIST ───────────────────────────────────────── -->
             <div x-show="page === 'watchlist'" x-data="{
               items: [], integrations: [], loading: false, showModal: false,
-              checkingById: {},
               /* Drawer state */
               showDrawer: false,
               drawerReport: null,
@@ -2017,7 +2016,10 @@
               },
               async load() {
                 this.loading = true;
-                try { this.items = await api.get('/watchlist/'); } catch(e){ showToast(e.message,'error'); } finally { this.loading = false; }
+                try {
+                  const data = await api.get('/watchlist/');
+                  this.items = data.map(item => ({ ...item, _checking: false }));
+                } catch(e) { showToast(e.message,'error'); } finally { this.loading = false; }
               },
               _resetModalForm() {
                 this.newItem = { type: 'email', value: '', integrations_json: '[]', alert_email: '', alert_telegram: '' };
@@ -2062,12 +2064,13 @@
                   this.closeModal();
                 } catch(e) { showToast(e.message,'error'); }
               },
-              isChecking(id) { return !!this.checkingById[id]; },
-              _setItemChecking(id, checking) {
-                const next = Object.assign({}, this.checkingById);
-                if (checking) next[id] = true;
-                else delete next[id];
-                this.checkingById = next;
+              isChecking(id) {
+                const item = this.items.find(i => i.id === id);
+                return item ? !!item._checking : false;
+              },
+              _setItemChecking(id, val) {
+                const item = this.items.find(i => i.id === id);
+                if (item) item._checking = val;
               },
               _hasSummaryData(normalized) {
                 if (!normalized || typeof normalized !== 'object') return false;
@@ -2193,6 +2196,17 @@
                   return this._normalizeUrlscanFromRaw(entry.data, entry.source, report.value, report.type, report.checked_at);
                 }
                 return entry.normalized || null;
+              },
+              genericFields(data) {
+                if (!data || typeof data !== 'object') return [];
+                if (data.error) return [{ label: 'Error', value: String(data.error) }];
+                if (data.not_found) return [{ label: 'Status', value: 'Not found' }];
+                const important = ['ip','ip_str','domain','url','country','country_name','org','isp','asn','threat','score','result','status','message','query_status','abuseConfidenceScore','totalReports','positives','total','pulse_count'];
+                const src = (data.data && typeof data.data === 'object') ? Object.assign({}, data, data.data) : data;
+                const fields = [];
+                important.forEach(k => { const v = src[k]; if (v !== undefined && v !== null && v !== '' && typeof v !== 'object') fields.push({ label: k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value: String(v).substring(0,200) }); });
+                if (!fields.length) Object.entries(src).slice(0,8).forEach(([k,v]) => { if (typeof v !== 'object' && v !== null && v !== undefined && v !== '') fields.push({ label: k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), value: String(v).substring(0,200) }); });
+                return fields;
               },
               async checkItem(id) {
                 if (!id || this.isChecking(id)) return;
@@ -2491,6 +2505,21 @@
                                 </div>
                               </div>
                             </template>
+
+                            <!-- Fallback generic display when all normalized fields are null -->
+                            <template x-if="!r.normalized.main_ip && !r.normalized.final_url && !r.normalized.title && !(r.normalized.indicators && r.normalized.indicators.length) && !r.normalized.total_results && !(r.normalized.tags && r.normalized.tags.length)">
+                              <div class="ti-fields-grid">
+                                <template x-for="field in genericFields(r.data)" :key="field.label">
+                                  <div class="ti-field">
+                                    <div class="ti-field-label" x-text="field.label"></div>
+                                    <div class="ti-field-value" x-text="field.value"></div>
+                                  </div>
+                                </template>
+                                <template x-if="!genericFields(r.data).length">
+                                  <div class="text-muted text-sm" style="padding:8px 0;">No structured data — see Raw tab.</div>
+                                </template>
+                              </div>
+                            </template>
                           </div>
 
                           <!-- Tab: Indicators -->
@@ -2591,7 +2620,7 @@
               <!-- Add Modal -->
               <div x-show="showModal" class="modal-overlay" @click.self="closeModal()">
                 <div class="modal">
-                  <div class="modal-title" x-text="modalMode === 'edit' ? 'Edit Item' : t('add_item')"></div>
+                  <div class="modal-title" x-text="modalMode === 'edit' ? 'Edit Watchlist Item' : t('add_watchlist_item')"></div>
                   <div class="form-group">
                     <label class="form-label" x-text="t('item_type')"></label>
                     <select class="form-select" x-model="newItem.type">

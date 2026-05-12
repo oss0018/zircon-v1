@@ -64,6 +64,9 @@ def _canonical_source(source: str) -> str:
     s = (source or "").strip().lower()
     aliases = {
         "urlscan.io": "urlscan",
+        "have_i_been_pwned": "hibp",
+        "otx": "alienvault",
+        "intelligencex": "intelx",
     }
     return aliases.get(s, s)
 
@@ -235,8 +238,199 @@ def _normalize_urlscan(raw: dict, base: dict) -> dict:
 # Dispatch table
 # ---------------------------------------------------------------------------
 
+def _normalize_virustotal(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    if raw.get("not_found"): base["status"] = "no_data"; return base
+    # v2
+    if "positives" in raw:
+        pos = int(raw.get("positives", 0)); total = int(raw.get("total", 1) or 1)
+        base["verdict"] = "malicious" if pos >= 10 else ("suspicious" if pos >= 1 else "clean")
+        base["verdict_score"] = round(pos / total * 100); base["total_results"] = pos
+        base["provider_url"] = _safe_str(raw.get("permalink")); base["scan_age"] = _safe_str(raw.get("scan_date"))
+        detected = [(e, v["result"]) for e, v in (raw.get("scans") or {}).items() if v.get("detected")]
+        if detected: base["indicators"] = [{"type": "detection", "value": f"{e}: {r}", "context": "Engine"} for e, r in detected[:15]]
+        return base
+    # v3
+    data_obj = raw.get("data", {}) if isinstance(raw.get("data"), dict) else {}
+    attrs = data_obj.get("attributes", {}) or raw.get("attributes", {})
+    stats = attrs.get("last_analysis_stats", {}); mal = int(stats.get("malicious", 0)); sus = int(stats.get("suspicious", 0)); total = sum(stats.values()) if stats else 0
+    base["verdict"] = "malicious" if mal > 0 else ("suspicious" if sus > 0 else "clean")
+    base["verdict_score"] = round(mal / total * 100) if total else 0; base["total_results"] = mal + sus
+    base["title"] = _safe_str(attrs.get("meaningful_name")); base["tags"] = list(attrs.get("tags", []))[:6]
+    results = attrs.get("last_analysis_results", {})
+    det = [{"type": "detection", "value": f"{e}: {v.get('result', '')}", "context": v.get("category", "")} for e, v in results.items() if v and v.get("category") in ("malicious", "suspicious")][:15]
+    if det: base["indicators"] = det
+    return base
+
+
+def _normalize_abuseipdb(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    data = raw.get("data", raw) or {}
+    score = int(data.get("abuseConfidenceScore") or data.get("abuse_confidence_score") or 0)
+    base["verdict_score"] = score; base["verdict"] = "malicious" if score >= 75 else ("suspicious" if score >= 25 else "clean")
+    base["total_results"] = int(data.get("totalReports") or data.get("total_reports") or 0)
+    country = _safe_str(data.get("countryName") or data.get("country_name")); code = _safe_str(data.get("countryCode") or data.get("country_code"))
+    base["country"] = f"{country} ({code})" if country and code else (country or code)
+    base["asn"] = _safe_str(data.get("isp")); base["main_ip"] = _safe_str(data.get("ipAddress") or data.get("ip_address"))
+    base["scan_age"] = _safe_str(data.get("lastReportedAt") or data.get("last_reported_at"))
+    reports = (data.get("reports") or [])[:5]
+    if reports: base["indicators"] = [{"type": "report", "value": (r.get("comment") or "Abuse report")[:100], "context": r.get("reportedAt", "")} for r in reports]
+    return base
+
+
+def _normalize_shodan(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    if not raw or raw.get("not_found"): base["status"] = "no_data"; return base
+    base["main_ip"] = _safe_str(raw.get("ip_str") or raw.get("ip")); base["org"] = _safe_str(raw.get("org"))
+    base["asn"] = _safe_str(raw.get("asn")); base["scan_age"] = _safe_str(raw.get("last_update"))
+    base["country"] = ", ".join(filter(None, [raw.get("country_name", ""), raw.get("city", "")])) or None
+    ports = raw.get("ports", []); base["total_results"] = len(ports)
+    inds = [{"type": "port", "value": str(p), "context": "Open port"} for p in ports[:20]]
+    vulns = raw.get("vulns", {})
+    if vulns: inds += [{"type": "cve", "value": cve, "context": "Vulnerability"} for cve in list(vulns.keys())[:10]]; base["verdict"] = "suspicious"
+    base["indicators"] = inds or None
+    services = raw.get("data", []); base["tags"] = list({s.get("product") for s in services if s.get("product")})[:5]
+    return base
+
+
+def _normalize_hibp(raw: dict, base: dict) -> dict:
+    if isinstance(raw, dict) and raw.get("error"): base["status"] = "failed"; return base
+    breaches = raw if isinstance(raw, list) else raw.get("breaches", [])
+    if not breaches: base["verdict"] = "clean"; base["total_results"] = 0; return base
+    base["total_results"] = len(breaches); base["verdict"] = "malicious" if len(breaches) >= 5 else "suspicious"
+    base["verdict_score"] = min(100, len(breaches) * 10)
+    base["indicators"] = [{"type": "breach", "value": (b.get("Name") or b.get("name") or "Unknown")[:60], "context": b.get("BreachDate") or b.get("breach_date") or ""} for b in breaches[:10]]
+    all_dc = [dc for b in breaches[:5] for dc in (b.get("DataClasses") or b.get("data_classes") or [])]
+    base["tags"] = list(dict.fromkeys(all_dc))[:8]
+    return base
+
+
+def _normalize_alienvault(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    if not raw: base["status"] = "no_data"; return base
+    pi = raw.get("pulse_info", {}); pc = int(pi.get("count") or raw.get("pulse_count") or 0)
+    base["total_results"] = pc; base["verdict"] = "malicious" if pc >= 10 else ("suspicious" if pc >= 2 else "clean")
+    base["verdict_score"] = min(100, pc * 5); base["country"] = _safe_str(raw.get("country_name")); base["asn"] = _safe_str(raw.get("asn"))
+    pulses = (pi.get("pulses") or [])[:5]
+    if pulses: base["indicators"] = [{"type": "pulse", "value": p.get("name", "Pulse")[:60], "context": p.get("tlp", "")} for p in pulses]
+    return base
+
+
+def _normalize_intelx(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    records = raw.get("records", []); total = int(raw.get("total") or len(records))
+    base["total_results"] = total
+    if not total: base["status"] = "no_data"; return base
+    base["verdict"] = "suspicious"
+    if records:
+        base["indicators"] = [{"type": str(r.get("type", "record")), "value": (r.get("name") or "")[:80], "context": r.get("date", "")} for r in records[:10]]
+        base["tags"] = list({r.get("bucket", "") for r in records if r.get("bucket")})[:6]
+    return base
+
+
+def _normalize_urlhaus(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    qs = raw.get("query_status", "")
+    if qs in ("no_results", "is_not_malware"): base["verdict"] = "clean"; return base
+    if not raw or raw.get("not_found"): base["status"] = "no_data"; return base
+    base["verdict"] = "malicious" if qs == "is_malware" else "suspicious"; base["verdict_score"] = 100 if qs == "is_malware" else 50
+    threat = _safe_str(raw.get("threat")); base["tags"] = ([threat] if threat else []) + list(raw.get("tags") or [])[:5]
+    urls = raw.get("urls", []); base["total_results"] = len(urls); base["provider_url"] = _safe_str(raw.get("urlhaus_reference"))
+    if urls: base["indicators"] = [{"type": "url", "value": (u.get("url") or "")[:80], "context": u.get("url_status", "")} for u in urls[:10]]
+    return base
+
+
+def _normalize_phishtank(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    results = raw.get("results", raw); in_db = results.get("in_database", False)
+    if not in_db: base["verdict"] = "clean"; base["total_results"] = 0; return base
+    valid = results.get("valid", False)
+    base["verdict"] = "malicious" if valid else "suspicious"; base["verdict_score"] = 100 if valid else 50
+    base["total_results"] = 1; base["provider_url"] = _safe_str(results.get("phish_detail_page"))
+    base["indicators"] = [{"type": "phish", "value": "Confirmed phishing" if valid else "In PhishTank database", "context": "PhishTank"}]
+    return base
+
+
+def _normalize_securitytrails(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    if not raw: base["status"] = "no_data"; return base
+    dns = raw.get("current_dns", {}); records = []
+    for rtype in ("a", "aaaa", "mx", "ns", "txt", "cname"):
+        for v in (dns.get(rtype) or {}).get("values", [])[:3]:
+            val = v.get("ip") or v.get("hostname") or v.get("nameserver") or v.get("value") or str(v)
+            records.append({"type": rtype.upper(), "value": str(val)[:80], "context": "DNS"})
+    base["total_results"] = len(records); base["indicators"] = records[:15] or None
+    base["title"] = _safe_str(raw.get("hostname")); base["verdict"] = "clean"
+    whois = raw.get("whois") or {}
+    base["org"] = _safe_str(whois.get("registrar")) if isinstance(whois, dict) else None
+    return base
+
+
+def _normalize_censys(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    if not raw: base["status"] = "no_data"; return base
+    data = raw.get("result", raw); base["main_ip"] = _safe_str(data.get("ip"))
+    loc = data.get("location") or {}; base["country"] = _safe_str(loc.get("country"))
+    asn_d = data.get("autonomous_system") or {}
+    base["asn"] = f"AS{asn_d.get('asn', '')} {asn_d.get('name', '')}".strip() if asn_d else None
+    services = data.get("services", []); base["total_results"] = len(services)
+    if services:
+        base["indicators"] = [{"type": "service", "value": f"{s.get('port')}/{(s.get('transport_protocol') or '').lower()}", "context": s.get("service_name", "")} for s in services[:15]]
+        base["tags"] = list({s.get("service_name") for s in services if s.get("service_name") and s["service_name"] != "UNKNOWN"})[:6]
+    base["verdict"] = "clean"; return base
+
+
+def _normalize_malwarebazaar(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    if raw.get("query_status") == "hash_not_found": base["status"] = "no_data"; base["verdict"] = "clean"; return base
+    samples = raw.get("data", [])
+    if not samples: base["status"] = "no_data"; return base
+    s = samples[0]; base["verdict"] = "malicious"; base["verdict_score"] = 100; base["total_results"] = len(samples)
+    base["title"] = _safe_str(s.get("file_name")); base["tags"] = (s.get("tags") or [])[:6]; base["scan_age"] = _safe_str(s.get("first_seen"))
+    inds = []
+    if s.get("signature"): inds.append({"type": "malware", "value": s["signature"], "context": "Malware family"})
+    if s.get("sha256_hash"): inds.append({"type": "hash", "value": s["sha256_hash"], "context": "SHA-256"})
+    if s.get("file_type"): inds.append({"type": "filetype", "value": s["file_type"], "context": "File type"})
+    base["indicators"] = inds or None; return base
+
+
+def _normalize_threatfox(raw: dict, base: dict) -> dict:
+    if raw.get("error"): base["status"] = "failed"; return base
+    if raw.get("query_status") == "no_result": base["status"] = "no_data"; base["verdict"] = "clean"; return base
+    iocs = raw.get("data", [])
+    if not iocs: base["status"] = "no_data"; return base
+    first = iocs[0]; base["verdict"] = "malicious"; base["verdict_score"] = int(first.get("confidence_level") or 75)
+    base["total_results"] = len(iocs); base["scan_age"] = _safe_str(first.get("first_seen"))
+    inds = []
+    if first.get("malware"): inds.append({"type": "malware", "value": first["malware"], "context": _safe_str(first.get("malware_alias")) or ""})
+    if first.get("ioc_type") and first.get("ioc"): inds.append({"type": first["ioc_type"], "value": first["ioc"], "context": "IOC"})
+    base["indicators"] = inds or None
+    base["tags"] = list({tag for ioc in iocs for tag in (ioc.get("tags") or [])})[:6]
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Dispatch table
+# ---------------------------------------------------------------------------
+
 _NORMALIZERS: dict[str, Any] = {
     "urlscan": _normalize_urlscan,
+    "urlscan.io": _normalize_urlscan,
+    "virustotal": _normalize_virustotal,
+    "abuseipdb": _normalize_abuseipdb,
+    "shodan": _normalize_shodan,
+    "hibp": _normalize_hibp,
+    "have_i_been_pwned": _normalize_hibp,
+    "alienvault": _normalize_alienvault,
+    "otx": _normalize_alienvault,
+    "intelx": _normalize_intelx,
+    "intelligencex": _normalize_intelx,
+    "urlhaus": _normalize_urlhaus,
+    "phishtank": _normalize_phishtank,
+    "securitytrails": _normalize_securitytrails,
+    "censys": _normalize_censys,
+    "malwarebazaar": _normalize_malwarebazaar,
+    "threatfox": _normalize_threatfox,
 }
 
 

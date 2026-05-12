@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
@@ -72,33 +73,34 @@ async def check_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db),
     import json
     integrations_list = json.loads(item.integrations_json or "[]")
     checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    results = []
 
-    for svc in integrations_list:
+    async def _check_one(svc):
         res = await db.execute(select(Integration).where(Integration.service_type == svc))
         integration = res.scalar_one_or_none()
-        api_key = ""
-        if integration:
-            api_key = decrypt(integration.api_key_encrypted)
+        api_key = decrypt(integration.api_key_encrypted) if integration else ""
         client = get_client(svc, api_key)
-        if client:
-            try:
-                osint_result = await client.search(item.value, item.type)
-                normalized = ensure_normalized_scan_report(
-                    source=svc,
-                    raw=osint_result,
-                    target=item.value,
-                    target_type=item.type,
-                    checked_at=checked_at,
-                )
-                results.append({"source": svc, "data": osint_result, "normalized": normalized})
-            except Exception:
-                results.append({"source": svc, "data": {"error": "Integration request failed"}, "normalized": None})
+        if not client:
+            return {"source": svc, "data": {"error": "Not configured"}, "normalized": None}
+        try:
+            osint_result = await asyncio.wait_for(client.search(item.value, item.type), timeout=15.0)
+            normalized = ensure_normalized_scan_report(
+                source=svc,
+                raw=osint_result,
+                target=item.value,
+                target_type=item.type,
+                checked_at=checked_at,
+            )
+            return {"source": svc, "data": osint_result, "normalized": normalized}
+        except asyncio.TimeoutError:
+            return {"source": svc, "data": {"error": "Timed out (15s)"}, "normalized": None}
+        except Exception as e:
+            return {"source": svc, "data": {"error": str(e)}, "normalized": None}
 
+    results = await asyncio.gather(*[_check_one(svc) for svc in integrations_list])
     return {
         "item_id": item_id,
         "value": item.value,
         "type": item.type,
         "checked_at": checked_at,
-        "results": results,
+        "results": list(results),
     }
