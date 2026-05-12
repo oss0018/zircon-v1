@@ -15,6 +15,8 @@ from app.services.scan_report_normalizer import ensure_normalized_scan_report
 
 router = APIRouter()
 
+INTEGRATION_TIMEOUT_SECONDS = 15.0
+
 
 @router.get("/", response_model=List[WatchlistItemOut])
 async def list_watchlist(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
@@ -82,7 +84,7 @@ async def check_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db),
         if not client:
             return {"source": svc, "data": {"error": "Not configured"}, "normalized": None}
         try:
-            osint_result = await asyncio.wait_for(client.search(item.value, item.type), timeout=15.0)
+            osint_result = await asyncio.wait_for(client.search(item.value, item.type), timeout=INTEGRATION_TIMEOUT_SECONDS)
             normalized = ensure_normalized_scan_report(
                 source=svc,
                 raw=osint_result,
@@ -92,7 +94,7 @@ async def check_watchlist_item(item_id: int, db: AsyncSession = Depends(get_db),
             )
             return {"source": svc, "data": osint_result, "normalized": normalized}
         except asyncio.TimeoutError:
-            return {"source": svc, "data": {"error": "Timed out (15s)"}, "normalized": None}
+            return {"source": svc, "data": {"error": f"Timed out ({int(INTEGRATION_TIMEOUT_SECONDS)}s)"}, "normalized": None}
         except Exception as e:
             return {"source": svc, "data": {"error": str(e)}, "normalized": None}
 
