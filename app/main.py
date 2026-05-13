@@ -161,9 +161,10 @@ async def lifespan(app: FastAPI):
 
     # Pre-load SPA HTML into memory to avoid disk I/O on every request
     global _SPA_HTML_CACHE
-    _index_path = Path("app/static/index.html")
-    if _index_path.exists():
-        _SPA_HTML_CACHE = _index_path.read_text()
+    _index = Path("app/static/index.html")
+    if _index.exists():
+        _SPA_HTML_CACHE = _index.read_text(encoding="utf-8")
+        print(f"[init] index.html cached ({len(_SPA_HTML_CACHE):,} bytes)")
 
     yield
 
@@ -205,13 +206,13 @@ app.include_router(storage_sources.router, prefix="/api/v1/storage-sources", tag
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 async def serve_spa(full_path: str, request: Request):
-    # Don't intercept API or static routes
     if full_path.startswith("api/") or full_path.startswith("static/"):
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": "Not Found"}, status_code=404)
+    global _SPA_HTML_CACHE
     if _SPA_HTML_CACHE:
         return HTMLResponse(content=_SPA_HTML_CACHE)
     index_path = Path("app/static/index.html")
     if index_path.exists():
-        return HTMLResponse(content=index_path.read_text())
+        return HTMLResponse(content=index_path.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>Zircon FRT — Static files not found</h1>")
