@@ -3546,40 +3546,479 @@
 
                   <!-- Tab: Summary (per-source overview) -->
                   <div x-show="activeResultTab === 'summary'">
-                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">
+                    <!-- Tags cloud (if any tags) -->
+                    <template x-if="normalized.tags && normalized.tags.length > 0">
+                      <div class="card mb-3" style="padding:14px 16px;">
+                        <div class="card-title" style="margin-bottom:8px;">Tags</div>
+                        <div class="flex gap-2 flex-wrap">
+                          <template x-for="tag in normalized.tags" :key="tag">
+                            <span :class="'ti-tag-badge ' + tagBadgeClass(tag)" x-text="tag"></span>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- Source cards grid -->
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
                       <template x-for="src in perSource" :key="src.source">
                         <div class="ti-result-card"
-                             :class="src.error ? 'ti-threat-error has-error' : src.free ? 'ti-threat-none' : 'ti-threat-none'">
+                             :class="[
+                               src.error ? 'ti-threat-error has-error' : '',
+                               src.source === 'virustotal' ? 'ti-source-virustotal' :
+                               src.source === 'abuseipdb' ? 'ti-source-abuseipdb' :
+                               src.source === 'alienvault' ? 'ti-source-alienvault' :
+                               src.source === 'shodan' ? 'ti-source-shodan' :
+                               src.source === 'malwarebazaar' ? 'ti-source-malwarebazaar' :
+                               src.source === 'threatfox' ? 'ti-source-threatfox' :
+                               src.source === 'urlhaus' ? 'ti-source-urlhaus' :
+                               src.source === 'hibp' ? 'ti-source-hibp' :
+                               src.source === 'censys' ? 'ti-source-censys' :
+                               src.source === 'urlscan' ? 'ti-source-urlscan' :
+                               src.source === 'securitytrails' ? 'ti-source-securitytrails' : ''
+                             ]">
+                          <!-- Card header -->
                           <div class="flex items-center justify-between mb-2">
                             <div class="flex items-center gap-2">
-                              <span style="font-weight:700;font-size:12px;" x-text="src.name"></span>
+                              <span style="font-weight:700;font-size:13px;" x-text="src.name"></span>
                               <template x-if="src.free">
                                 <span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(0,180,216,0.15);color:#38bdf8;font-weight:700;">FREE</span>
                               </template>
                               <a :href="src.url" target="_blank" rel="noopener noreferrer"
-                                 class="badge badge-gray text-xs" style="text-decoration:none;">↗</a>
+                                 class="badge badge-gray text-xs" style="text-decoration:none;">&#x2197;</a>
                             </div>
                             <button class="btn btn-sm btn-secondary" style="font-size:10px;padding:2px 7px;"
                                     @click="openRaw(src.name, src.data)">Raw JSON</button>
                           </div>
-                          <!-- OTX header pills: indicator type, pulse count, reputation, whois/alexa links -->
-                          <template x-if="src.source === 'alienvault' && src.data && src.data.pulse_info">
-                            <div class="flex gap-2 flex-wrap mb-2" style="font-size:10px;">
-                              <span x-show="src.data.type_title" class="badge badge-gray"
-                                    x-text="src.data.type_title"></span>
-                              <span :class="src.data.pulse_info.count > 0 ? 'badge badge-red' : 'badge badge-gray'"
-                                    x-text="src.data.pulse_info.count + ' pulse(s)'"></span>
-                              <span x-show="src.data.reputation !== undefined"
-                                    :class="src.data.reputation < 0 ? 'badge badge-red' : 'badge badge-gray'"
-                                    x-text="'Rep: ' + src.data.reputation"></span>
-                              <template x-for="link in otxLinks(src.data)" :key="link.label">
-                                <a :href="link.url" target="_blank" rel="noopener noreferrer"
-                                   class="badge badge-gray" style="text-decoration:none;"
-                                   x-text="'↗ ' + link.label"></a>
+
+                          <!-- Error / not found states -->
+                          <template x-if="src.error">
+                            <div style="font-size:11px;color:#f87171;" x-text="src.error"></div>
+                          </template>
+                          <template x-if="!src.error && (!src.data || src.data.not_found)">
+                            <div style="font-size:11px;color:var(--text-muted);">No data found for this IOC</div>
+                          </template>
+
+                          <!-- VirusTotal smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'virustotal'">
+                            <div>
+                              <template x-if="vtStatsBreakdown(src.data)">
+                                <div>
+                                  <div class="flex items-center gap-3 mb-2">
+                                    <span style="font-size:22px;font-weight:900;"
+                                          :style="`color:${vtStatsBreakdown(src.data).malicious > 0 ? '#ff4444' : vtStatsBreakdown(src.data).suspicious > 0 ? '#ff9900' : '#00cc66'}`"
+                                          x-text="vtStatsBreakdown(src.data).malicious + '/' + vtStatsBreakdown(src.data).total"></span>
+                                    <span style="font-size:11px;color:var(--text-muted);">engines detected</span>
+                                  </div>
+                                  <div class="ti-detection-bar mb-2">
+                                    <div class="ti-detection-bar-mal" :style="`width:${vtStatsBreakdown(src.data).malPct}%`"></div>
+                                    <div class="ti-detection-bar-sus" :style="`width:${vtStatsBreakdown(src.data).susPct}%`"></div>
+                                    <div class="ti-detection-bar-clean" :style="`width:${vtStatsBreakdown(src.data).cleanPct}%`"></div>
+                                    <div class="ti-detection-bar-unk" :style="`width:${vtStatsBreakdown(src.data).unkPct}%`"></div>
+                                  </div>
+                                  <div class="ti-vt-stats mb-3">
+                                    <div class="ti-vt-stat-tile ti-vt-stat-mal">
+                                      <div class="ti-vt-stat-val" x-text="vtStatsBreakdown(src.data).malicious"></div>
+                                      <div class="ti-vt-stat-lbl">Malicious</div>
+                                    </div>
+                                    <div class="ti-vt-stat-tile ti-vt-stat-sus">
+                                      <div class="ti-vt-stat-val" x-text="vtStatsBreakdown(src.data).suspicious"></div>
+                                      <div class="ti-vt-stat-lbl">Suspicious</div>
+                                    </div>
+                                    <div class="ti-vt-stat-tile ti-vt-stat-clean">
+                                      <div class="ti-vt-stat-val" x-text="vtStatsBreakdown(src.data).undetected + vtStatsBreakdown(src.data).harmless"></div>
+                                      <div class="ti-vt-stat-lbl">Undetected</div>
+                                    </div>
+                                    <div class="ti-vt-stat-tile ti-vt-stat-unk">
+                                      <div class="ti-vt-stat-val" x-text="vtStatsBreakdown(src.data).timeout"></div>
+                                      <div class="ti-vt-stat-lbl">Timeout</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </template>
+                              <div class="flex gap-3 flex-wrap" style="font-size:10px;color:var(--text-muted);">
+                                <template x-if="(src.data.data && src.data.data.attributes && src.data.data.attributes.first_submission_date) || (src.data.attributes && src.data.attributes.first_submission_date)">
+                                  <span x-text="'First seen: ' + new Date(((src.data.data && src.data.data.attributes && src.data.data.attributes.first_submission_date) || (src.data.attributes && src.data.attributes.first_submission_date)) * 1000).toLocaleDateString()"></span>
+                                </template>
+                                <template x-if="(src.data.data && src.data.data.attributes && src.data.data.attributes.last_analysis_date) || (src.data.attributes && src.data.attributes.last_analysis_date)">
+                                  <span x-text="'Last analysis: ' + new Date(((src.data.data && src.data.data.attributes && src.data.data.attributes.last_analysis_date) || (src.data.attributes && src.data.attributes.last_analysis_date)) * 1000).toLocaleDateString()"></span>
+                                </template>
+                              </div>
+                              <div class="mt-2">
+                                <a :href="src.url" target="_blank" rel="noopener noreferrer"
+                                   class="btn btn-sm btn-secondary" style="font-size:10px;text-decoration:none;">View on VirusTotal</a>
+                              </div>
+                            </div>
+                          </template>
+
+                          <!-- AbuseIPDB smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'abuseipdb'">
+                            <div>
+                              <div class="flex items-start gap-4 mb-3">
+                                <div class="ti-abuse-ring-wrap">
+                                  <div class="ti-abuse-ring-outer" :style="abuseScoreRingStyle((src.data.data || src.data).abuseConfidenceScore || (src.data.data || src.data).abuse_confidence_score || 0)"></div>
+                                  <div class="ti-abuse-ring-inner"
+                                       :style="`color:${((src.data.data || src.data).abuseConfidenceScore || (src.data.data || src.data).abuse_confidence_score || 0) >= 75 ? '#ff4444' : ((src.data.data || src.data).abuseConfidenceScore || (src.data.data || src.data).abuse_confidence_score || 0) >= 40 ? '#ff9900' : '#00cc66'}`">
+                                    <span x-text="((src.data.data || src.data).abuseConfidenceScore || (src.data.data || src.data).abuse_confidence_score || 0) + '%'"></span>
+                                    <small>Abuse Score</small>
+                                  </div>
+                                </div>
+                                <div style="flex:1;min-width:0;">
+                                  <div class="ti-geo-grid" style="grid-template-columns:1fr 1fr;gap:5px;">
+                                    <template x-if="(src.data.data || src.data).totalReports !== undefined">
+                                      <div class="ti-geo-item"><div class="ti-geo-label">Total Reports</div><div class="ti-geo-value" x-text="(src.data.data || src.data).totalReports"></div></div>
+                                    </template>
+                                    <template x-if="(src.data.data || src.data).numDistinctUsers !== undefined">
+                                      <div class="ti-geo-item"><div class="ti-geo-label">Distinct Reporters</div><div class="ti-geo-value" x-text="(src.data.data || src.data).numDistinctUsers"></div></div>
+                                    </template>
+                                    <template x-if="(src.data.data || src.data).isp">
+                                      <div class="ti-geo-item"><div class="ti-geo-label">ISP</div><div class="ti-geo-value" x-text="(src.data.data || src.data).isp"></div></div>
+                                    </template>
+                                    <template x-if="(src.data.data || src.data).countryCode">
+                                      <div class="ti-geo-item"><div class="ti-geo-label">Country</div><div class="ti-geo-value" x-text="(src.data.data || src.data).countryCode"></div></div>
+                                    </template>
+                                  </div>
+                                </div>
+                              </div>
+                              <template x-if="(src.data.data || src.data).lastReportedAt">
+                                <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;"
+                                     x-text="'Last report: ' + formatDate((src.data.data || src.data).lastReportedAt)"></div>
+                              </template>
+                              <template x-if="(src.data.data || src.data).usageType">
+                                <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;"
+                                     x-text="'Usage: ' + (src.data.data || src.data).usageType"></div>
                               </template>
                             </div>
                           </template>
-                          <template x-if="!src.error && src.data && !src.data.not_found">
+
+                          <!-- AlienVault OTX smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'alienvault'">
+                            <div>
+                              <div class="flex gap-2 flex-wrap mb-2" style="font-size:10px;">
+                                <span x-show="src.data.type_title" class="badge badge-gray" x-text="src.data.type_title"></span>
+                                <span :class="(src.data.pulse_info && src.data.pulse_info.count > 0) ? 'badge badge-red' : 'badge badge-gray'"
+                                      x-text="(src.data.pulse_info ? src.data.pulse_info.count : src.data.pulse_count || 0) + ' pulse(s)'"></span>
+                                <span x-show="src.data.reputation !== undefined"
+                                      :class="src.data.reputation < 0 ? 'badge badge-red' : 'badge badge-gray'"
+                                      x-text="'Rep: ' + src.data.reputation"></span>
+                                <template x-if="src.data.country_name">
+                                  <span class="badge badge-gray" x-text="src.data.country_name + (src.data.country_code ? ' (' + src.data.country_code + ')' : '')"></span>
+                                </template>
+                                <template x-for="link in otxLinks(src.data)" :key="link.label">
+                                  <a :href="link.url" target="_blank" rel="noopener noreferrer"
+                                     class="badge badge-gray" style="text-decoration:none;"
+                                     x-text="'&#x2197; ' + link.label"></a>
+                                </template>
+                              </div>
+                              <template x-if="src.data.pulse_info && src.data.pulse_info.pulses && src.data.pulse_info.pulses.length > 0">
+                                <div>
+                                  <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;">
+                                    Pulses (<span x-text="src.data.pulse_info.pulses.length"></span>)
+                                  </div>
+                                  <template x-for="(pulse, idx) in src.data.pulse_info.pulses.slice(0,5)" :key="pulse.id || idx">
+                                    <div class="ti-pulse-item">
+                                      <div class="flex items-center gap-2 flex-wrap mb-1">
+                                        <span :class="'ti-tlp-badge ' + tlpClass(pulse.tlp)"
+                                              x-text="'TLP:' + (pulse.tlp || 'WHITE').toUpperCase()"></span>
+                                        <span style="font-size:11px;font-weight:700;color:var(--text-primary);" x-text="pulse.name"></span>
+                                        <span x-show="pulse.author && pulse.author.username" style="font-size:10px;color:var(--text-muted);"
+                                              x-text="'@ ' + (pulse.author && pulse.author.username)"></span>
+                                      </div>
+                                      <template x-if="pulse.tags && pulse.tags.length > 0">
+                                        <div class="flex gap-1 flex-wrap mb-1">
+                                          <template x-for="tag in pulse.tags.slice(0,5)" :key="tag">
+                                            <span class="badge badge-gray text-xs" x-text="tag"></span>
+                                          </template>
+                                        </div>
+                                      </template>
+                                      <div style="font-size:10px;color:var(--text-muted);" x-show="pulse.created"
+                                           x-text="formatDate(pulse.created)"></div>
+                                    </div>
+                                  </template>
+                                  <div x-show="src.data.pulse_info.pulses.length > 5"
+                                       style="font-size:11px;color:var(--text-muted);margin-top:4px;"
+                                       x-text="'+' + (src.data.pulse_info.pulses.length - 5) + ' more pulses'"></div>
+                                </div>
+                              </template>
+                              <template x-if="src.data.validation && src.data.validation.length > 0">
+                                <div style="margin-top:8px;">
+                                  <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Validation</div>
+                                  <template x-for="v in src.data.validation" :key="JSON.stringify(v)">
+                                    <div style="font-size:11px;color:var(--text-secondary);padding:2px 0;"
+                                         x-text="(v.source || '') + (v.message ? ': ' + v.message : '') + (v.name ? ' (' + v.name + ')' : '')"></div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- Shodan smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'shodan'">
+                            <div>
+                              <div class="ti-geo-grid" style="grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:10px;">
+                                <template x-if="src.data.os"><div class="ti-geo-item"><div class="ti-geo-label">OS</div><div class="ti-geo-value" x-text="src.data.os"></div></div></template>
+                                <template x-if="src.data.org"><div class="ti-geo-item"><div class="ti-geo-label">Org</div><div class="ti-geo-value" x-text="src.data.org"></div></div></template>
+                                <template x-if="src.data.isp"><div class="ti-geo-item"><div class="ti-geo-label">ISP</div><div class="ti-geo-value" x-text="src.data.isp"></div></div></template>
+                              </div>
+                              <template x-if="src.data.ports && src.data.ports.length > 0">
+                                <div class="mb-2">
+                                  <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em;">
+                                    Open Ports (<span x-text="src.data.ports.length"></span>)
+                                  </div>
+                                  <div class="flex gap-1 flex-wrap">
+                                    <template x-for="port in src.data.ports.slice(0,20)" :key="port">
+                                      <span :class="'ti-port-badge ' + portClass(port)" x-text="port"></span>
+                                    </template>
+                                    <span x-show="src.data.ports.length > 20" class="badge badge-gray text-xs"
+                                          x-text="'+' + (src.data.ports.length - 20) + ' more'"></span>
+                                  </div>
+                                </div>
+                              </template>
+                              <template x-if="src.data.vulns && Object.keys(src.data.vulns).length > 0">
+                                <div class="mb-2">
+                                  <div style="font-size:11px;font-weight:700;color:#ff5050;margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em;">
+                                    CVEs (<span x-text="Object.keys(src.data.vulns).length"></span>)
+                                  </div>
+                                  <div class="flex gap-1 flex-wrap">
+                                    <template x-for="cve in Object.keys(src.data.vulns).slice(0,10)" :key="cve">
+                                      <a :href="cveLink(cve)" target="_blank" rel="noopener noreferrer" class="ti-cve-badge" x-text="cve"></a>
+                                    </template>
+                                  </div>
+                                </div>
+                              </template>
+                              <template x-if="src.data.last_update">
+                                <div style="font-size:10px;color:var(--text-muted);" x-text="'Last scan: ' + formatDate(src.data.last_update)"></div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- MalwareBazaar smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'malwarebazaar'">
+                            <div>
+                              <template x-if="src.data.data && src.data.data.length > 0">
+                                <div>
+                                  <template x-if="src.data.data[0].signature">
+                                    <div class="mb-2">
+                                      <span style="font-size:10px;color:var(--text-muted);">Signature: </span>
+                                      <span style="font-size:13px;font-weight:800;color:#ff4444;" x-text="src.data.data[0].signature"></span>
+                                    </div>
+                                  </template>
+                                  <div class="ti-geo-grid" style="grid-template-columns:repeat(2,1fr);gap:5px;margin-bottom:8px;">
+                                    <template x-if="src.data.data[0].file_name"><div class="ti-geo-item"><div class="ti-geo-label">Filename</div><div class="ti-geo-value" x-text="src.data.data[0].file_name"></div></div></template>
+                                    <template x-if="src.data.data[0].file_type"><div class="ti-geo-item"><div class="ti-geo-label">Type</div><div class="ti-geo-value" x-text="src.data.data[0].file_type"></div></div></template>
+                                    <template x-if="src.data.data[0].file_size"><div class="ti-geo-item"><div class="ti-geo-label">Size</div><div class="ti-geo-value" x-text="formatBytes(src.data.data[0].file_size)"></div></div></template>
+                                    <template x-if="src.data.data[0].first_seen"><div class="ti-geo-item"><div class="ti-geo-label">First seen</div><div class="ti-geo-value" x-text="formatDate(src.data.data[0].first_seen)"></div></div></template>
+                                  </div>
+                                  <template x-if="src.data.data[0].sha256_hash">
+                                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:5px;word-break:break-all;">
+                                      SHA256: <span class="font-mono" style="color:var(--text-secondary);" x-text="src.data.data[0].sha256_hash"></span>
+                                    </div>
+                                  </template>
+                                  <template x-if="src.data.data[0].tags && src.data.data[0].tags.length > 0">
+                                    <div class="flex gap-1 flex-wrap">
+                                      <template x-for="tag in src.data.data[0].tags.slice(0,8)" :key="tag">
+                                        <span class="badge badge-gray text-xs" x-text="tag"></span>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                              <template x-if="!src.data.data || !src.data.data.length">
+                                <div style="font-size:11px;color:var(--text-muted);" x-text="src.data.query_status || 'No data'"></div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- ThreatFox smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'threatfox'">
+                            <div>
+                              <template x-if="src.data.data && src.data.data.length > 0">
+                                <div>
+                                  <template x-if="src.data.data[0].malware">
+                                    <div class="mb-2">
+                                      <span style="font-size:10px;color:var(--text-muted);">Malware Family: </span>
+                                      <span style="font-size:13px;font-weight:800;color:#ff4444;" x-text="src.data.data[0].malware"></span>
+                                    </div>
+                                  </template>
+                                  <div class="ti-geo-grid" style="grid-template-columns:repeat(2,1fr);gap:5px;margin-bottom:8px;">
+                                    <template x-if="src.data.data[0].ioc_type"><div class="ti-geo-item"><div class="ti-geo-label">IOC Type</div><div class="ti-geo-value" x-text="src.data.data[0].ioc_type"></div></div></template>
+                                    <template x-if="src.data.data[0].confidence_level !== undefined"><div class="ti-geo-item"><div class="ti-geo-label">Confidence</div><div class="ti-geo-value" x-text="src.data.data[0].confidence_level + '%'"></div></div></template>
+                                    <template x-if="src.data.data[0].first_seen"><div class="ti-geo-item"><div class="ti-geo-label">First seen</div><div class="ti-geo-value" x-text="formatDate(src.data.data[0].first_seen)"></div></div></template>
+                                    <template x-if="src.data.data[0].last_seen"><div class="ti-geo-item"><div class="ti-geo-label">Last seen</div><div class="ti-geo-value" x-text="formatDate(src.data.data[0].last_seen)"></div></div></template>
+                                  </div>
+                                  <template x-if="src.data.data[0].tags && src.data.data[0].tags.length > 0">
+                                    <div class="flex gap-1 flex-wrap">
+                                      <template x-for="tag in src.data.data[0].tags.slice(0,8)" :key="tag">
+                                        <span class="badge badge-gray text-xs" x-text="tag"></span>
+                                      </template>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                              <template x-if="!src.data.data || !src.data.data.length">
+                                <div style="font-size:11px;color:var(--text-muted);" x-text="src.data.query_status || 'No results'"></div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- URLhaus smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'urlhaus'">
+                            <div>
+                              <div class="mb-2">
+                                <span :class="src.data.query_status === 'no_results' ? 'badge badge-gray' : 'badge badge-red'"
+                                      x-text="src.data.query_status || 'unknown'"></span>
+                              </div>
+                              <template x-if="src.data.threat">
+                                <div class="mb-2">
+                                  <span style="font-size:10px;color:var(--text-muted);">Threat: </span>
+                                  <span style="font-size:12px;font-weight:700;color:#ff9800;" x-text="src.data.threat"></span>
+                                </div>
+                              </template>
+                              <template x-if="src.data.urls && src.data.urls.length > 0">
+                                <div>
+                                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;"
+                                       x-text="src.data.urls.length + ' malicious URL(s) found'"></div>
+                                  <template x-for="(u, idx) in src.data.urls.slice(0,3)" :key="idx">
+                                    <div style="font-size:10px;color:var(--text-secondary);word-break:break-all;margin-bottom:2px;font-family:monospace;"
+                                         x-text="u.url && u.url.length > 70 ? u.url.slice(0,70) + '...' : u.url"></div>
+                                  </template>
+                                  <div x-show="src.data.urls.length > 3" style="font-size:10px;color:var(--text-muted);"
+                                       x-text="'+' + (src.data.urls.length - 3) + ' more URLs'"></div>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- HIBP smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'hibp'">
+                            <div>
+                              <template x-if="Array.isArray(src.data) && src.data.length > 0">
+                                <div>
+                                  <div class="mb-3">
+                                    <span style="font-size:32px;font-weight:900;color:#ab47bc;" x-text="src.data.length"></span>
+                                    <span style="font-size:13px;color:var(--text-muted);margin-left:6px;">breach(es) found</span>
+                                  </div>
+                                  <template x-for="(breach, idx) in src.data.slice(0,5)" :key="breach.Name || idx">
+                                    <div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+                                      <div class="flex items-center justify-between">
+                                        <span style="font-size:12px;font-weight:700;" x-text="breach.Name || breach.name"></span>
+                                        <span style="font-size:10px;color:var(--text-muted);" x-text="(breach.BreachDate || breach.breach_date || '').slice(0,10)"></span>
+                                      </div>
+                                      <template x-if="(breach.DataClasses || breach.data_classes) && (breach.DataClasses || breach.data_classes).length > 0">
+                                        <div class="flex gap-1 flex-wrap mt-1">
+                                          <template x-for="dc in (breach.DataClasses || breach.data_classes).slice(0,5)" :key="dc">
+                                            <span class="badge badge-gray text-xs" x-text="dc"></span>
+                                          </template>
+                                        </div>
+                                      </template>
+                                    </div>
+                                  </template>
+                                  <div x-show="src.data.length > 5" style="font-size:11px;color:var(--text-muted);margin-top:6px;"
+                                       x-text="'+' + (src.data.length - 5) + ' more breaches'"></div>
+                                </div>
+                              </template>
+                              <template x-if="!Array.isArray(src.data) || !src.data.length">
+                                <div style="font-size:13px;color:#4ade80;font-weight:700;">No breaches found</div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- Censys smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'censys'">
+                            <div>
+                              <div class="ti-geo-grid" style="grid-template-columns:repeat(2,1fr);gap:5px;margin-bottom:8px;">
+                                <template x-if="src.data.location && src.data.location.country">
+                                  <div class="ti-geo-item"><div class="ti-geo-label">Country</div><div class="ti-geo-value" x-text="src.data.location.country + (src.data.location.country_code ? ' (' + src.data.location.country_code + ')' : '')"></div></div>
+                                </template>
+                                <template x-if="src.data.location && src.data.location.city">
+                                  <div class="ti-geo-item"><div class="ti-geo-label">City</div><div class="ti-geo-value" x-text="src.data.location.city"></div></div>
+                                </template>
+                                <template x-if="src.data.autonomous_system && src.data.autonomous_system.asn">
+                                  <div class="ti-geo-item"><div class="ti-geo-label">ASN</div><div class="ti-geo-value" x-text="'AS' + src.data.autonomous_system.asn"></div></div>
+                                </template>
+                                <template x-if="src.data.autonomous_system && src.data.autonomous_system.name">
+                                  <div class="ti-geo-item"><div class="ti-geo-label">Org</div><div class="ti-geo-value" x-text="src.data.autonomous_system.name"></div></div>
+                                </template>
+                              </div>
+                              <template x-if="src.data.services && src.data.services.length > 0">
+                                <div>
+                                  <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em;">
+                                    Services (<span x-text="src.data.services.length"></span>)
+                                  </div>
+                                  <div class="flex gap-1 flex-wrap">
+                                    <template x-for="svc in src.data.services.slice(0,15)" :key="JSON.stringify(svc)">
+                                      <span :class="'ti-port-badge ' + portClass(svc.port || svc)"
+                                            x-text="(svc.port || svc) + (svc.transport_protocol ? '/' + svc.transport_protocol.toLowerCase() : '')"></span>
+                                    </template>
+                                  </div>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- SecurityTrails smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'securitytrails'">
+                            <div>
+                              <template x-if="stDnsBreakdown(src.data).length > 0">
+                                <div>
+                                  <div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">DNS Records</div>
+                                  <template x-for="rec in stDnsBreakdown(src.data)" :key="rec.type">
+                                    <div style="margin-bottom:8px;">
+                                      <div class="flex items-center gap-2 mb-1">
+                                        <span class="badge badge-gray text-xs" x-text="rec.type"></span>
+                                        <span style="font-size:10px;color:var(--text-muted);" x-text="rec.values.length + ' record(s)'"></span>
+                                      </div>
+                                      <div class="flex gap-1 flex-wrap">
+                                        <template x-for="val in rec.values.slice(0,5)" :key="val">
+                                          <span class="badge badge-gray font-mono text-xs" x-text="val"></span>
+                                        </template>
+                                        <span x-show="rec.values.length > 5" class="badge badge-gray text-xs"
+                                              x-text="'+' + (rec.values.length - 5)"></span>
+                                      </div>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                              <template x-if="stDnsBreakdown(src.data).length === 0">
+                                <div class="ti-fields-grid">
+                                  <template x-for="field in humanFields(src.source, src.data)" :key="field.label">
+                                    <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
+                                      <div class="ti-field-label" x-text="field.label"></div>
+                                      <div class="ti-field-value"><span x-text="field.value"></span></div>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- URLscan smart card -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && src.source === 'urlscan'">
+                            <div>
+                              <template x-if="src.data.screenshot">
+                                <img :src="src.data.screenshot" alt="URLscan screenshot"
+                                     style="width:100%;border-radius:6px;border:1px solid var(--border-color);margin-bottom:8px;display:block;" />
+                              </template>
+                              <div class="ti-geo-grid" style="grid-template-columns:repeat(2,1fr);gap:5px;margin-bottom:8px;">
+                                <template x-if="src.data.verdicts && src.data.verdicts.overall">
+                                  <div class="ti-geo-item">
+                                    <div class="ti-geo-label">Verdict</div>
+                                    <div class="ti-geo-value"
+                                         :style="src.data.verdicts.overall.malicious ? 'color:#ff4444' : 'color:#00cc66'"
+                                         x-text="src.data.verdicts.overall.malicious ? 'MALICIOUS' : 'CLEAN'"></div>
+                                  </div>
+                                </template>
+                                <template x-if="src.data.page && src.data.page.country">
+                                  <div class="ti-geo-item"><div class="ti-geo-label">Country</div><div class="ti-geo-value" x-text="src.data.page.country"></div></div>
+                                </template>
+                              </div>
+                              <template x-if="src.data.page && src.data.page.title">
+                                <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;" x-text="'Title: ' + src.data.page.title"></div>
+                              </template>
+                            </div>
+                          </template>
+
+                          <!-- Generic card (fallback) -->
+                          <template x-if="!src.error && src.data && !src.data.not_found && !hasSmartCard(src.source)">
                             <div class="ti-fields-grid">
                               <template x-for="field in humanFields(src.source, src.data)" :key="field.label">
                                 <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
@@ -3597,62 +4036,6 @@
                               </template>
                             </div>
                           </template>
-                          <template x-if="src.error">
-                            <div style="font-size:11px;color:#f87171;" x-text="src.error"></div>
-                          </template>
-                          <template x-if="!src.error && (!src.data || src.data.not_found)">
-                            <div style="font-size:11px;color:var(--text-muted);">No data found for this IOC</div>
-                          </template>
-                          <!-- OTX rich pulse list (Summary card) -->
-                          <template x-if="src.source === 'alienvault' && src.data && src.data.pulse_info && src.data.pulse_info.pulses && src.data.pulse_info.pulses.length > 0">
-                            <div style="margin-top:10px;">
-                              <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;">
-                                Pulses (<span x-text="src.data.pulse_info.pulses.length"></span>)
-                              </div>
-                              <template x-for="(pulse, idx) in src.data.pulse_info.pulses.slice(0,20)" :key="pulse.id || idx">
-                                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:5px;padding:6px 8px;margin-bottom:5px;">
-                                  <div class="flex items-center gap-2 flex-wrap mb-1">
-                                    <span style="font-size:11px;font-weight:700;color:var(--text-primary);" x-text="pulse.name"></span>
-                                    <span x-show="pulse.tlp"
-                                          :style="`font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700;background:${pulse.tlp==='red'?'rgba(255,80,80,0.15)':pulse.tlp==='amber'?'rgba(255,200,0,0.15)':pulse.tlp==='green'?'rgba(0,200,80,0.15)':'rgba(148,163,184,0.15)'};color:${pulse.tlp==='red'?'#f87171':pulse.tlp==='amber'?'#fbbf24':pulse.tlp==='green'?'#34d399':'#94a3b8'};`"
-                                          x-text="'TLP:' + (pulse.tlp || 'WHITE').toUpperCase()"></span>
-                                    <span x-show="pulse.author && pulse.author.username" style="font-size:10px;color:var(--text-muted);" x-text="'@ ' + pulse.author.username"></span>
-                                  </div>
-                                  <template x-if="pulse.tags && pulse.tags.length > 0">
-                                    <div class="flex gap-1 flex-wrap mb-1">
-                                      <template x-for="tag in pulse.tags.slice(0,8)" :key="tag">
-                                        <span class="badge badge-gray text-xs" x-text="tag"></span>
-                                      </template>
-                                    </div>
-                                  </template>
-                                  <div class="flex gap-3 flex-wrap" style="font-size:10px;color:var(--text-muted);">
-                                    <span x-show="pulse.created" x-text="'Created: ' + formatDate(pulse.created)"></span>
-                                    <span x-show="pulse.modified" x-text="'Modified: ' + formatDate(pulse.modified)"></span>
-                                    <template x-if="pulse.references && pulse.references.length > 0">
-                                      <span>
-                                        <a :href="pulse.references[0]" target="_blank" rel="noopener noreferrer"
-                                           class="text-green" style="text-decoration:none;">↗ Reference</a>
-                                        <span x-show="pulse.references.length > 1" x-text="' +' + (pulse.references.length - 1) + ' more'"></span>
-                                      </span>
-                                    </template>
-                                  </div>
-                                </div>
-                              </template>
-                              <div x-show="src.data.pulse_info.pulses.length > 20"
-                                   style="font-size:11px;color:var(--text-muted);margin-top:4px;"
-                                   x-text="'+' + (src.data.pulse_info.pulses.length - 20) + ' more pulses (see Raw JSON)'"></div>
-                            </div>
-                          </template>
-                          <!-- OTX Validation section (Summary card) -->
-                          <template x-if="src.source === 'alienvault' && src.data && src.data.validation && src.data.validation.length > 0">
-                            <div style="margin-top:8px;">
-                              <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Validation</div>
-                              <template x-for="v in src.data.validation" :key="JSON.stringify(v)">
-                                <div style="font-size:11px;color:var(--text-secondary);padding:2px 0;"
-                                     x-text="(v.source || '') + (v.message ? ': ' + v.message : '') + (v.name ? ' (' + v.name + ')' : '')"></div>
-                              </template>
-                            </div>
-                          </template>
                         </div>
                       </template>
                     </div>
@@ -3661,15 +4044,32 @@
                   <!-- Tab: Detections -->
                   <div x-show="activeResultTab === 'detections'">
                     <div class="card">
-                      <div class="card-title" x-text="'🛡️ ' + normalized.detections.length + ' Detection(s)'"></div>
-                      <template x-if="normalized.detections.length === 0">
-                        <div class="text-center text-muted" style="padding:20px;">No detections from any source</div>
+                      <!-- Header + search -->
+                      <div class="flex items-center justify-between mb-2" style="flex-wrap:wrap;gap:8px;">
+                        <div class="card-title" x-text="'Detections (' + normalized.detections.length + ')'"></div>
+                      </div>
+                      <input class="ti-det-search" type="text" placeholder="Search engines, results..."
+                             x-model="detectionSearchQuery" />
+                      <template x-if="detectionsFiltered.length === 0">
+                        <div class="text-center text-muted" style="padding:20px;">No detections match your search</div>
                       </template>
-                      <template x-for="det in normalized.detections" :key="det.engine + det.result">
-                        <div class="ti-detection-row">
-                          <div class="ti-detection-engine" x-text="det.engine"></div>
-                          <div class="ti-detection-result" x-text="det.result"></div>
-                          <span class="ti-detection-cat" x-text="det.category"></span>
+                      <!-- Grouped by category -->
+                      <template x-for="[cat, dets] in Object.entries(detectionsByCategory)" :key="cat">
+                        <div>
+                          <div class="ti-det-group-header">
+                            <span x-text="detectionCategoryIcon(cat)"></span>
+                            <span style="text-transform:capitalize;" x-text="cat"></span>
+                            <span class="ti-det-group-count" x-text="dets.length + ' engine(s)'"></span>
+                          </div>
+                          <template x-for="det in dets" :key="det.engine + det.result">
+                            <div class="ti-detection-row">
+                              <div class="ti-detection-engine" x-text="det.engine"></div>
+                              <div class="ti-detection-result" x-text="det.result"></div>
+                              <span class="ti-detection-cat"
+                                    :style="`color:${detectionCategoryColor(det.category)};background:rgba(0,0,0,0.2);border:1px solid ${detectionCategoryColor(det.category)}40`"
+                                    x-text="det.category"></span>
+                            </div>
+                          </template>
                         </div>
                       </template>
                     </div>
@@ -3697,7 +4097,7 @@
                         <div class="card-title">🔌 Network Services</div>
                         <div class="flex gap-1 flex-wrap mt-2">
                           <template x-for="port in normalized.enrichment.network.ports" :key="port">
-                            <span class="badge badge-gray font-mono text-xs" x-text="port"></span>
+                            <span :class="'ti-port-badge ' + portClass(port)" x-text="port"></span>
                           </template>
                         </div>
                         <template x-if="normalized.enrichment.network.os">
@@ -3799,17 +4199,20 @@
                   <!-- Tab: Timeline -->
                   <div x-show="activeResultTab === 'timeline'">
                     <div class="card">
-                      <div class="card-title">📅 Event Timeline</div>
+                      <div class="card-title">Event Timeline</div>
                       <template x-if="!hasTimeline">
                         <div class="text-center text-muted" style="padding:20px;">No timeline events available</div>
                       </template>
                       <template x-if="hasTimeline">
-                        <div class="ti-timeline mt-2">
-                          <template x-for="ev in normalized.timeline.slice().sort((a,b) => new Date(b.date) - new Date(a.date))" :key="ev.date + ev.event">
-                            <div class="ti-timeline-event">
-                              <div class="ti-timeline-date" x-text="formatDate(ev.date)"></div>
-                              <div class="ti-timeline-text" x-text="ev.event"></div>
-                              <div class="ti-timeline-source" x-text="'via ' + ev.source"></div>
+                        <div class="ti-timeline-v2 mt-3">
+                          <template x-for="ev in sortedTimeline" :key="ev.date + ev.event">
+                            <div class="ti-timeline-v2-item">
+                              <div class="ti-timeline-v2-dot"></div>
+                              <div class="ti-timeline-v2-date" x-text="formatDate(ev.date)"></div>
+                              <div class="ti-timeline-v2-text" x-text="ev.event"></div>
+                              <div class="ti-timeline-v2-src">
+                                <span x-text="ev.source"></span>
+                              </div>
                             </div>
                           </template>
                         </div>
@@ -3821,7 +4224,20 @@
                   <div x-show="activeResultTab === 'sources'">
                     <template x-for="src in perSource" :key="src.source">
                       <div class="ti-result-card mb-3"
-                           :class="src.error ? 'ti-threat-error has-error' : ''">
+                           :class="[
+                             src.error ? 'ti-threat-error has-error' : '',
+                             src.source === 'virustotal' ? 'ti-source-virustotal' :
+                             src.source === 'abuseipdb' ? 'ti-source-abuseipdb' :
+                             src.source === 'alienvault' ? 'ti-source-alienvault' :
+                             src.source === 'shodan' ? 'ti-source-shodan' :
+                             src.source === 'malwarebazaar' ? 'ti-source-malwarebazaar' :
+                             src.source === 'threatfox' ? 'ti-source-threatfox' :
+                             src.source === 'urlhaus' ? 'ti-source-urlhaus' :
+                             src.source === 'hibp' ? 'ti-source-hibp' :
+                             src.source === 'censys' ? 'ti-source-censys' :
+                             src.source === 'urlscan' ? 'ti-source-urlscan' :
+                             src.source === 'securitytrails' ? 'ti-source-securitytrails' : ''
+                           ]">
                         <!-- Source header -->
                         <div class="flex items-center justify-between mb-2">
                           <div class="flex items-center gap-2">
