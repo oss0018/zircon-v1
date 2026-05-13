@@ -976,6 +976,34 @@ document.addEventListener('alpine:init', () => {
     // ── Reactive state for detections search ───────────────────────────────
     detectionSearchQuery: '',
 
+    // ── Tag classification constants ────────────────────────────────────────
+    _malwareFamilyKeywords: ['malware','trojan','ransomware','backdoor','rat','stealer','botnet','rootkit','spyware','worm','dropper','downloader','loader'],
+    _phishingKeywords: ['phish','phishing','scam','fraud'],
+    _cleanKeywords: ['clean','harmless','benign','safe','whitelist'],
+
+    // Sources with dedicated smart cards (generic fallback used for all others)
+    _smartCardSources: ['virustotal','abuseipdb','alienvault','shodan','malwarebazaar','threatfox','urlhaus','hibp','censys','securitytrails','urlscan'],
+
+    /**
+     * Returns a CSS class for a tag based on its content.
+     */
+    tagBadgeClass(tag) {
+      if (!tag) return 'ti-tag-default';
+      const t = tag.toLowerCase();
+      if (tag.startsWith('CVE') || tag.startsWith('cve')) return 'ti-tag-cve';
+      if (this._malwareFamilyKeywords.some(k => t.includes(k))) return 'ti-tag-malware';
+      if (this._phishingKeywords.some(k => t.includes(k))) return 'ti-tag-phishing';
+      if (this._cleanKeywords.some(k => t.includes(k))) return 'ti-tag-clean';
+      return 'ti-tag-default';
+    },
+
+    /**
+     * Returns true if a source has a dedicated smart card template.
+     */
+    hasSmartCard(source) {
+      return this._smartCardSources.includes(source);
+    },
+
     // ── Computed / derived helpers ──────────────────────────────────────────
 
     /**

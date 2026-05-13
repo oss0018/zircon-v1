@@ -3552,13 +3552,7 @@
                         <div class="card-title" style="margin-bottom:8px;">Tags</div>
                         <div class="flex gap-2 flex-wrap">
                           <template x-for="tag in normalized.tags" :key="tag">
-                            <span :class="'ti-tag-badge ' + (
-                              tag.startsWith('CVE') ? 'ti-tag-cve' :
-                              ['malware','trojan','ransomware','backdoor','rat','stealer','botnet','rootkit','spyware','worm','dropper','downloader','loader'].some(m => tag.toLowerCase().includes(m)) ? 'ti-tag-malware' :
-                              ['phish','phishing','scam','fraud'].some(m => tag.toLowerCase().includes(m)) ? 'ti-tag-phishing' :
-                              ['clean','harmless','benign','safe','whitelist'].some(m => tag.toLowerCase().includes(m)) ? 'ti-tag-clean' :
-                              'ti-tag-default'
-                            )" x-text="tag"></span>
+                            <span :class="'ti-tag-badge ' + tagBadgeClass(tag)" x-text="tag"></span>
                           </template>
                         </div>
                       </div>
@@ -4024,7 +4018,7 @@
                           </template>
 
                           <!-- Generic card (fallback) -->
-                          <template x-if="!src.error && src.data && !src.data.not_found && !['virustotal','abuseipdb','alienvault','shodan','malwarebazaar','threatfox','urlhaus','hibp','censys','securitytrails','urlscan'].includes(src.source)">
+                          <template x-if="!src.error && src.data && !src.data.not_found && !hasSmartCard(src.source)">
                             <div class="ti-fields-grid">
                               <template x-for="field in humanFields(src.source, src.data)" :key="field.label">
                                 <div class="ti-field" :class="field.highlight ? 'ti-field-' + field.highlight : ''">
