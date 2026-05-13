@@ -116,7 +116,7 @@ def start_scheduler():
         misfire_grace_time=60,
     )
     _scheduler.start()
-    print("[scheduler] Started. Watched folder scan every 8 minutes. Storage sources are evaluated every 11 minutes. Monitoring jobs are evaluated every 6 minutes.")
+    print("[scheduler] Started. Monitored dir scan every 15 minutes. Watched folder scan every 8 minutes. Storage sources are evaluated every 11 minutes. Monitoring jobs are evaluated every 6 minutes.")
 
 
 def _is_source_due(source) -> bool:

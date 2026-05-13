@@ -159,6 +159,7 @@ async def lifespan(app: FastAPI):
     # Create deep_search_data/ directory if it doesn't exist
     Path(settings.deep_search_dir).mkdir(parents=True, exist_ok=True)
 
+    # Pre-load SPA HTML into memory to avoid disk I/O on every request
     global _SPA_HTML_CACHE
     _index = Path("app/static/index.html")
     if _index.exists():
