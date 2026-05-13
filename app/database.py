@@ -8,7 +8,26 @@ logger = logging.getLogger(__name__)
 
 Path("data/db").mkdir(parents=True, exist_ok=True)
 
-engine = create_async_engine(settings.database_url, echo=False)
+_is_sqlite = settings.database_url.startswith("sqlite")
+_engine_kwargs: dict = {"echo": False, "pool_pre_ping": True}
+if _is_sqlite:
+    _engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
+
+if _is_sqlite:
+    from sqlalchemy import event
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA cache_size=10000")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
+
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 

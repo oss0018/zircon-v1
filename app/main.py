@@ -14,6 +14,8 @@ from app.database import init_db
 from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
+_SPA_HTML_CACHE: str = ""
+
 
 async def seed_ti_default_dashboard():
     """Seed a default 'Threat Intelligence Overview' dashboard if none exists."""
@@ -157,6 +159,12 @@ async def lifespan(app: FastAPI):
     # Create deep_search_data/ directory if it doesn't exist
     Path(settings.deep_search_dir).mkdir(parents=True, exist_ok=True)
 
+    # Pre-load SPA HTML into memory to avoid disk I/O on every request
+    global _SPA_HTML_CACHE
+    _index_path = Path("app/static/index.html")
+    if _index_path.exists():
+        _SPA_HTML_CACHE = _index_path.read_text()
+
     yield
 
     from app.services.scheduler import stop_scheduler
@@ -201,6 +209,8 @@ async def serve_spa(full_path: str, request: Request):
     if full_path.startswith("api/") or full_path.startswith("static/"):
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": "Not Found"}, status_code=404)
+    if _SPA_HTML_CACHE:
+        return HTMLResponse(content=_SPA_HTML_CACHE)
     index_path = Path("app/static/index.html")
     if index_path.exists():
         return HTMLResponse(content=index_path.read_text())
