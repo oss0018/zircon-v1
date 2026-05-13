@@ -1426,3 +1426,307 @@ mark.highlight {
 }
 
 .scan-source-section:last-child { margin-bottom: 0; }
+
+/* ════════════════════════════════════════════════════════════
+   TI Enhanced Display — added styles
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Verdict hero block ─────────────────────────────────────── */
+.ti-verdict-hero {
+  border-radius: 10px;
+  padding: 20px 24px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+}
+.ti-verdict-malicious { background: rgba(255,50,50,0.07); border-color: rgba(255,50,50,0.45); }
+.ti-verdict-suspicious { background: rgba(255,150,0,0.07); border-color: rgba(255,150,0,0.45); }
+.ti-verdict-clean { background: rgba(0,255,100,0.05); border-color: rgba(0,255,100,0.35); }
+.ti-verdict-unknown { background: rgba(100,100,100,0.07); border-color: rgba(150,150,150,0.35); }
+
+/* ── Confidence ring (SVG/CSS) ──────────────────────────────── */
+.ti-confidence-ring-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+}
+.ti-confidence-ring-inner {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  background: var(--bg-main);
+}
+.ti-confidence-ring-outer {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  padding: 5px;
+}
+
+/* ── Detection bar (VT style) ──────────────────────────────── */
+.ti-detection-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+  background: rgba(255,255,255,0.06);
+}
+.ti-detection-bar-mal   { background: #ff4444; }
+.ti-detection-bar-sus   { background: #ff9900; }
+.ti-detection-bar-clean { background: #00cc66; }
+.ti-detection-bar-unk   { background: rgba(255,255,255,0.15); }
+
+/* ── VT stats breakdown tiles ──────────────────────────────── */
+.ti-vt-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+.ti-vt-stat-tile {
+  border-radius: 6px;
+  padding: 7px 10px;
+  text-align: center;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.ti-vt-stat-tile .ti-vt-stat-val {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.ti-vt-stat-tile .ti-vt-stat-lbl {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-top: 2px;
+}
+.ti-vt-stat-mal  .ti-vt-stat-val { color: #ff4444; }
+.ti-vt-stat-sus  .ti-vt-stat-val { color: #ff9900; }
+.ti-vt-stat-clean .ti-vt-stat-val { color: #00cc66; }
+.ti-vt-stat-unk  .ti-vt-stat-val { color: var(--text-muted); }
+
+/* ── AbuseIPDB score ring ────────────────────────────────────── */
+.ti-abuse-ring-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+}
+.ti-abuse-ring-outer {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  padding: 7px;
+}
+.ti-abuse-ring-inner {
+  position: absolute;
+  inset: 10px;
+  border-radius: 50%;
+  background: var(--bg-main);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+}
+.ti-abuse-ring-inner small {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* ── TLP badges ─────────────────────────────────────────────── */
+.ti-tlp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.ti-tlp-white { background: rgba(148,163,184,0.15); color: #94a3b8; }
+.ti-tlp-green { background: rgba(0,200,80,0.15); color: #34d399; }
+.ti-tlp-amber { background: rgba(255,200,0,0.15); color: #fbbf24; }
+.ti-tlp-red   { background: rgba(255,80,80,0.15); color: #f87171; }
+
+/* ── OTX pulse items ────────────────────────────────────────── */
+.ti-pulse-item {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.ti-pulse-item:hover { border-color: rgba(126,87,194,0.35); }
+
+/* ── Port badges ────────────────────────────────────────────── */
+.ti-port-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  cursor: default;
+}
+.ti-port-well-known  { background: rgba(255,80,80,0.12); color: #ff6060; border: 1px solid rgba(255,80,80,0.2); }
+.ti-port-registered  { background: rgba(255,180,0,0.12); color: #ffb400; border: 1px solid rgba(255,180,0,0.2); }
+.ti-port-ephemeral   { background: rgba(100,180,255,0.12); color: #64b4ff; border: 1px solid rgba(100,180,255,0.2); }
+
+/* ── CVE badge ──────────────────────────────────────────────── */
+.ti-cve-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(255,50,50,0.12);
+  color: #ff5050;
+  border: 1px solid rgba(255,50,50,0.25);
+  text-decoration: none;
+}
+.ti-cve-badge:hover { background: rgba(255,50,50,0.2); }
+
+/* ── Source-specific card borders ───────────────────────────── */
+.ti-source-virustotal    { border-top: 3px solid #2196f3; }
+.ti-source-abuseipdb     { border-top: 3px solid #e53935; }
+.ti-source-alienvault    { border-top: 3px solid #7e57c2; }
+.ti-source-shodan        { border-top: 3px solid #00acc1; }
+.ti-source-malwarebazaar { border-top: 3px solid #ff7043; }
+.ti-source-threatfox     { border-top: 3px solid #ef5350; }
+.ti-source-urlhaus       { border-top: 3px solid #fb8c00; }
+.ti-source-hibp          { border-top: 3px solid #ab47bc; }
+.ti-source-censys        { border-top: 3px solid #26a69a; }
+.ti-source-urlscan       { border-top: 3px solid #42a5f5; }
+.ti-source-securitytrails { border-top: 3px solid #66bb6a; }
+
+/* ── Detections grouped header ──────────────────────────────── */
+.ti-det-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.ti-det-group-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.08);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* ── Detection search input ─────────────────────────────────── */
+.ti-det-search {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  font-size: 12px;
+  margin-bottom: 10px;
+  outline: none;
+}
+.ti-det-search:focus { border-color: rgba(0,255,157,0.4); }
+
+/* ── Tags cloud ─────────────────────────────────────────────── */
+.ti-tag-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  border: 1px solid transparent;
+}
+.ti-tag-badge:hover { opacity: 0.8; }
+.ti-tag-malware  { background: rgba(244,67,54,0.15); color: #f44336; border-color: rgba(244,67,54,0.3); }
+.ti-tag-phishing { background: rgba(255,152,0,0.15); color: #ff9800; border-color: rgba(255,152,0,0.3); }
+.ti-tag-cve      { background: rgba(255,50,50,0.15); color: #ff5050; border-color: rgba(255,50,50,0.3); }
+.ti-tag-clean    { background: rgba(76,175,80,0.15); color: #4caf50; border-color: rgba(76,175,80,0.3); }
+.ti-tag-default  { background: rgba(255,255,255,0.07); color: var(--text-secondary); border-color: rgba(255,255,255,0.1); }
+
+/* ── Enhanced timeline ──────────────────────────────────────── */
+.ti-timeline-v2 {
+  position: relative;
+  padding-left: 28px;
+}
+.ti-timeline-v2::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--accent-green), rgba(0,255,157,0.15));
+}
+.ti-timeline-v2-item {
+  position: relative;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  font-size: 12px;
+}
+.ti-timeline-v2-dot {
+  position: absolute;
+  left: -22px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  border: 2px solid var(--bg-main);
+  z-index: 1;
+}
+.ti-timeline-v2-date {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.ti-timeline-v2-text {
+  color: var(--text-primary);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+.ti-timeline-v2-src {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

@@ -973,6 +973,188 @@ document.addEventListener('alpine:init', () => {
       return this.activeIntegrations.length > 0;
     },
 
+    // ── Reactive state for detections search ───────────────────────────────
+    detectionSearchQuery: '',
+
+    // ── Computed / derived helpers ──────────────────────────────────────────
+
+    /**
+     * Returns { malicious, suspicious, undetected, harmless, timeout, total,
+     *           malPct, susPct, cleanPct, unkPct } from a VT per_source data object.
+     */
+    vtStatsBreakdown(d) {
+      if (!d) return null;
+      const attrs = (d.data && d.data.attributes) ? d.data.attributes : (d.attributes || {});
+      const stats = attrs.last_analysis_stats || {};
+      if (!Object.keys(stats).length) {
+        // v2 fallback
+        if (d.positives !== undefined && d.total !== undefined) {
+          const mal = d.positives || 0;
+          const total = d.total || 0;
+          const clean = total - mal;
+          return { malicious: mal, suspicious: 0, undetected: clean, harmless: 0, timeout: 0, total,
+                   malPct: total ? Math.round(mal/total*100) : 0, susPct: 0,
+                   cleanPct: total ? Math.round(clean/total*100) : 0, unkPct: 0 };
+        }
+        return null;
+      }
+      const mal = stats.malicious || 0;
+      const sus = stats.suspicious || 0;
+      const und = stats.undetected || 0;
+      const har = stats.harmless || 0;
+      const tim = stats.timeout || 0;
+      const total = mal + sus + und + har + tim;
+      if (!total) return null;
+      return {
+        malicious: mal, suspicious: sus, undetected: und, harmless: har, timeout: tim, total,
+        malPct:   Math.round(mal/total*100),
+        susPct:   Math.round(sus/total*100),
+        cleanPct: Math.round((und+har)/total*100),
+        unkPct:   Math.round(tim/total*100),
+      };
+    },
+
+    /**
+     * Returns { malicious, suspicious, undetected, harmless, total, malPct, susPct, cleanPct }
+     * Alias for backward compat.
+     */
+    vtDetectionBar(d) {
+      return this.vtStatsBreakdown(d);
+    },
+
+    /**
+     * Returns inline style string for an abuse confidence ring using conic-gradient.
+     * score: 0–100
+     */
+    abuseScoreRingStyle(score) {
+      const s = Math.max(0, Math.min(100, Number(score) || 0));
+      let color = '#00cc66';
+      if (s >= 75) color = '#ff4444';
+      else if (s >= 40) color = '#ff9900';
+      else if (s >= 15) color = '#fbbf24';
+      const deg = Math.round(s / 100 * 360);
+      return `background: conic-gradient(${color} ${deg}deg, rgba(255,255,255,0.08) ${deg}deg)`;
+    },
+
+    /**
+     * Returns CSS class for port number (well-known / registered / ephemeral).
+     */
+    portClass(port) {
+      const p = parseInt(port, 10);
+      if (p < 1024) return 'ti-port-well-known';
+      if (p < 49152) return 'ti-port-registered';
+      return 'ti-port-ephemeral';
+    },
+
+    /**
+     * Returns CSS class for TLP level.
+     */
+    tlpClass(tlp) {
+      switch ((tlp || '').toLowerCase()) {
+        case 'red':   return 'ti-tlp-red';
+        case 'amber': return 'ti-tlp-amber';
+        case 'green': return 'ti-tlp-green';
+        default:      return 'ti-tlp-white';
+      }
+    },
+
+    /**
+     * Returns NVD link for a CVE identifier.
+     */
+    cveLink(cve) {
+      return `https://nvd.nist.gov/vuln/detail/${cve}`;
+    },
+
+    /**
+     * Formats bytes as human-readable string.
+     */
+    formatBytes(bytes) {
+      if (!bytes && bytes !== 0) return '—';
+      const b = Number(bytes);
+      if (b < 1024) return b + ' B';
+      if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+      if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+      return (b / 1073741824).toFixed(2) + ' GB';
+    },
+
+    /**
+     * Maps AbuseIPDB numeric category IDs to human-readable names.
+     * Reference: https://www.abuseipdb.com/categories
+     */
+    abuseCategory(num) {
+      const cats = {
+        1: 'DNS Compromise', 2: 'DNS Poisoning', 3: 'Fraud Orders',
+        4: 'DDoS Attack', 5: 'FTP Brute-Force', 6: 'Ping of Death',
+        7: 'Phishing', 8: 'Fraud VoIP', 9: 'Open Proxy',
+        10: 'Web Spam', 11: 'Email Spam', 12: 'Blog Spam',
+        13: 'VPN IP', 14: 'Port Scan', 15: 'Hacking',
+        16: 'SQL Injection', 17: 'Spoofing', 18: 'Brute-Force',
+        19: 'Bad Web Bot', 20: 'Exploited Host', 21: 'Web App Attack',
+        22: 'SSH', 23: 'IoT Targeted',
+      };
+      return cats[num] || `Category ${num}`;
+    },
+
+    /**
+     * Returns normalized.timeline sorted by date descending.
+     */
+    get sortedTimeline() {
+      const tl = (this.searchResult && this.searchResult.normalized && this.searchResult.normalized.timeline) || [];
+      return tl.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+    },
+
+    /**
+     * Returns normalized.detections filtered by detectionSearchQuery.
+     */
+    get detectionsFiltered() {
+      const dets = (this.searchResult && this.searchResult.normalized && this.searchResult.normalized.detections) || [];
+      const q = (this.detectionSearchQuery || '').toLowerCase().trim();
+      if (!q) return dets;
+      return dets.filter(d =>
+        (d.engine || '').toLowerCase().includes(q) ||
+        (d.result || '').toLowerCase().includes(q) ||
+        (d.category || '').toLowerCase().includes(q)
+      );
+    },
+
+    /**
+     * Returns detections grouped by category as { [category]: detection[] }.
+     */
+    get detectionsByCategory() {
+      const dets = this.detectionsFiltered;
+      const groups = {};
+      for (const det of dets) {
+        const cat = det.category || 'other';
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(det);
+      }
+      return groups;
+    },
+
+    /**
+     * Returns a color for a detection category.
+     */
+    detectionCategoryColor(cat) {
+      const map = {
+        antivirus: '#2196f3', malware: '#f44336', phishing: '#ff9800',
+        abuse: '#e53935', vulnerability: '#9c27b0', data_breach: '#ab47bc',
+        other: '#607d8b',
+      };
+      return map[(cat || '').toLowerCase()] || '#607d8b';
+    },
+
+    /**
+     * Returns emoji icon for a detection category.
+     */
+    detectionCategoryIcon(cat) {
+      const icons = {
+        antivirus: '🦠', malware: '☠️', phishing: '🎣',
+        abuse: '🚨', vulnerability: '🔓', data_breach: '💾',
+        other: '⚠️',
+      };
+      return icons[(cat || '').toLowerCase()] || '⚠️';
+    },
+
     // ── Misc helpers ───────────────────────────────────────────────────────
 
     resultSummary(data) {
