@@ -57,6 +57,7 @@ def _make_base(source: str, target: str, target_type: str, checked_at: str) -> d
         "dns_info": None,
         "links": None,
         "total_results": 0,
+        "urlscan_details": None,
     }
 
 
@@ -145,7 +146,10 @@ def _normalize_urlscan(raw: dict, base: dict) -> dict:
         _safe_str(r.get("result"))
         or _safe_str(task.get("reportURL"))
     )
-    base["screenshot_url"] = _safe_str(r.get("screenshot"))
+    uuid = _safe_str(task.get("uuid"))
+    base["screenshot_url"] = _safe_str(r.get("screenshot")) or (
+        f"https://urlscan.io/screenshots/{uuid}.png" if uuid else None
+    )
 
     # Verdict
     is_malicious = bool(overall.get("malicious"))
@@ -230,6 +234,22 @@ def _normalize_urlscan(raw: dict, base: dict) -> dict:
             base["multi_scan_summary"] = (
                 f"{mal_count}/{len(results)} scans flagged as malicious"
             )
+
+    # URLscan-specific details for the dedicated Details tab
+    base["urlscan_details"] = {
+        "domain": _safe_str(page.get("domain")),
+        "country": _safe_str(page.get("country")),
+        "server": _safe_str(page.get("server")),
+        "redirected": _safe_str(page.get("redirected")),
+        "ip": _safe_str(page.get("ip")),
+        "apexDomainAgeDays": page.get("apexDomainAgeDays"),
+        "language": _safe_str(page.get("language")),
+        "apexDomain": _safe_str(page.get("apexDomain")),
+        "result_url": _safe_str(r.get("result")),
+        "screenshot_url": base.get("screenshot_url"),
+        "uuid": uuid,
+        "total_results": base.get("total_results", 0),
+    }
 
     return base
 

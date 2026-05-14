@@ -2107,6 +2107,7 @@
                   dns_info: null,
                   links: null,
                   total_results: 0,
+                  urlscan_details: null,
                 };
                 if (raw.error) {
                   const err = String(raw.error).toLowerCase();
@@ -2141,7 +2142,7 @@
                 normalized.title = page.title || null;
                 normalized.scan_age = task.time || null;
                 normalized.provider_url = r0.result || task.reportURL || null;
-                normalized.screenshot_url = r0.screenshot || null;
+                normalized.screenshot_url = r0.screenshot || (r0.task?.uuid ? `https://urlscan.io/screenshots/${r0.task.uuid}.png` : null);
                 const score = Number(overall.score || 0);
                 normalized.verdict_score = score;
                 if (overall.malicious || score >= 70) normalized.verdict = 'malicious';
@@ -2187,6 +2188,20 @@
                   const maliciousCount = results.filter(rx => !!(((rx || {}).verdicts || {}).overall || {}).malicious).length;
                   if (maliciousCount) normalized.multi_scan_summary = `${maliciousCount}/${results.length} scans flagged as malicious`;
                 }
+                normalized.urlscan_details = {
+                  domain: page.domain || null,
+                  country: page.country || null,
+                  server: page.server || null,
+                  redirected: page.redirected || null,
+                  ip: page.ip || null,
+                  apexDomainAgeDays: page.apexDomainAgeDays !== undefined ? page.apexDomainAgeDays : null,
+                  language: page.language || null,
+                  apexDomain: page.apexDomain || null,
+                  result_url: r0.result || null,
+                  screenshot_url: normalized.screenshot_url,
+                  uuid: task.uuid || null,
+                  total_results: normalized.total_results,
+                };
                 return normalized;
               },
               normalizeResultEntry(entry, report) {
@@ -2408,6 +2423,12 @@
                             <button class="ti-tab" :class="getTab(r.source) === 'summary' ? 'active' : ''"
                                     @click="setTab(r.source, 'summary')">Summary</button>
                             <button class="ti-tab"
+                                    :class="getTab(r.source) === 'urlscan_details' ? 'active' : ''"
+                                    x-show="r.source === 'urlscan' && r.normalized && r.normalized.urlscan_details"
+                                    @click="setTab(r.source, 'urlscan_details')">
+                              🔍 URLscan Details
+                            </button>
+                            <button class="ti-tab"
                                     :class="getTab(r.source) === 'indicators' ? 'active' : ''"
                                     x-show="r.normalized.indicators && r.normalized.indicators.length > 0"
                                     @click="setTab(r.source, 'indicators')">
@@ -2430,7 +2451,8 @@
                           <div x-show="getTab(r.source) === 'summary'">
                             <!-- Screenshot -->
                             <template x-if="r.normalized.screenshot_url">
-                              <img :src="r.normalized.screenshot_url" alt="Screenshot" class="scan-drawer-screenshot" />
+                              <img :src="r.normalized.screenshot_url" alt="Screenshot" class="scan-drawer-screenshot"
+                                   onerror="this.style.display='none'" />
                             </template>
 
                             <!-- Multi-scan note -->
@@ -2517,6 +2539,89 @@
                                 </template>
                                 <template x-if="!genericFields(r.data).length">
                                   <div class="text-muted text-sm" style="padding:8px 0;">No structured data — see Raw tab.</div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+
+                          <!-- Tab: URLscan Details -->
+                          <div x-show="getTab(r.source) === 'urlscan_details'" x-cloak>
+                            <template x-if="r.normalized.urlscan_details">
+                              <div>
+                                <!-- Screenshot -->
+                                <template x-if="r.normalized.screenshot_url">
+                                  <div style="margin-bottom:12px;">
+                                    <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Screenshot</div>
+                                    <img :src="r.normalized.screenshot_url" alt="URLscan Screenshot"
+                                         style="width:100%;border-radius:6px;border:1px solid var(--border-color);display:block;"
+                                         onerror="this.style.display='none'" />
+                                  </div>
+                                </template>
+
+                                <!-- Details grid -->
+                                <div class="ti-fields-grid" style="margin-bottom:12px;">
+                                  <template x-if="r.normalized.urlscan_details.domain">
+                                    <div class="ti-field">
+                                      <div class="ti-field-label">Domain</div>
+                                      <div class="ti-field-value font-mono" x-text="r.normalized.urlscan_details.domain"></div>
+                                    </div>
+                                  </template>
+                                  <template x-if="r.normalized.urlscan_details.apexDomain">
+                                    <div class="ti-field">
+                                      <div class="ti-field-label">Apex Domain</div>
+                                      <div class="ti-field-value font-mono" x-text="r.normalized.urlscan_details.apexDomain"></div>
+                                    </div>
+                                  </template>
+                                  <template x-if="r.normalized.urlscan_details.ip">
+                                    <div class="ti-field">
+                                      <div class="ti-field-label">IP Address</div>
+                                      <div class="ti-field-value font-mono" x-text="r.normalized.urlscan_details.ip"></div>
+                                    </div>
+                                  </template>
+                                  <template x-if="r.normalized.urlscan_details.country">
+                                    <div class="ti-field">
+                                      <div class="ti-field-label">Country</div>
+                                      <div class="ti-field-value" x-text="r.normalized.urlscan_details.country"></div>
+                                    </div>
+                                  </template>
+                                  <template x-if="r.normalized.urlscan_details.server">
+                                    <div class="ti-field">
+                                      <div class="ti-field-label">Server</div>
+                                      <div class="ti-field-value font-mono" x-text="r.normalized.urlscan_details.server"></div>
+                                    </div>
+                                  </template>
+                                  <template x-if="r.normalized.urlscan_details.language">
+                                    <div class="ti-field">
+                                      <div class="ti-field-label">Language</div>
+                                      <div class="ti-field-value" x-text="r.normalized.urlscan_details.language"></div>
+                                    </div>
+                                  </template>
+                                  <template x-if="r.normalized.urlscan_details.apexDomainAgeDays != null">
+                                    <div class="ti-field">
+                                      <div class="ti-field-label">Domain Age (days)</div>
+                                      <div class="ti-field-value" x-text="r.normalized.urlscan_details.apexDomainAgeDays"></div>
+                                    </div>
+                                  </template>
+                                  <template x-if="r.normalized.urlscan_details.redirected">
+                                    <div class="ti-field ti-field-warning">
+                                      <div class="ti-field-label">Redirected To</div>
+                                      <div class="ti-field-value font-mono" style="word-break:break-all;" x-text="r.normalized.urlscan_details.redirected"></div>
+                                    </div>
+                                  </template>
+                                  <template x-if="r.normalized.urlscan_details.total_results">
+                                    <div class="ti-field">
+                                      <div class="ti-field-label">Total Scans Found</div>
+                                      <div class="ti-field-value" x-text="r.normalized.urlscan_details.total_results"></div>
+                                    </div>
+                                  </template>
+                                </div>
+
+                                <!-- Full report link -->
+                                <template x-if="r.normalized.urlscan_details.result_url">
+                                  <a :href="r.normalized.urlscan_details.result_url" target="_blank" rel="noopener noreferrer"
+                                     class="btn btn-sm btn-secondary" style="width:100%;text-align:center;display:block;">
+                                    🔗 Open Full URLscan Report ↗
+                                  </a>
                                 </template>
                               </div>
                             </template>
