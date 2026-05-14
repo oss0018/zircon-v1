@@ -10,6 +10,9 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('deepSearchPage', () => ({
     // Tabs
     activeTab: 'tree',   // 'tree' | 'search' | 'viewer'
+    isAdminUser: false,
+    foldersCollapsed: false,
+    folderTreeCollapsed: false,
 
     // File tree
     treeData: null,
@@ -57,9 +60,17 @@ document.addEventListener('alpine:init', () => {
     ctxMenu: { show: false, x: 0, y: 0, item: null },
 
     async init() {
+      this.isAdminUser = window._currentUser?.role === 'admin';
+      this.foldersCollapsed = localStorage.getItem('dsf_collapsed') === 'true';
+      this.folderTreeCollapsed = localStorage.getItem('dstree_collapsed') === 'true';
+      if (!this.isAdminUser) {
+        this.activeTab = 'search';
+      }
       this._searchCache = new Map();
       await this.loadFolders();
-      await this.loadTree();
+      if (this.isAdminUser) {
+        await this.loadTree();
+      }
       this._setupSentinel();
 
       // Global listeners for context menu dismissal
@@ -73,6 +84,7 @@ document.addEventListener('alpine:init', () => {
     // ── Tree ──────────────────────────────────────────────────────────────
 
     async loadTree() {
+      if (!this.isAdminUser) return;
       this.treeLoading = true;
       try {
         this.treeData = await api.get('/deep-search/tree');
@@ -180,6 +192,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     async uploadFolder() {
+      if (!this.isAdminUser) return;
       const input = document.getElementById('ds-folder-input');
       if (!input.files.length) return;
       if (!this.uploadFolderName.trim()) {
@@ -217,6 +230,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     async deleteFolder(name) {
+      if (!this.isAdminUser) return;
       if (!confirm(`Delete folder "${name}" and all its contents?`)) return;
       try {
         await api.delete(`/deep-search/folder/${encodeURIComponent(name)}`);
@@ -392,6 +406,49 @@ document.addEventListener('alpine:init', () => {
       this.openFile(filePath);
     },
 
+    toggleFoldersPanel() {
+      this.foldersCollapsed = !this.foldersCollapsed;
+      localStorage.setItem('dsf_collapsed', this.foldersCollapsed ? 'true' : 'false');
+    },
+
+    toggleFolderTreePanel() {
+      this.folderTreeCollapsed = !this.folderTreeCollapsed;
+      localStorage.setItem('dstree_collapsed', this.folderTreeCollapsed ? 'true' : 'false');
+    },
+
+    async _downloadPath(filePath, useWatermark) {
+      const token = localStorage.getItem('zircon_token');
+      const endpoint = useWatermark ? '/deep-search/download-watermark' : '/deep-search/download';
+      const resp = await fetch(`/api/v1${endpoint}?path=${encodeURIComponent(filePath)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!resp.ok) {
+        let message = `Download failed (${resp.status})`;
+        try {
+          const err = await resp.json();
+          message = err.detail || message;
+        } catch {}
+        throw new Error(message);
+      }
+      const blob = await resp.blob();
+      const fileName = filePath.split('/').pop() || 'download';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = useWatermark ? `[REVIEW_ONLY]_${fileName}` : fileName;
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(a.href);
+      document.body.removeChild(a);
+    },
+
+    async downloadSearchResult(filePath) {
+      try {
+        await this._downloadPath(filePath, !this.isAdminUser);
+      } catch (e) {
+        showToast(e.message || 'Download failed', 'error');
+      }
+    },
+
     // ── Context Menu ──────────────────────────────────────────────────────
 
     showContextMenu(event, item) {
@@ -439,20 +496,15 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    ctxDownload() {
+    async ctxDownload() {
       const item = this.ctxMenu.item;
       this.closeContextMenu();
       if (!item || item.type !== 'file') return;
-      const token = localStorage.getItem('zircon_token');
-      const a = document.createElement('a');
-      a.href = `/api/v1/deep-search/file?path=${encodeURIComponent(item.path)}&token=${encodeURIComponent(token || '')}`;
-      a.download = item.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      await this._downloadPath(item.path, !this.isAdminUser);
     },
 
     async ctxDelete() {
+      if (!this.isAdminUser) return;
       const item = this.ctxMenu.item;
       this.closeContextMenu();
       if (!item) return;

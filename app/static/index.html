@@ -3078,7 +3078,7 @@
 
               <!-- Tab switcher -->
               <div class="flex gap-2 mb-4" style="border-bottom:1px solid var(--border-color);padding-bottom:10px;">
-                <button class="btn btn-sm" :class="activeTab==='tree' ? 'btn-primary' : 'btn-secondary'"
+                <button x-show="isAdminUser" class="btn btn-sm" :class="activeTab==='tree' ? 'btn-primary' : 'btn-secondary'"
                         @click="activeTab='tree'">📁 Folder File Tree</button>
                 <button class="btn btn-sm" :class="activeTab==='search' ? 'btn-primary' : 'btn-secondary'"
                         @click="activeTab='search'">🔍 Deep Search</button>
@@ -3090,7 +3090,7 @@
               <div x-show="activeTab==='tree'">
 
                 <!-- Upload toolbar -->
-                <div class="card mb-4">
+                <div class="card mb-4" x-show="isAdminUser">
                   <div class="card-title">Upload Folder</div>
                   <div class="flex gap-2 items-center flex-wrap">
                     <input class="form-input" type="text" x-model="uploadFolderName"
@@ -3113,8 +3113,11 @@
                 <!-- Folder list with delete -->
                 <template x-if="folders.length > 0">
                   <div class="card mb-4">
-                    <div class="card-title">Folders</div>
-                    <table class="table">
+                    <div class="card-title flex items-center justify-between">
+                      <span>Folders</span>
+                      <button class="btn btn-sm btn-secondary" @click="toggleFoldersPanel()" x-text="foldersCollapsed ? '▶' : '▼'"></button>
+                    </div>
+                    <table class="table" x-show="!foldersCollapsed">
                       <thead><tr>
                         <th>Name</th><th>Files</th><th>Size</th><th>Created</th><th></th>
                       </tr></thead>
@@ -3126,7 +3129,7 @@
                             <td x-text="formatSize(f.size_bytes)"></td>
                             <td x-text="f.created_at ? f.created_at.substring(0,10) : '—'"></td>
                             <td>
-                              <button class="btn btn-sm btn-danger" @click="deleteFolder(f.name)">🗑 Delete</button>
+                              <button class="btn btn-sm btn-danger" @click="deleteFolder(f.name)" x-show="isAdminUser">🗑 Delete</button>
                             </td>
                           </tr>
                         </template>
@@ -3136,15 +3139,19 @@
                 </template>
 
                 <!-- Tree view -->
-                <div class="card">
+                <div class="card" x-show="isAdminUser">
                   <div class="card-title flex justify-between items-center">
                     <div class="flex items-center gap-2">
                       <button x-show="navigationStack.length > 0" class="btn btn-sm btn-secondary"
                               @click="navBack()" title="Go back" style="padding:2px 8px;">← Back</button>
                       <span>Folder File Tree</span>
                     </div>
-                    <span x-show="treeLoading" class="spinner" style="width:14px;height:14px;"></span>
+                    <div class="flex items-center gap-2">
+                      <span x-show="treeLoading" class="spinner" style="width:14px;height:14px;"></span>
+                      <button class="btn btn-sm btn-secondary" @click="toggleFolderTreePanel()" x-text="folderTreeCollapsed ? '▶' : '▼'"></button>
+                    </div>
                   </div>
+                  <div x-show="!folderTreeCollapsed">
                   <!-- Breadcrumbs -->
                   <div class="ft-breadcrumbs" x-show="navBreadcrumbParts.length > 0">
                     <span class="crumb" @click="navToIndex(-1)">Home</span>
@@ -3240,6 +3247,7 @@
                   <template x-if="treeLoading">
                     <p class="text-muted text-sm">Loading...</p>
                   </template>
+                  </div>
                 </div>
               </div><!-- /tree tab -->
 
@@ -3311,6 +3319,8 @@
                       <div class="flex gap-2 items-center">
                         <span class="text-xs text-muted truncate" x-text="result.file_path" style="max-width:200px;"></span>
                         <button class="btn btn-sm btn-secondary" @click="openFileFromSearch(result.file_path)">Open</button>
+                        <button class="btn btn-sm btn-secondary" @click="downloadSearchResult(result.file_path)"
+                                x-text="isAdminUser ? 'Download' : 'Download (watermark)'"></button>
                       </div>
                     </div>
                     <div x-show="isResultExpanded(result.file_path)" style="font-family:'JetBrains Mono',monospace;font-size:12px;">
@@ -3423,8 +3433,8 @@
                 <button class="context-menu-item" @click="ctxCopyPath()">📋 Copy path</button>
                 <hr class="context-menu-sep">
                 <button class="context-menu-item" @click="ctxDownload()"
-                        x-show="ctxMenu.item && ctxMenu.item.type==='file'">⬇️ Download</button>
-                <button class="context-menu-item danger" @click="ctxDelete()">🗑️ Delete</button>
+                        x-show="ctxMenu.item && ctxMenu.item.type==='file'" x-text="isAdminUser ? '⬇️ Download' : '⬇️ Download (watermark)'"></button>
+                <button class="context-menu-item danger" @click="ctxDelete()" x-show="isAdminUser">🗑️ Delete</button>
               </div>
 
             </div><!-- /deep-search -->

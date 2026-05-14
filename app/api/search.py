@@ -31,10 +31,11 @@ async def run_search(query: SearchQuery, db: AsyncSession = Depends(get_db),
                 limit=query.limit,
                 offset=query.offset,
                 fuzzy=query.fuzzy,
+                source="local",
             )
             for hit in local_hits:
                 results.append({
-                    "source": "local",
+                    "source": hit.get("source", "local"),
                     "score": hit.get("score", 0),
                     "data": hit,
                     "cached": False,
@@ -67,7 +68,7 @@ async def run_search(query: SearchQuery, db: AsyncSession = Depends(get_db),
     if query.source in ("deep_search", "all"):
         try:
             from app.services.deep_search_service import search_deep_data
-            ds_hits = await search_deep_data(query.query, limit=200)
+            ds_hits = await search_deep_data(query.query, limit=200, use_index=True)
             for hit in ds_hits:
                 results.append({
                     "source": "deep_search",

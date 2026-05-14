@@ -13,6 +13,7 @@ import whoosh.qparser
 from whoosh import index as whoosh_index
 from whoosh.analysis import RegexTokenizer, LowercaseFilter
 from whoosh.fields import Schema, TEXT, ID, DATETIME, STORED
+from whoosh.query import Term
 from whoosh.qparser import MultifieldParser
 from whoosh.writing import AsyncWriter
 
@@ -29,6 +30,7 @@ SCHEMA = Schema(
     filename=TEXT(stored=True, analyzer=cyrillic_analyzer),
     content=TEXT(stored=False, analyzer=cyrillic_analyzer),
     content_raw=STORED(),
+    source=ID(stored=True),
     file_type=ID(stored=True),
     project=TEXT(stored=True),
     path=TEXT(stored=True, analyzer=cyrillic_analyzer),
@@ -42,7 +44,9 @@ _QUERY_OPERATORS = frozenset(["AND", "OR", "NOT", '"', "*", "?", "~"])
 _MAX_CONTENT_CHARS = 10 * 1024 * 1024
 
 # Characters stored in content_raw snippet
-_CONTENT_RAW_MAXCHARS = 500
+_CONTENT_RAW_MAXCHARS = 2000
+
+_SNIPPET_CONTEXT_CHARS = 100
 
 # Edit distance used for fuzzy term matching
 _FUZZY_EDIT_DISTANCE = 1
@@ -62,6 +66,7 @@ class SearchEngine:
                 # Recreate index if schema fields changed (e.g. added content_raw or cyrillic_analyzer)
                 needs_migration = (
                     "content_raw" not in existing_fields
+                    or "source" not in existing_fields
                     or not isinstance(ix.schema.fields().get("path"), TEXT)
                 )
                 if needs_migration:
@@ -88,7 +93,8 @@ class SearchEngine:
         return self._ix
 
     def index_document(self, doc_id: str, filename: str, content: str,
-                       file_type: str = "", project: str = "", path: str = ""):
+                       file_type: str = "", project: str = "", path: str = "",
+                       source: str = "local"):
         # Normalize whitespace
         content = content or ""
         content = re.sub(r'[ \t]+', ' ', content)
@@ -103,6 +109,7 @@ class SearchEngine:
             filename=filename,
             content=content,
             content_raw=content_raw,
+            source=source,
             file_type=file_type,
             project=project,
             path=path,
@@ -115,8 +122,41 @@ class SearchEngine:
         writer.delete_by_term("id", doc_id)
         writer.commit()
 
+    def _build_snippet(self, content_raw: str, query_str: str) -> str:
+        content_raw = content_raw or ""
+        if not content_raw:
+            return ""
+        query_norm = (query_str or "").strip().lower()
+        search_candidates: List[str] = []
+        if query_norm:
+            search_candidates.append(query_norm)
+            search_candidates.extend([term for term in query_norm.split() if term and term not in search_candidates])
+        lower_content = content_raw.lower()
+        match_idx = -1
+        match_len = 0
+        for candidate in search_candidates:
+            idx = lower_content.find(candidate)
+            if idx >= 0:
+                match_idx = idx
+                match_len = len(candidate)
+                break
+
+        if match_idx < 0:
+            snippet = content_raw[: _SNIPPET_CONTEXT_CHARS * 2]
+            return snippet + ("…" if len(content_raw) > len(snippet) else "")
+
+        start = max(0, match_idx - _SNIPPET_CONTEXT_CHARS)
+        end = min(len(content_raw), match_idx + max(match_len, 1) + _SNIPPET_CONTEXT_CHARS)
+        snippet = content_raw[start:end]
+        if start > 0:
+            snippet = "…" + snippet
+        if end < len(content_raw):
+            snippet = snippet + "…"
+        return snippet
+
     def search(self, query_str: str, limit: int = 50, offset: int = 0,
-               fuzzy: bool = True, fields: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+               fuzzy: bool = True, fields: Optional[List[str]] = None,
+               source: Optional[str] = None) -> List[Dict[str, Any]]:
         results = []
         with self.ix.searcher() as searcher:
             search_fields = fields or ["filename", "content", "path"]
@@ -141,13 +181,15 @@ class SearchEngine:
                     query = parser.parse(query_str.replace(":", " "))
                 except Exception:
                     return results
-            hits = searcher.search(query, limit=offset + limit)
+            source_filter = Term("source", source) if source else None
+            hits = searcher.search(query, limit=offset + limit, filter=source_filter)
             for hit in list(hits)[offset:offset + limit]:
                 content_raw = hit.get("content_raw", "") or ""
-                snippet = content_raw[:200]
+                snippet = self._build_snippet(content_raw, query_str)
                 results.append({
                     "id": hit["id"],
                     "filename": hit.get("filename", ""),
+                    "source": hit.get("source", ""),
                     "file_type": hit.get("file_type", ""),
                     "project": hit.get("project", ""),
                     "path": hit.get("path", ""),
