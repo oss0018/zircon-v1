@@ -1,6 +1,7 @@
 """
 Deep Search Service — search through files in deep_search_data/ directory.
 """
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,7 @@ SUPPORTED_TEXT_EXTS = {
 }
 
 _MAX_TOTAL_MATCHES = 1000
+logger = logging.getLogger(__name__)
 
 
 def _get_deep_search_dir() -> Path:
@@ -96,6 +98,7 @@ async def search_deep_data(
         except Exception:
             indexed_results = []
             indexed_paths = set()
+            logger.warning("Deep search index lookup failed; falling back to grep scan", exc_info=True)
 
     loop = asyncio.get_event_loop()
     grep_results, _ = await loop.run_in_executor(

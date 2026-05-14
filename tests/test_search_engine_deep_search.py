@@ -15,7 +15,6 @@ def test_snippet_uses_query_context():
 
 
 def test_search_filters_by_source_and_returns_source(tmp_path, monkeypatch):
-    old_index_dir = settings.whoosh_index_dir
     index_dir = tmp_path / "whoosh"
     monkeypatch.setattr(settings, "whoosh_index_dir", str(index_dir))
     engine = SearchEngine()
@@ -40,6 +39,5 @@ def test_search_filters_by_source_and_returns_source(tmp_path, monkeypatch):
         assert hits[0]["id"] == "ds-1"
         assert hits[0]["source"] == "deep_search"
     finally:
-        monkeypatch.setattr(settings, "whoosh_index_dir", old_index_dir)
         if Path(index_dir).exists():
             shutil.rmtree(index_dir, ignore_errors=True)

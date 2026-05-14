@@ -17,6 +17,7 @@ from app.api.auth import get_current_user, get_admin_user
 from app.config import settings
 from app.models import User
 from app.services.indexer import index_deep_search_folder, deep_search_doc_id
+from app.services.search_engine import search_engine
 from app.utils.sanitize import sanitize_filename
 
 router = APIRouter()
@@ -39,6 +40,9 @@ def _base_dir() -> Path:
 
 def _safe_resolve(base: Path, rel: str) -> Path:
     """Resolve *rel* inside *base* and raise 400 if path escapes *base*."""
+    rel = str(rel or "").replace("\\", "/")
+    if rel.startswith("/") or rel.startswith("../") or "/../" in f"/{rel}/":
+        raise HTTPException(status_code=400, detail="Path traversal detected")
     target = (base / rel).resolve()
     try:
         target.relative_to(base)
@@ -382,7 +386,6 @@ async def delete_folder(
             continue
         relative_path = f"{safe_folder}/{item.relative_to(folder_path).as_posix()}"
         try:
-            from app.services.search_engine import search_engine
             search_engine.delete_document(deep_search_doc_id(relative_path))
         except Exception:
             logger.warning("Failed to remove deep-search document from index: %s", relative_path, exc_info=True)

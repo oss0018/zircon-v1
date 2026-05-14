@@ -1,9 +1,11 @@
 import asyncio
 
 from app.services import indexer
+from app.config import settings
 
 
 def test_index_deep_search_folder_indexes_text_files_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "deep_search_dir", str(tmp_path))
     folder = tmp_path / "sample"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "a.txt").write_text("alpha", encoding="utf-8")

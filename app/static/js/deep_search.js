@@ -423,7 +423,7 @@ document.addEventListener('alpine:init', () => {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!resp.ok) {
-        let message = 'Download failed';
+        let message = `Download failed (${resp.status})`;
         try {
           const err = await resp.json();
           message = err.detail || message;

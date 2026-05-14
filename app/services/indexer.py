@@ -6,9 +6,11 @@ import hashlib
 from pathlib import Path
 from typing import Optional
 
+from app.config import settings
 from app.services.deep_search_service import SUPPORTED_TEXT_EXTS
 from app.services.file_parsers import extract_text, extract_text_streaming, MAX_INDEX_BYTES
 from app.services.search_engine import search_engine
+from app.utils.sanitize import sanitize_filename
 
 
 async def compute_checksum(file_path: str) -> str:
@@ -64,18 +66,27 @@ def deep_search_doc_id(relative_path: str) -> str:
 
 async def index_deep_search_folder(folder_path: str, folder_name: str) -> int:
     root = Path(folder_path)
+    base = Path(settings.deep_search_dir).resolve()
+    safe_folder = sanitize_filename(folder_name)
+    if not safe_folder:
+        return 0
     if not root.exists() or not root.is_dir():
+        return 0
+    try:
+        root_resolved = root.resolve()
+        root_resolved.relative_to(base)
+    except Exception:
         return 0
 
     loop = asyncio.get_event_loop()
     indexed = 0
-    for file_path in root.rglob("*"):
+    for file_path in root_resolved.rglob("*"):
         if not file_path.is_file():
             continue
         if file_path.suffix.lower() not in SUPPORTED_TEXT_EXTS:
             continue
 
-        relative_path = f"{folder_name}/{file_path.relative_to(root).as_posix()}"
+        relative_path = f"{safe_folder}/{file_path.relative_to(root_resolved).as_posix()}"
         file_size = file_path.stat().st_size if file_path.exists() else 0
         if file_size > MAX_INDEX_BYTES:
             content = await loop.run_in_executor(None, extract_text_streaming, str(file_path))
@@ -89,7 +100,7 @@ async def index_deep_search_folder(folder_path: str, folder_name: str) -> int:
             filename=file_path.name,
             content=content,
             file_type=file_path.suffix.lstrip("."),
-            project=folder_name,
+            project=safe_folder,
             path=relative_path,
             source="deep_search",
         )
