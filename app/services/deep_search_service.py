@@ -53,6 +53,7 @@ async def search_deep_data(
     query: str,
     folder: Optional[str] = None,
     limit: int = 200,
+    use_index: bool = True,
 ) -> list:
     """Search through files in deep_search_data/ directory.
 
@@ -65,12 +66,47 @@ async def search_deep_data(
         return []
 
     effective_limit = min(limit, _MAX_TOTAL_MATCHES)
+    indexed_results = []
+    indexed_paths = set()
+
+    if use_index:
+        try:
+            from app.services.search_engine import search_engine
+            indexed_hits = search_engine.search(
+                query,
+                limit=effective_limit,
+                offset=0,
+                fuzzy=True,
+                fields=["filename", "content", "path"],
+                source="deep_search",
+            )
+            for hit in indexed_hits:
+                rel_path = str(hit.get("path") or "").replace("\\", "/")
+                if folder and not rel_path.startswith(f"{folder}/"):
+                    continue
+                if not rel_path:
+                    continue
+                indexed_paths.add(rel_path)
+                indexed_results.append({
+                    "file_path": rel_path,
+                    "file_name": hit.get("filename") or Path(rel_path).name,
+                    "matches": [{"line": 0, "text": hit.get("snippet", "")}],
+                    "match_count": 1,
+                })
+        except Exception:
+            indexed_results = []
+            indexed_paths = set()
 
     loop = asyncio.get_event_loop()
-    results, _ = await loop.run_in_executor(
+    grep_results, _ = await loop.run_in_executor(
         None, _sync_search, base, query, folder, effective_limit
     )
-    return results
+    merged = list(indexed_results)
+    for item in grep_results:
+        if item["file_path"] in indexed_paths:
+            continue
+        merged.append(item)
+    return merged[:effective_limit]
 
 
 def _sync_search(base: Path, query: str, folder: Optional[str], limit: int):

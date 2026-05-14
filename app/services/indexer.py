@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 from typing import Optional
 
+from app.services.deep_search_service import SUPPORTED_TEXT_EXTS
 from app.services.file_parsers import extract_text, extract_text_streaming, MAX_INDEX_BYTES
 from app.services.search_engine import search_engine
 
@@ -27,7 +28,7 @@ def _compute_checksum_sync(file_path: str) -> str:
 
 
 async def index_file(file_id: int, file_path: str, filename: str,
-                     file_type: str = "", project: str = "") -> bool:
+                     file_type: str = "", project: str = "", source: str = "local") -> bool:
     loop = asyncio.get_event_loop()
     try:
         file_size = Path(file_path).stat().st_size if Path(file_path).exists() else 0
@@ -44,6 +45,7 @@ async def index_file(file_id: int, file_path: str, filename: str,
             file_type=file_type,
             project=project,
             path=file_path,
+            source=source,
         )
         return True
     except Exception as e:
@@ -54,6 +56,46 @@ async def index_file(file_id: int, file_path: str, filename: str,
 async def remove_from_index(file_id: int):
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, search_engine.delete_document, str(file_id))
+
+
+def deep_search_doc_id(relative_path: str) -> str:
+    return f"deep_search::{relative_path.replace('\\', '/')}"
+
+
+async def index_deep_search_folder(folder_path: str, folder_name: str) -> int:
+    root = Path(folder_path)
+    if not root.exists() or not root.is_dir():
+        return 0
+
+    loop = asyncio.get_event_loop()
+    indexed = 0
+    for file_path in root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() not in SUPPORTED_TEXT_EXTS:
+            continue
+
+        relative_path = f"{folder_name}/{file_path.relative_to(root).as_posix()}"
+        file_size = file_path.stat().st_size if file_path.exists() else 0
+        if file_size > MAX_INDEX_BYTES:
+            content = await loop.run_in_executor(None, extract_text_streaming, str(file_path))
+        else:
+            content = await loop.run_in_executor(None, extract_text, str(file_path))
+        if content is None:
+            content = ""
+
+        search_engine.index_document(
+            doc_id=deep_search_doc_id(relative_path),
+            filename=file_path.name,
+            content=content,
+            file_type=file_path.suffix.lstrip("."),
+            project=folder_name,
+            path=relative_path,
+            source="deep_search",
+        )
+        indexed += 1
+
+    return indexed
 
 
 async def scan_monitored_dir(monitored_dir: str, db_session_factory) -> int:
@@ -81,6 +123,7 @@ async def scan_monitored_dir(monitored_dir: str, db_session_factory) -> int:
                 file_type=f.suffix.lstrip("."),
                 project="monitored",
                 path=str(f),
+                source="monitored",
             )
             count += 1
     return count

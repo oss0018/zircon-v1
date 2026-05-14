@@ -1,6 +1,8 @@
 """
 Deep Search API — upload folders, browse file trees, search content.
 """
+import asyncio
+import logging
 import os
 import shutil
 from datetime import datetime
@@ -9,13 +11,16 @@ from typing import List, Optional
 
 import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi.responses import FileResponse, Response
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_admin_user
 from app.config import settings
 from app.models import User
+from app.services.indexer import index_deep_search_folder, deep_search_doc_id
 from app.utils.sanitize import sanitize_filename
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _MAX_FILES = 10_000
 _MAX_TOTAL_SIZE = 500 * 1024 * 1024  # 500 MB
@@ -78,7 +83,7 @@ def _build_tree(path: Path, base: Path) -> dict:
 async def upload_folder(
     folder_name: str = Form(...),
     files: List[UploadFile] = File(...),
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_admin_user),
 ):
     """Upload multiple files into a named folder inside deep_search_data/."""
     safe_folder = sanitize_filename(folder_name)
@@ -122,17 +127,20 @@ async def upload_folder(
 
         saved_paths.append(str(dest_path.relative_to(base)))
 
+    asyncio.create_task(_index_uploaded_folder(str(dest_root), safe_folder))
+
     return {
         "folder": safe_folder,
         "files_count": len(saved_paths),
         "files": saved_paths,
+        "indexing_started": True,
     }
 
 
 # ── File tree ──────────────────────────────────────────────────────────────────
 
 @router.get("/tree")
-async def get_tree(_: User = Depends(get_current_user)):
+async def get_tree(_: User = Depends(get_admin_user)):
     """Return the full directory tree of deep_search_data/."""
     base = _base_dir()
     if not base.exists():
@@ -143,7 +151,7 @@ async def get_tree(_: User = Depends(get_current_user)):
 @router.get("/tree/{folder_name}")
 async def get_folder_tree(
     folder_name: str,
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_admin_user),
 ):
     """Return the directory tree for a specific top-level folder."""
     safe_folder = sanitize_filename(folder_name)
@@ -238,6 +246,63 @@ async def read_file(
     }
 
 
+@router.get("/download-watermark")
+async def download_watermark(
+    path: str = Query(..., description="Relative path inside deep_search_data/"),
+    _: User = Depends(get_current_user),
+):
+    base = _base_dir()
+    abs_path = _safe_resolve(base, path)
+
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = abs_path.suffix.lower()
+    original_name = abs_path.name
+
+    if ext in _TEXT_EXTS:
+        try:
+            content = abs_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Cannot read file")
+        watermarked = (
+            "[WATERMARK: For review only. Unauthorized distribution prohibited.]\n\n"
+            f"{content}\n\n"
+            "[END OF WATERMARKED DOCUMENT]"
+        )
+        headers = {
+            "Content-Disposition": f'attachment; filename="{original_name}"',
+        }
+        return Response(content=watermarked, media_type="text/plain; charset=utf-8", headers=headers)
+
+    headers = {
+        "X-Watermark": "CONFIDENTIAL - FOR REVIEW ONLY",
+        "Content-Disposition": f'attachment; filename="[REVIEW_ONLY]_{original_name}"',
+    }
+    return FileResponse(
+        str(abs_path),
+        media_type="application/octet-stream",
+        filename=f"[REVIEW_ONLY]_{original_name}",
+        headers=headers,
+    )
+
+
+@router.get("/download")
+async def download_file(
+    path: str = Query(..., description="Relative path inside deep_search_data/"),
+    _: User = Depends(get_current_user),
+):
+    base = _base_dir()
+    abs_path = _safe_resolve(base, path)
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        str(abs_path),
+        media_type="application/octet-stream",
+        filename=abs_path.name,
+    )
+
+
 # ── Content search ─────────────────────────────────────────────────────────────
 
 @router.post("/search")
@@ -261,7 +326,7 @@ async def search_deep(
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
-    results = await search_deep_data(query=query, folder=folder, limit=1000)
+    results = await search_deep_data(query=query, folder=folder, limit=1000, use_index=True)
 
     total_matches = sum(r["match_count"] for r in results)
     return {
@@ -300,7 +365,7 @@ async def list_folders(_: User = Depends(get_current_user)):
 @router.delete("/folder/{folder_name}")
 async def delete_folder(
     folder_name: str,
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_admin_user),
 ):
     """Delete a folder and all its contents."""
     safe_folder = sanitize_filename(folder_name)
@@ -312,5 +377,23 @@ async def delete_folder(
     if not folder_path.is_dir():
         raise HTTPException(status_code=400, detail="Not a directory")
 
+    for item in folder_path.rglob("*"):
+        if not item.is_file():
+            continue
+        relative_path = f"{safe_folder}/{item.relative_to(folder_path).as_posix()}"
+        try:
+            from app.services.search_engine import search_engine
+            search_engine.delete_document(deep_search_doc_id(relative_path))
+        except Exception:
+            logger.warning("Failed to remove deep-search document from index: %s", relative_path, exc_info=True)
+
     shutil.rmtree(folder_path)
     return {"ok": True, "deleted": safe_folder}
+
+
+async def _index_uploaded_folder(folder_path: str, folder_name: str) -> None:
+    try:
+        indexed = await index_deep_search_folder(folder_path, folder_name)
+        logger.info("Indexed deep-search folder '%s': %s files", folder_name, indexed)
+    except Exception:
+        logger.exception("Failed to index uploaded deep-search folder '%s'", folder_name)
