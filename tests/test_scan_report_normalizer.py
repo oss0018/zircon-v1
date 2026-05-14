@@ -152,6 +152,45 @@ class TestURLscanSearch:
         assert report["scan_count"] == 3
         assert "2/3" in report.get("multi_scan_summary", "")
 
+    def test_screenshot_url_from_screenshot_field(self):
+        """screenshot_url is taken directly when screenshot field is present."""
+        raw = {"total": 1, "results": [self._make_result()]}
+        report = _norm("urlscan", raw)
+        assert report["screenshot_url"] == "https://urlscan.io/screenshots/uuid.png"
+
+    def test_screenshot_url_fallback_from_uuid(self):
+        """screenshot_url is derived from task.uuid when screenshot field is absent."""
+        result = self._make_result()
+        del result["screenshot"]
+        raw = {"total": 1, "results": [result]}
+        report = _norm("urlscan", raw)
+        assert report["screenshot_url"] == "https://urlscan.io/screenshots/uuid.png"
+
+    def test_screenshot_url_none_when_no_screenshot_and_no_uuid(self):
+        """screenshot_url is None when both screenshot and uuid are absent."""
+        result = self._make_result()
+        del result["screenshot"]
+        result["task"].pop("uuid", None)
+        raw = {"total": 1, "results": [result]}
+        report = _norm("urlscan", raw)
+        assert report["screenshot_url"] is None
+
+    def test_urlscan_details_populated(self):
+        """urlscan_details dict is populated with all expected fields."""
+        raw = {"total": 1, "results": [self._make_result()]}
+        report = _norm("urlscan", raw)
+        details = report["urlscan_details"]
+        assert details is not None
+        assert details["domain"] == "example.com"
+        assert details["country"] == "US"
+        assert details["server"] == "ECS"
+        assert details["ip"] == "93.184.216.34"
+        assert details["apexDomain"] == "example.com"
+        assert details["result_url"] == "https://urlscan.io/result/uuid/"
+        assert details["screenshot_url"] == "https://urlscan.io/screenshots/uuid.png"
+        assert details["uuid"] == "uuid"
+        assert details["total_results"] == 1
+
 
 # ---------------------------------------------------------------------------
 # urlscan — scan submission response
