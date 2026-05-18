@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict, Literal
 from datetime import datetime
 from pydantic_core import PydanticCustomError
 import html as _html
@@ -445,6 +445,141 @@ class OwnedDomainOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Social Listening ───────────────────────────────────────────────────────────
+class SLRuleCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    brand_id: int
+    brand_terms: List[str] = []
+    hashtags: List[str] = []
+    exclusions: List[str] = []
+    languages: List[str] = ["uk", "ru", "en"]
+    platforms: List[str] = []
+    severity_threshold: int = Field(2, ge=1, le=5)
+    alert_on: str = "EVERY_MENTION"
+    schedule_cron: str = "*/15 * * * *"
+    store_all: bool = False
+    active: bool = True
+
+    @field_validator("name", "alert_on", "schedule_cron")
+    @classmethod
+    def sanitize_text_fields(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=200)
+
+    @field_validator("brand_terms", "hashtags", "exclusions", "languages", "platforms")
+    @classmethod
+    def sanitize_list_fields(cls, v: List[str]) -> List[str]:
+        return [_sanitize(str(item).strip(), max_length=200) for item in v if str(item).strip()]
+
+
+class SLRuleUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    brand_id: Optional[int] = None
+    brand_terms: Optional[List[str]] = None
+    hashtags: Optional[List[str]] = None
+    exclusions: Optional[List[str]] = None
+    languages: Optional[List[str]] = None
+    platforms: Optional[List[str]] = None
+    severity_threshold: Optional[int] = Field(None, ge=1, le=5)
+    alert_on: Optional[str] = None
+    schedule_cron: Optional[str] = None
+    store_all: Optional[bool] = None
+    active: Optional[bool] = None
+
+    @field_validator("name", "alert_on", "schedule_cron")
+    @classmethod
+    def sanitize_optional_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _sanitize(v.strip(), max_length=200)
+
+    @field_validator("brand_terms", "hashtags", "exclusions", "languages", "platforms")
+    @classmethod
+    def sanitize_optional_list_fields(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return v
+        return [_sanitize(str(item).strip(), max_length=200) for item in v if str(item).strip()]
+
+
+class SLRuleOut(BaseModel):
+    id: int
+    name: str
+    brand_id: int
+    brand_terms: List[str] = []
+    hashtags: List[str] = []
+    exclusions: List[str] = []
+    languages: List[str] = []
+    platforms: List[str] = []
+    severity_threshold: int
+    alert_on: str
+    schedule_cron: str
+    store_all: bool
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SLMentionOut(BaseModel):
+    id: int
+    rule_id: int
+    raw_id: Optional[int] = None
+    source_platform: str
+    source_url: str
+    source_channel: str
+    author_id: str
+    author_username: str
+    author_reach: int
+    content_raw: str
+    content_normalized: str
+    content_fingerprint: str
+    language: str
+    sentiment_label: str
+    sentiment_score: float
+    entities_json: str
+    matched_terms_json: str
+    threat_indicators_json: str
+    relevance_score: float
+    severity: int
+    engagement_json: str
+    status: str
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+    collected_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SLMentionStatusUpdate(BaseModel):
+    status: Literal["new", "reviewed", "fp", "escalated"]
+
+
+class SLAlertOut(BaseModel):
+    id: int
+    rule_id: int
+    mention_id: Optional[int] = None
+    alert_type: str
+    severity: int
+    title: str
+    body: str
+    channels_json: str
+    status: str
+    acknowledged_by: Optional[int] = None
+    acknowledged_at: Optional[datetime] = None
+    sent_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SLDashboardStats(BaseModel):
+    total_mentions: int
+    sentiment_breakdown: Dict[str, int] = {}
+    top_platforms: Dict[str, int] = {}
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────
