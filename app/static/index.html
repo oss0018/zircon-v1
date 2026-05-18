@@ -1688,7 +1688,7 @@
                       </div>
                       <!-- Primary actions -->
                       <div class="flex gap-2 flex-wrap mb-2">
-                        <button class="btn btn-sm btn-primary" @click="scanBrand(brand.id)" :disabled="scanning" x-text="t('scan')"></button>
+                        <button class="btn btn-sm btn-primary" @click="scanBrand(brand.id)" :disabled="brandRunning[brand.id]" x-text="t('scan')"></button>
                         <button class="btn btn-sm btn-secondary" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
                         <button class="btn btn-sm btn-secondary" title="Manage owned/trusted domains" @click="showOwnedDomainsFor(brand)">🛡</button>
                         <button class="btn btn-sm btn-danger" @click="deleteBrand(brand.id)">✕</button>
@@ -1712,24 +1712,28 @@
                           </select>
                           <button class="btn btn-sm btn-primary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="generateAndCheck(brand.id, brand.url, brand.generate_limit, brand.generate_mode)"
-                                  :disabled="checkProgress.running">
+                                  :disabled="brandRunning[brand.id]">
                             🔍 Generate &amp; Check
                           </button>
                         </div>
                         <!-- Row 2: File/import/recheck/export — flex-wrap so they never overflow -->
                         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-                          <label class="btn btn-sm btn-secondary" style="cursor:pointer;font-size:11px;padding:3px 8px;white-space:nowrap;">
+                          <label class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                                 :class="{ 'text-muted': brandRunning[brand.id] }"
+                                 :style="brandRunning[brand.id] ? 'pointer-events:none;opacity:0.6;cursor:not-allowed;' : 'cursor:pointer;'">
                             📄 Check from File
                             <input :id="`file-input-check-${brand.id}`" type="file" accept=".txt"
-                                   style="display:none;" @change="checkFromFile(brand.id, $event)" />
+                                   style="display:none;" :disabled="brandRunning[brand.id]" @change="checkFromFile(brand.id, $event)" />
                           </label>
-                          <label class="btn btn-sm btn-secondary" style="cursor:pointer;font-size:11px;padding:3px 8px;white-space:nowrap;">
+                          <label class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                                 :class="{ 'text-muted': brandRunning[brand.id] }"
+                                 :style="brandRunning[brand.id] ? 'pointer-events:none;opacity:0.6;cursor:not-allowed;' : 'cursor:pointer;'">
                             📥 Import .txt
-                            <input type="file" accept=".txt" style="display:none;" @change="scanFromFile(brand.id, $event)" />
+                            <input type="file" accept=".txt" style="display:none;" :disabled="brandRunning[brand.id]" @change="scanFromFile(brand.id, $event)" />
                           </label>
                           <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="recheckAlive(brand.id)"
-                                  :disabled="checkProgress.running">
+                                  :disabled="brandRunning[brand.id]">
                             🔄 Re-check
                           </button>
                           <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"

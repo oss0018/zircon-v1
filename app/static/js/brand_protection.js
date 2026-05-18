@@ -11,6 +11,7 @@ document.addEventListener('alpine:init', () => {
     showAlerts: false,
     activeBrand: null,
     scanning: false,
+    brandRunning: {},
     fileScanResults: [],
     showFileScanResults: false,
     // Progress state for async checks
@@ -154,6 +155,7 @@ document.addEventListener('alpine:init', () => {
 
     async scanBrand(id) {
       this.scanning = true;
+      this.brandRunning = { ...this.brandRunning, [id]: true };
       try {
         const result = await api.post(`/brands/${id}/scan`, {});
         showToast(`Scan complete: ${result.alerts_created} new alerts found`, 'success');
@@ -162,6 +164,7 @@ document.addEventListener('alpine:init', () => {
         showToast(e.message, 'error');
       } finally {
         this.scanning = false;
+        this.brandRunning = { ...this.brandRunning, [id]: false };
       }
     },
 
@@ -260,6 +263,7 @@ document.addEventListener('alpine:init', () => {
       const brandName = brand ? brand.name : '';
 
       this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
+      this.brandRunning = { ...this.brandRunning, [brandId]: true };
       this.selectedResults = new Set();
       this.showAlerts = true;
       showToast(`Generating up to ${limit} variants…`, 'info');
@@ -312,6 +316,7 @@ document.addEventListener('alpine:init', () => {
         showToast(e.message, 'error');
       } finally {
         this.checkProgress.running = false;
+        this.brandRunning = { ...this.brandRunning, [brandId]: false };
         showToast(`Check complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
         // Reload alerts to show persisted results
         if (this.activeBrand) {
@@ -341,6 +346,7 @@ document.addEventListener('alpine:init', () => {
       if (!file) return;
 
       this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
+      this.brandRunning = { ...this.brandRunning, [brandId]: true };
       this.selectedResults = new Set();
       showToast(`Uploading ${file.name}…`, 'info');
 
@@ -389,6 +395,7 @@ document.addEventListener('alpine:init', () => {
         showToast(e.message, 'error');
       } finally {
         this.checkProgress.running = false;
+        this.brandRunning = { ...this.brandRunning, [brandId]: false };
         showToast(`File check complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
         event.target.value = '';
         if (this.activeBrand) {
@@ -405,6 +412,7 @@ document.addEventListener('alpine:init', () => {
      */
     async recheckAlive(brandId) {
       this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
+      this.brandRunning = { ...this.brandRunning, [brandId]: true };
       showToast('Re-checking alive domains…', 'info');
 
       const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
@@ -444,6 +452,7 @@ document.addEventListener('alpine:init', () => {
         showToast(e.message, 'error');
       } finally {
         this.checkProgress.running = false;
+        this.brandRunning = { ...this.brandRunning, [brandId]: false };
         showToast(`Recheck complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
         if (this.activeBrand) {
           await this.loadBrandAlerts(this.activeBrand);
