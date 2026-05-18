@@ -409,9 +409,9 @@ async def check_from_file(
                 checked += 1
                 if result.get("alive"):
                     found_alive += 1
-                    if target_id and base_domain:
+                    if target_id:
                         try:
-                            await _save_check_result(db, target_id, base_domain, result)
+                            await _save_check_result(db, target_id, base_domain or brand_name or result["domain"], result)
                         except Exception as exc:
                             logger.warning("Failed to save check result for %s: %s", result.get("domain"), exc)
                 payload = {**result, "checked": checked, "total": total, "found_alive": found_alive}
@@ -810,7 +810,14 @@ async def create_brand_owned_domain(
     if not brand_res.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Brand not found")
 
-    raw_domain = sanitize_string(str(data.get("domain", "")).strip().lower(), max_length=512)
+    raw_domain = str(data.get("domain", "")).strip().lower()
+    # Normalise: strip scheme, path, query-string, and port
+    if "://" in raw_domain:
+        raw_domain = raw_domain.split("://", 1)[1]
+    raw_domain = raw_domain.split("/")[0].split("?")[0].split("#")[0]
+    if ":" in raw_domain:
+        raw_domain = raw_domain.split(":")[0]
+    raw_domain = sanitize_string(raw_domain.strip().rstrip("."), max_length=512)
     if not raw_domain:
         raise HTTPException(status_code=400, detail="domain is required")
     match_subdomains = bool(data.get("match_subdomains", True))

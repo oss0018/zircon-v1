@@ -78,9 +78,14 @@ document.addEventListener('alpine:init', () => {
     },
 
     async loadAllAlerts() {
+      // Clear per-brand owned-domain list so stale Trusted badges don't appear
+      // in the all-alerts view. loadAllAlerts is only called when activeBrand is null.
+      if (!this.activeBrand) this.ownedDomains = [];
       try {
         this.alerts = await api.get('/brands/alerts/all');
-      } catch (e) {}
+      } catch (e) {
+        console.warn('loadAllAlerts error:', e.message);
+      }
     },
 
     async loadBrandAlerts(brand) {
@@ -261,6 +266,7 @@ document.addEventListener('alpine:init', () => {
       }
       const brand = this.brands.find(b => b.id === brandId);
       const brandName = brand ? brand.name : '';
+      this.activeBrand = brand || null;
 
       this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
       this.brandRunning = { ...this.brandRunning, [brandId]: true };
@@ -277,6 +283,7 @@ document.addEventListener('alpine:init', () => {
         limit: Number(limit),
       });
 
+      let hadError = false;
       try {
         const resp = await fetch('/api/v1/brands/generate-check', {
           method: 'POST',
@@ -313,11 +320,12 @@ document.addEventListener('alpine:init', () => {
           }
         }
       } catch (e) {
+        hadError = true;
         showToast(e.message, 'error');
       } finally {
         this.checkProgress.running = false;
         this.brandRunning = { ...this.brandRunning, [brandId]: false };
-        showToast(`Check complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
+        if (!hadError) showToast(`Check complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
         // Reload alerts to show persisted results
         if (this.activeBrand) {
           await this.loadBrandAlerts(this.activeBrand);
@@ -345,6 +353,8 @@ document.addEventListener('alpine:init', () => {
       const file = event.target.files[0];
       if (!file) return;
 
+      const brand = this.brands.find(b => b.id === brandId);
+      this.activeBrand = brand || null;
       this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
       this.brandRunning = { ...this.brandRunning, [brandId]: true };
       this.selectedResults = new Set();
@@ -356,6 +366,7 @@ document.addEventListener('alpine:init', () => {
 
       const url = `/api/v1/brands/check-from-file${brandId ? `?target_id=${brandId}` : ''}`;
 
+      let hadError = false;
       try {
         const resp = await fetch(url, {
           method: 'POST',
@@ -392,11 +403,12 @@ document.addEventListener('alpine:init', () => {
           }
         }
       } catch (e) {
+        hadError = true;
         showToast(e.message, 'error');
       } finally {
         this.checkProgress.running = false;
         this.brandRunning = { ...this.brandRunning, [brandId]: false };
-        showToast(`File check complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
+        if (!hadError) showToast(`File check complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
         event.target.value = '';
         if (this.activeBrand) {
           await this.loadBrandAlerts(this.activeBrand);
@@ -411,12 +423,15 @@ document.addEventListener('alpine:init', () => {
      * @param {number} brandId
      */
     async recheckAlive(brandId) {
+      const brand = this.brands.find(b => b.id === brandId);
+      this.activeBrand = brand || null;
       this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
       this.brandRunning = { ...this.brandRunning, [brandId]: true };
       showToast('Re-checking alive domains…', 'info');
 
       const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
 
+      let hadError = false;
       try {
         const resp = await fetch(`/api/v1/brands/${brandId}/recheck-alive`, {
           method: 'POST',
@@ -442,6 +457,9 @@ document.addEventListener('alpine:init', () => {
                 this.checkProgress.checked = data.checked || 0;
                 this.checkProgress.total = data.total || 0;
                 this.checkProgress.foundAlive = data.found_alive || 0;
+                if (data.alive) {
+                  this.checkProgress.results.push(data);
+                }
               } catch (parseErr) { console.warn('SSE parse error:', parseErr); }
             } else if (line.startsWith('event: done')) {
               this.checkProgress.running = false;
@@ -449,11 +467,12 @@ document.addEventListener('alpine:init', () => {
           }
         }
       } catch (e) {
+        hadError = true;
         showToast(e.message, 'error');
       } finally {
         this.checkProgress.running = false;
         this.brandRunning = { ...this.brandRunning, [brandId]: false };
-        showToast(`Recheck complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
+        if (!hadError) showToast(`Recheck complete. Alive: ${this.checkProgress.foundAlive}`, 'success');
         if (this.activeBrand) {
           await this.loadBrandAlerts(this.activeBrand);
         } else {
@@ -673,7 +692,7 @@ document.addEventListener('alpine:init', () => {
 
     async addOwnedDomain() {
       if (!this.activeBrand) return;
-      const domain = this.newOwnedDomain.domain.trim();
+      const domain = this._normalizeDomain(this.newOwnedDomain.domain);
       if (!domain) return;
       try {
         await api.post(`/brands/${this.activeBrand.id}/owned-domains`, {
