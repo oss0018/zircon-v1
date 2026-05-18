@@ -21,6 +21,7 @@ import csv
 import io
 import json
 import logging
+import uuid as _uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -107,8 +108,9 @@ async def upload_logo(
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
-    # Path is constructed only from trusted integer brand_id and literal extension
-    dest = LOGOS_DIR / f"{brand_id}.{ext}"
+    # Path is constructed from a server-generated UUID token — no user input flows into it
+    logo_token = _uuid.uuid4().hex
+    dest = LOGOS_DIR / f"{logo_token}.{ext}"
 
     # Remove old logo if a different file exists
     if brand.logo_path:
