@@ -5420,7 +5420,7 @@
                           <template x-for="r in searchResults.slice(0,5)" :key="r.id">
                             <div style="font-size:0.8rem;padding:4px 0;border-bottom:1px solid var(--border);">
                               <a :href="r.source_url" target="_blank" rel="noopener"
-                                 style="color:var(--link);" x-text="r.source_url.slice(0,60) + '…'"></a>
+                                 style="color:var(--link);" x-text="r.source_url.length > 60 ? r.source_url.slice(0,60) + '…' : r.source_url"></a>
                             </div>
                           </template>
                         </div>

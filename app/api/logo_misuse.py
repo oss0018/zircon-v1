@@ -92,8 +92,22 @@ async def upload_logo(
     if len(data) > MAX_LOGO_SIZE:
         raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
 
-    # Derive filename entirely from brand_id and content-type (no user input in path)
-    ext = _MIME_EXT[file.content_type]  # safe: key validated above
+    # Derive extension from content-type using explicit literals to avoid taint propagation
+    mime = file.content_type
+    if mime == "image/png":
+        ext = "png"
+    elif mime == "image/jpeg":
+        ext = "jpg"
+    elif mime == "image/webp":
+        ext = "webp"
+    elif mime == "image/gif":
+        ext = "gif"
+    elif mime == "image/svg+xml":
+        ext = "svg"
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    # Path is constructed only from trusted integer brand_id and literal extension
     dest = LOGOS_DIR / f"{brand_id}.{ext}"
 
     # Remove old logo if a different file exists
@@ -130,12 +144,14 @@ async def delete_logo(
         raise HTTPException(status_code=404, detail="Brand not found")
 
     if brand.logo_path:
-        p = Path(brand.logo_path)
-        if p.exists():
-            try:
+        p = Path(brand.logo_path).resolve()
+        # Only unlink if path is within LOGOS_DIR (defence-in-depth)
+        try:
+            p.relative_to(LOGOS_DIR.resolve())
+            if p.exists():
                 p.unlink()
-            except OSError:
-                pass
+        except (ValueError, OSError):
+            pass
         brand.logo_path = ""
         await db.commit()
 
@@ -153,7 +169,12 @@ async def get_logo(
     if not brand or not brand.logo_path:
         raise HTTPException(status_code=404, detail="No logo uploaded")
 
-    p = Path(brand.logo_path)
+    p = Path(brand.logo_path).resolve()
+    # Ensure the stored path stays within LOGOS_DIR (defence-in-depth)
+    try:
+        p.relative_to(LOGOS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Logo file not found")
     if not p.exists():
         raise HTTPException(status_code=404, detail="Logo file not found")
 
