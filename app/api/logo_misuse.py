@@ -25,7 +25,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -80,7 +80,13 @@ async def upload_logo(
         raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
 
     safe_name = _safe_filename(file.filename or "logo")
-    dest = LOGOS_DIR / f"{brand_id}_{safe_name}"
+    dest = (LOGOS_DIR / f"{brand_id}_{safe_name}").resolve()
+
+    # Ensure the resolved destination stays within LOGOS_DIR (prevent path traversal)
+    try:
+        dest.relative_to(LOGOS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
     # Remove old logo if different path
     if brand.logo_path and brand.logo_path != str(dest):
@@ -207,8 +213,8 @@ async def search_brand_misuse(
             pass
 
     rss_feeds = [
-        f"https://news.google.com/rss/search?q={query}+logo",
-        f"https://www.bing.com/news/search?q={query}+logo&format=rss",
+        f"https://news.google.com/rss/search?q={quote_plus(query)}+logo",
+        f"https://www.bing.com/news/search?q={quote_plus(query)}+logo&format=rss",
     ]
 
     all_items: list[dict] = []
