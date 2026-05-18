@@ -8,11 +8,9 @@ protecting against XSS, path-traversal and other injection attacks.
 import html
 import logging
 import re
+from html.parser import HTMLParser
 
 logger = logging.getLogger(__name__)
-
-# Regex that matches any HTML/XML tag
-_HTML_TAG_RE = re.compile(r"<[^>]*>", re.DOTALL)
 
 # Regex for javascript: and data: URI schemes (case-insensitive, ignoring whitespace)
 _DANGEROUS_PROTO_RE = re.compile(r"(?i)(?:javascript|vbscript|data)\s*:", re.IGNORECASE)
@@ -25,6 +23,25 @@ _DOMAIN_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
 
 # Simple email format validation
 _EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
+
+
+class _TagStripper(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str):
+        self.parts.append(data)
+
+    def get_data(self) -> str:
+        return "".join(self.parts)
+
+
+def _strip_tags(value: str) -> str:
+    parser = _TagStripper()
+    parser.feed(value or "")
+    parser.close()
+    return parser.get_data()
 
 
 def sanitize_string(value: str, max_length: int = 2048) -> str:
@@ -47,8 +64,8 @@ def sanitize_string(value: str, max_length: int = 2048) -> str:
     # caught even if the surrounding tag structure is unusual)
     stripped = _DANGEROUS_PROTO_RE.sub("", value)
 
-    # Strip HTML/XML tags
-    stripped = _HTML_TAG_RE.sub("", stripped)
+    # Strip HTML/XML tags via HTMLParser (regex-free to avoid ReDoS risks)
+    stripped = _strip_tags(stripped)
 
     if stripped != original:
         logger.warning(
@@ -101,7 +118,7 @@ def sanitize_html(value: str) -> str:
         return key
 
     safe_saved = allowed_tag_re.sub(_save_allowed, value)
-    all_stripped = _HTML_TAG_RE.sub("", safe_saved)
+    all_stripped = _strip_tags(safe_saved)
     for key, original_tag in placeholder_map.items():
         all_stripped = all_stripped.replace(key, original_tag)
 

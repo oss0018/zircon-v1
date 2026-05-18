@@ -20,6 +20,7 @@ class PasteAdapter:
         "pastebin.com": "https://pastebin.com/search?q={term}",
         "pastes.io": "https://pastes.io/search?q={term}",
     }
+    _RATE_LIMIT_SECONDS = 6  # max 10 req/min per domain
 
     def __init__(self):
         self._last_request_at: dict[str, datetime] = {}
@@ -29,8 +30,8 @@ class PasteAdapter:
         if not last:
             return
         elapsed = (datetime.now(timezone.utc) - last).total_seconds()
-        if elapsed < 6:
-            await asyncio.sleep(6 - elapsed)
+        if elapsed < self._RATE_LIMIT_SECONDS:
+            await asyncio.sleep(self._RATE_LIMIT_SECONDS - elapsed)
 
     async def collect(self, rule: SocialListeningRule) -> list[dict]:
         try:

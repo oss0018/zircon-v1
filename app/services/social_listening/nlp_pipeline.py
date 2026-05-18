@@ -1,6 +1,7 @@
 import html
 import json
 import re
+from html.parser import HTMLParser
 from typing import Any
 
 from app.models import SLRawMention, SocialListeningRule
@@ -15,6 +16,26 @@ _EMAIL_RE = re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b")
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _PHONE_RE = re.compile(r"\+?\d[\d\s\-()]{7,}\d")
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_NEGATIVE_SCORE_STEP = 0.2
+
+
+class _TagStripper(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str):
+        self.parts.append(data)
+
+    def get_data(self) -> str:
+        return "".join(self.parts)
+
+
+def _strip_tags(value: str) -> str:
+    parser = _TagStripper()
+    parser.feed(value or "")
+    parser.close()
+    return parser.get_data()
 
 
 class NLPPipeline:
@@ -24,7 +45,7 @@ class NLPPipeline:
 
     def _normalize_text(self, text: str) -> str:
         plain = html.unescape(text or "")
-        plain = re.sub(r"<[^>]+>", " ", plain)
+        plain = _strip_tags(plain)
         plain = _URL_RE.sub(" URL ", plain)
         return re.sub(r"\s+", " ", plain).strip()
 
@@ -33,8 +54,9 @@ class NLPPipeline:
             from langdetect import detect  # type: ignore
 
             detected = detect(text or "")
-            if detected:
-                return detected[:5].lower()
+            normalized = (detected or "").strip().lower()
+            if normalized in {"en", "uk", "ru"}:
+                return normalized
         except Exception:
             pass
 
@@ -51,7 +73,7 @@ class NLPPipeline:
         negatives = sum(1 for w in words if w in lowered)
         if negatives == 0:
             return "NEU", 0.0
-        score = max(-1.0, -0.2 * negatives)
+        score = max(-1.0, -_NEGATIVE_SCORE_STEP * negatives)
         if score <= -0.4:
             return "NEG", score
         return "NEU", score

@@ -1,4 +1,5 @@
 import json
+import re
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,8 +70,12 @@ class AlertEngine:
         except Exception:
             brand_terms = []
 
-        author = (mention.author_username or "").lower()
-        if any(str(term).lower() in author for term in brand_terms if str(term).strip()):
+        author = mention.author_username or ""
+        if any(
+            re.search(rf"(?<![a-zA-Z0-9]){re.escape(str(term).strip())}(?![a-zA-Z0-9])", author, re.IGNORECASE)
+            for term in brand_terms
+            if str(term).strip()
+        ):
             alerts.append(
                 SLAlert(
                     rule_id=rule.id,
