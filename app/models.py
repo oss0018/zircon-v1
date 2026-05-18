@@ -211,6 +211,88 @@ class BrandAlert(Base):
     brand = relationship("Brand", back_populates="alerts")
 
 
+class SocialListeningRule(Base):
+    __tablename__ = "sl_rules"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    brand_id = Column(Integer, ForeignKey("brands.id"), nullable=False)
+    brand_terms = Column(Text, default="[]")
+    hashtags = Column(Text, default="[]")
+    exclusions = Column(Text, default="[]")
+    languages = Column(Text, default='["uk","ru","en"]')
+    platforms = Column(Text, default="[]")
+    severity_threshold = Column(Integer, default=2)
+    alert_on = Column(String(40), default="EVERY_MENTION")
+    schedule_cron = Column(String(100), default="*/15 * * * *")
+    store_all = Column(Boolean, default=False)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class SLRawMention(Base):
+    __tablename__ = "sl_raw_mentions"
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("sl_rules.id"), nullable=False)
+    source_platform = Column(String(50), nullable=False)
+    source_url = Column(Text, default="")
+    author_id = Column(String(200), default="")
+    author_username = Column(String(200), default="")
+    content_raw = Column(Text, default="")
+    content_fingerprint = Column(String(64), unique=True, nullable=False)
+    published_at = Column(DateTime, nullable=True)
+    collected_at = Column(DateTime, default=_utcnow)
+    status = Column(String(20), default="pending")
+
+
+class SLMention(Base):
+    __tablename__ = "sl_mentions"
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("sl_rules.id"), nullable=False)
+    raw_id = Column(Integer, ForeignKey("sl_raw_mentions.id"), nullable=True)
+    source_platform = Column(String(50), nullable=False)
+    source_url = Column(Text, default="")
+    source_channel = Column(String(200), default="")
+    author_id = Column(String(200), default="")
+    author_username = Column(String(200), default="")
+    author_reach = Column(Integer, default=0)
+    content_raw = Column(Text, default="")
+    content_normalized = Column(Text, default="")
+    content_fingerprint = Column(String(64), unique=True, nullable=False)
+    language = Column(String(20), default="unknown")
+    sentiment_label = Column(String(10), default="NEU")
+    sentiment_score = Column(Float, default=0.0)
+    entities_json = Column(Text, default="[]")
+    matched_terms_json = Column(Text, default="[]")
+    threat_indicators_json = Column(Text, default="{}")
+    relevance_score = Column(Float, default=0.0)
+    severity = Column(Integer, default=1)
+    engagement_json = Column(Text, default="{}")
+    status = Column(String(20), default="new")
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    published_at = Column(DateTime, nullable=True)
+    collected_at = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class SLAlert(Base):
+    __tablename__ = "sl_alerts"
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("sl_rules.id"), nullable=False)
+    mention_id = Column(Integer, ForeignKey("sl_mentions.id"), nullable=True)
+    alert_type = Column(String(40), nullable=False)
+    severity = Column(Integer, default=1)
+    title = Column(String(255), nullable=False)
+    body = Column(Text, default="")
+    channels_json = Column(Text, default="[]")
+    status = Column(String(20), default="pending")
+    acknowledged_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     id = Column(Integer, primary_key=True)
