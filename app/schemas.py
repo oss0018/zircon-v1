@@ -447,6 +447,55 @@ class OwnedDomainOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Logo Misuse ───────────────────────────────────────────────────────────────
+class LogoMisuseCaseCreate(BaseModel):
+    brand_id: int
+    source_url: str = Field(..., min_length=1)
+    page_title: str = ""
+    thumbnail_url: str = ""
+    match_type: str = "logo"
+    confidence: float = 0.0
+    description: str = ""
+    detection_source: str = "manual"
+
+    @field_validator("source_url", "page_title", "description")
+    @classmethod
+    def sanitize_fields(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=2048)
+
+
+class LogoMisuseCaseUpdate(BaseModel):
+    status: Optional[str] = None
+    description: Optional[str] = None
+    confidence: Optional[float] = None
+
+
+class LogoMisuseCaseOut(BaseModel):
+    id: int
+    brand_id: int
+    source_url: str
+    page_title: str
+    thumbnail_url: str
+    match_type: str
+    confidence: float
+    description: str
+    status: str
+    detection_source: str
+    evidence_json: str
+    reported_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class LogoMisuseStats(BaseModel):
+    total: int
+    by_status: dict
+    by_match_type: dict
+    by_brand: dict
+
+
 # ── Social Listening ───────────────────────────────────────────────────────────
 class SLRuleCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)

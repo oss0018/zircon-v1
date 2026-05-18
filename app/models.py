@@ -173,6 +173,7 @@ class Brand(Base):
     created_at = Column(DateTime, default=_utcnow)
     alerts = relationship("BrandAlert", back_populates="brand")
     owned_domains = relationship("OwnedDomain", back_populates="brand", cascade="all, delete-orphan")
+    logo_misuse_cases = relationship("LogoMisuseCase", back_populates="brand", cascade="all, delete-orphan")
 
 
 class OwnedDomain(Base):
@@ -209,6 +210,26 @@ class BrandAlert(Base):
     checked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
     brand = relationship("Brand", back_populates="alerts")
+
+
+class LogoMisuseCase(Base):
+    __tablename__ = "logo_misuse_cases"
+    id = Column(Integer, primary_key=True)
+    brand_id = Column(Integer, ForeignKey("brands.id"), nullable=False)
+    source_url = Column(Text, nullable=False)
+    page_title = Column(String(512), default="")
+    thumbnail_url = Column(Text, default="")
+    match_type = Column(String(50), default="logo")   # logo | text | domain | manual
+    confidence = Column(Float, default=0.0)
+    description = Column(Text, default="")
+    status = Column(String(20), default="new")        # new | reviewing | confirmed | dismissed | takedown_requested
+    detection_source = Column(String(50), default="manual")
+    evidence_json = Column(Text, default="{}")
+    reported_at = Column(DateTime, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    brand = relationship("Brand", back_populates="logo_misuse_cases")
 
 
 class SocialListeningRule(Base):

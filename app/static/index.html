@@ -26,6 +26,7 @@
   <script src="/static/js/threat_intel.js"></script>
   <script src="/static/js/ti_dashboard.js"></script>
   <script src="/static/js/storage_sources.js"></script>
+  <script src="/static/js/logo_misuse.js"></script>
 
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container"></div>
@@ -5225,31 +5226,270 @@
               </div>
             </div><!-- /infrastructure-intelligence -->
 
-            <div x-show="page === 'logo-content-misuse'">
+            <div x-show="page === 'logo-content-misuse'" x-data="logoMisusePage">
+
+              <!-- Page header -->
               <div class="flex justify-between items-center mb-4">
-                <div>
-                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;"
-                      x-text="t('logo_content_misuse')"></h2>
+                <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0;"
+                    x-text="t('logo_content_misuse')"></h2>
+                <div class="flex gap-2">
+                  <button class="btn btn-secondary btn-sm" @click="exportCases('csv')">Export CSV</button>
+                  <button class="btn btn-secondary btn-sm" @click="exportCases('json')">Export JSON</button>
+                  <button class="btn btn-primary btn-sm" @click="showAddModal = true">+ Add Case</button>
                 </div>
               </div>
 
-              <div class="card" style="padding:60px 40px;text-align:center;max-width:560px;margin:40px auto;">
-                <div style="margin-bottom:20px;">
-                  <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                       style="display:block;margin:0 auto;opacity:0.35;">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                          d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
-                  </svg>
+              <!-- Stats row -->
+              <div class="flex gap-2 mb-4" style="flex-wrap:wrap;">
+                <div class="card" style="flex:1;min-width:130px;padding:16px;text-align:center;">
+                  <div style="font-size:1.6rem;font-weight:700;" x-text="stats.total"></div>
+                  <div class="text-muted" style="font-size:0.8rem;">Total Cases</div>
                 </div>
-                <div style="font-size:1.3rem;font-weight:700;color:var(--text-primary);margin-bottom:10px;">
-                  In Development
+                <div class="card" style="flex:1;min-width:130px;padding:16px;text-align:center;">
+                  <div style="font-size:1.6rem;font-weight:700;color:var(--info);" x-text="stats.by_status.new || 0"></div>
+                  <div class="text-muted" style="font-size:0.8rem;">New</div>
                 </div>
-                <div class="text-muted" style="font-size:0.9rem;line-height:1.6;margin-bottom:24px;">
-                  Logo &amp; Content Misuse detection is currently under development.<br>
-                  This module will detect unauthorized use of your brand assets, logos, and content across the web.
+                <div class="card" style="flex:1;min-width:130px;padding:16px;text-align:center;">
+                  <div style="font-size:1.6rem;font-weight:700;color:var(--danger);" x-text="stats.by_status.confirmed || 0"></div>
+                  <div class="text-muted" style="font-size:0.8rem;">Confirmed</div>
                 </div>
-                <span class="badge badge-yellow" style="font-size:0.8rem;padding:6px 14px;">🚧 Coming Soon</span>
+                <div class="card" style="flex:1;min-width:130px;padding:16px;text-align:center;">
+                  <div style="font-size:1.6rem;font-weight:700;color:var(--purple,#7c3aed);" x-text="stats.by_status.takedown_requested || 0"></div>
+                  <div class="text-muted" style="font-size:0.8rem;">Takedown Sent</div>
+                </div>
               </div>
+
+              <!-- Two-column layout: brand logos | cases table -->
+              <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start;">
+
+                <!-- Left: Brand Logos panel -->
+                <div class="card" style="padding:16px;">
+                  <div style="font-weight:600;margin-bottom:12px;">Brand Logos</div>
+                  <template x-if="brands.length === 0">
+                    <div class="text-muted" style="font-size:0.85rem;">No brands found.</div>
+                  </template>
+                  <template x-for="brand in brands" :key="brand.id">
+                    <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;">
+                      <div style="font-weight:500;margin-bottom:6px;" x-text="brand.name"></div>
+                      <template x-if="brand.logo_path">
+                        <div style="margin-bottom:6px;">
+                          <img :src="'/api/v1/logo-misuse/brands/' + brand.id + '/logo'" alt="logo"
+                               style="max-height:48px;max-width:100%;border-radius:4px;object-fit:contain;" />
+                        </div>
+                      </template>
+                      <div class="flex gap-2" style="flex-wrap:wrap;">
+                        <label class="btn btn-secondary btn-xs" style="cursor:pointer;">
+                          <span x-text="uploadingLogo[brand.id] ? 'Uploading…' : 'Upload'"></span>
+                          <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                                 style="display:none;" @change="uploadLogo(brand.id, $event)" />
+                        </label>
+                        <button class="btn btn-secondary btn-xs" @click="openSearchModal(brand.id)">Search</button>
+                        <template x-if="brand.logo_path">
+                          <button class="btn btn-danger btn-xs" @click="deleteLogo(brand.id)">Delete</button>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Right: filter bar + cases table -->
+                <div>
+                  <!-- Filter bar -->
+                  <div class="flex gap-2 mb-3" style="flex-wrap:wrap;align-items:center;">
+                    <select class="form-input" style="width:160px;" x-model="filterBrandId" @change="loadCases()">
+                      <option value="">All Brands</option>
+                      <template x-for="b in brands" :key="b.id">
+                        <option :value="b.id" x-text="b.name"></option>
+                      </template>
+                    </select>
+                    <select class="form-input" style="width:140px;" x-model="filterStatus" @change="loadCases()">
+                      <option value="all">All Statuses</option>
+                      <option value="new">New</option>
+                      <option value="reviewing">Reviewing</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="dismissed">Dismissed</option>
+                      <option value="takedown_requested">Takedown Sent</option>
+                    </select>
+                    <select class="form-input" style="width:130px;" x-model="filterMatchType" @change="loadCases()">
+                      <option value="all">All Types</option>
+                      <option value="logo">Logo</option>
+                      <option value="text">Text</option>
+                      <option value="domain">Domain</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                    <input class="form-input" style="flex:1;min-width:160px;" type="text"
+                           placeholder="Search URL / title…" x-model="filterQuery"
+                           @input.debounce.400ms="loadCases()" />
+                  </div>
+
+                  <!-- Cases table -->
+                  <div class="card" style="padding:0;overflow:hidden;">
+                    <template x-if="loading">
+                      <div style="padding:40px;text-align:center;" class="text-muted">Loading…</div>
+                    </template>
+                    <template x-if="!loading && cases.length === 0">
+                      <div style="padding:40px;text-align:center;" class="text-muted">No cases found.</div>
+                    </template>
+                    <template x-if="!loading && cases.length > 0">
+                      <div style="overflow-x:auto;">
+                        <table class="table" style="width:100%;min-width:700px;">
+                          <thead>
+                            <tr>
+                              <th style="width:50px;">Type</th>
+                              <th>Source URL</th>
+                              <th style="width:110px;">Brand</th>
+                              <th style="width:90px;">Confidence</th>
+                              <th style="width:120px;">Status</th>
+                              <th style="width:100px;">Found</th>
+                              <th style="width:160px;">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-for="c in cases" :key="c.id">
+                              <tr>
+                                <td style="text-align:center;font-size:1.1rem;" :title="c.match_type" x-text="matchTypeIcon(c.match_type)"></td>
+                                <td>
+                                  <a :href="c.source_url" target="_blank" rel="noopener"
+                                     style="color:var(--link);word-break:break-all;font-size:0.8rem;"
+                                     x-text="c.source_url.length > 60 ? c.source_url.slice(0,60) + '…' : c.source_url"></a>
+                                  <template x-if="c.page_title">
+                                    <div class="text-muted" style="font-size:0.75rem;" x-text="c.page_title"></div>
+                                  </template>
+                                </td>
+                                <td style="font-size:0.82rem;" x-text="brandName(c.brand_id)"></td>
+                                <td>
+                                  <span :style="confidenceColor(c.confidence)"
+                                        x-text="(c.confidence * 100).toFixed(0) + '%'"></span>
+                                </td>
+                                <td>
+                                  <span class="badge" :class="statusColor(c.status)"
+                                        x-text="statusLabel(c.status)"></span>
+                                </td>
+                                <td class="text-muted" style="font-size:0.78rem;"
+                                    x-text="c.created_at ? new Date(c.created_at).toLocaleDateString() : ''"></td>
+                                <td>
+                                  <div class="flex gap-2" style="flex-wrap:wrap;">
+                                    <template x-if="c.status === 'new' || c.status === 'reviewing'">
+                                      <button class="btn btn-secondary btn-xs"
+                                              @click="updateCaseStatus(c.id, 'confirmed')">Confirm</button>
+                                    </template>
+                                    <template x-if="c.status === 'confirmed'">
+                                      <button class="btn btn-secondary btn-xs"
+                                              @click="requestTakedown(c.id)">Takedown</button>
+                                    </template>
+                                    <template x-if="c.status !== 'dismissed'">
+                                      <button class="btn btn-secondary btn-xs"
+                                              @click="dismissCase(c.id)">Dismiss</button>
+                                    </template>
+                                    <button class="btn btn-danger btn-xs"
+                                            @click="deleteCase(c.id)">Delete</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Search modal -->
+              <template x-if="showSearchModal">
+                <div class="modal-overlay" @click.self="showSearchModal = false">
+                  <div class="modal" style="max-width:480px;">
+                    <div class="modal-header">
+                      <div class="modal-title">Search for Misuse</div>
+                      <button class="modal-close" @click="showSearchModal = false">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                      <div class="form-group">
+                        <label class="form-label">Search Query</label>
+                        <input class="form-input" type="text" x-model="searchForm.query"
+                               placeholder="Brand name or keywords…" />
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Max Results</label>
+                        <input class="form-input" type="number" x-model.number="searchForm.max_results"
+                               min="1" max="100" />
+                      </div>
+                      <template x-if="searchResults.length > 0">
+                        <div style="margin-top:12px;">
+                          <div style="font-weight:500;margin-bottom:6px;" x-text="searchResults.length + ' new cases found'"></div>
+                          <template x-for="r in searchResults.slice(0,5)" :key="r.id">
+                            <div style="font-size:0.8rem;padding:4px 0;border-bottom:1px solid var(--border);">
+                              <a :href="r.source_url" target="_blank" rel="noopener"
+                                 style="color:var(--link);" x-text="r.source_url.length > 60 ? r.source_url.slice(0,60) + '…' : r.source_url"></a>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                    <div class="modal-footer">
+                      <button class="btn btn-secondary" @click="showSearchModal = false">Cancel</button>
+                      <button class="btn btn-primary" @click="triggerSearch()" :disabled="searchLoading">
+                        <span x-text="searchLoading ? 'Searching…' : 'Search'"></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Add Case modal -->
+              <template x-if="showAddModal">
+                <div class="modal-overlay" @click.self="showAddModal = false">
+                  <div class="modal" style="max-width:520px;">
+                    <div class="modal-header">
+                      <div class="modal-title">Add Misuse Case</div>
+                      <button class="modal-close" @click="showAddModal = false">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                      <div class="form-group">
+                        <label class="form-label">Brand</label>
+                        <select class="form-input" x-model="newCase.brand_id">
+                          <option value="">— select brand —</option>
+                          <template x-for="b in brands" :key="b.id">
+                            <option :value="b.id" x-text="b.name"></option>
+                          </template>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Source URL</label>
+                        <input class="form-input" type="text" x-model="newCase.source_url"
+                               placeholder="https://…" />
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Page Title</label>
+                        <input class="form-input" type="text" x-model="newCase.page_title" />
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Match Type</label>
+                        <select class="form-input" x-model="newCase.match_type">
+                          <option value="logo">Logo</option>
+                          <option value="text">Text</option>
+                          <option value="domain">Domain</option>
+                          <option value="manual">Manual</option>
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Confidence (0–1)</label>
+                        <input class="form-input" type="number" x-model.number="newCase.confidence"
+                               min="0" max="1" step="0.05" />
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-input" x-model="newCase.description" rows="3"></textarea>
+                      </div>
+                    </div>
+                    <div class="modal-footer">
+                      <button class="btn btn-secondary" @click="showAddModal = false">Cancel</button>
+                      <button class="btn btn-primary" @click="createCase()">Add Case</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
             </div><!-- /logo-content-misuse -->
 
           </div><!-- /page-content (moved closing tag) -->
