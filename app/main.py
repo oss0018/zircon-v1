@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources, social_listening
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources, social_listening, logo_misuse
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
 _SPA_HTML_CACHE: str = ""
@@ -159,6 +159,9 @@ async def lifespan(app: FastAPI):
     # Create deep_search_data/ directory if it doesn't exist
     Path(settings.deep_search_dir).mkdir(parents=True, exist_ok=True)
 
+    # Create data/logos/ directory for brand logo uploads
+    Path("data/logos").mkdir(parents=True, exist_ok=True)
+
     # Pre-load SPA HTML into memory to avoid disk I/O on every request
     global _SPA_HTML_CACHE
     _index = Path("app/static/index.html")
@@ -203,6 +206,7 @@ app.include_router(ti_dashboards.router, prefix="/api/v1/ti-dashboards", tags=["
 app.include_router(impersonation.router, prefix="/api/v1/impersonation", tags=["impersonation"])
 app.include_router(storage_sources.router, prefix="/api/v1/storage-sources", tags=["storage-sources"])
 app.include_router(social_listening.router, prefix="/api/v1/social-listening", tags=["social-listening"])
+app.include_router(logo_misuse.router, prefix="/api/v1/logo-misuse", tags=["logo-misuse"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)
