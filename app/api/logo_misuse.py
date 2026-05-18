@@ -21,7 +21,6 @@ import csv
 import io
 import json
 import logging
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -47,11 +46,25 @@ LOGOS_DIR = Path("data/logos")
 ALLOWED_MIME = {"image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"}
 MAX_LOGO_SIZE = 5 * 1024 * 1024  # 5 MB
 
-_SAFE_FILENAME = re.compile(r"[^a-zA-Z0-9._\-]")
+# Map content-type → safe extension (no user input used in the path)
+_MIME_EXT: dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/svg+xml": "svg",
+}
 
+# Confidence thresholds for RSS misuse detection
+_CONF_URL_MATCH = 0.6
+_CONF_TITLE_MATCH = 0.3
+_CONF_DEFAULT = 0.4
 
-def _safe_filename(name: str) -> str:
-    return _SAFE_FILENAME.sub("_", name)
+# RSS feed URL templates
+_RSS_FEEDS = [
+    "https://news.google.com/rss/search?q={query}+logo",
+    "https://www.bing.com/news/search?q={query}+logo&format=rss",
+]
 
 
 def _utcnow() -> datetime:
@@ -79,19 +92,14 @@ async def upload_logo(
     if len(data) > MAX_LOGO_SIZE:
         raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
 
-    safe_name = _safe_filename(file.filename or "logo")
-    dest = (LOGOS_DIR / f"{brand_id}_{safe_name}").resolve()
+    # Derive filename entirely from brand_id and content-type (no user input in path)
+    ext = _MIME_EXT[file.content_type]  # safe: key validated above
+    dest = LOGOS_DIR / f"{brand_id}.{ext}"
 
-    # Ensure the resolved destination stays within LOGOS_DIR (prevent path traversal)
-    try:
-        dest.relative_to(LOGOS_DIR.resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
-    # Remove old logo if different path
-    if brand.logo_path and brand.logo_path != str(dest):
+    # Remove old logo if a different file exists
+    if brand.logo_path:
         old = Path(brand.logo_path)
-        if old.exists():
+        if old.exists() and old != dest:
             try:
                 old.unlink()
             except OSError:
@@ -202,7 +210,10 @@ async def search_brand_misuse(
         raise HTTPException(status_code=404, detail="Brand not found")
 
     query = sanitize_string(str(body.get("query", brand.name)).strip(), max_length=200)
-    max_results: int = min(int(body.get("max_results", 20)), 100)
+    try:
+        max_results = min(int(body.get("max_results", 20)), 100)
+    except (TypeError, ValueError):
+        max_results = 20
 
     # Determine brand's own domain to skip
     own_domain = ""
@@ -212,10 +223,8 @@ async def search_brand_misuse(
         except Exception:
             pass
 
-    rss_feeds = [
-        f"https://news.google.com/rss/search?q={quote_plus(query)}+logo",
-        f"https://www.bing.com/news/search?q={quote_plus(query)}+logo&format=rss",
-    ]
+    encoded_query = quote_plus(query)
+    rss_feeds = [feed.format(query=encoded_query) for feed in _RSS_FEEDS]
 
     all_items: list[dict] = []
     for feed_url in rss_feeds:
@@ -247,11 +256,11 @@ async def search_brand_misuse(
         # Confidence scoring
         url_lower = link.lower()
         if brand_name_lower in url_lower:
-            confidence = 0.6
+            confidence = _CONF_URL_MATCH
         elif brand_name_lower in title.lower():
-            confidence = 0.3
+            confidence = _CONF_TITLE_MATCH
         else:
-            confidence = 0.4
+            confidence = _CONF_DEFAULT
 
         # Deduplicate by source_url + brand_id
         existing = await db.execute(
