@@ -78,7 +78,9 @@ document.addEventListener('alpine:init', () => {
     },
 
     async loadAllAlerts() {
-      this.ownedDomains = [];
+      // Clear per-brand owned-domain list so stale Trusted badges don't appear
+      // in the all-alerts view. loadAllAlerts is only called when activeBrand is null.
+      if (!this.activeBrand) this.ownedDomains = [];
       try {
         this.alerts = await api.get('/brands/alerts/all');
       } catch (e) {
