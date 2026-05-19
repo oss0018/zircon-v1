@@ -28,8 +28,8 @@ document.addEventListener('alpine:init', () => {
     ownedDomains: [],
     showOwnedDomainsPanel: false,
     newOwnedDomain: { domain: '', notes: '', match_subdomains: true },
-    // Checklist for results selection
-    selectedResults: new Set(),
+    // Checklist for results selection (plain object keyed by domain for Alpine.js reactivity)
+    selectedResults: {},
     newBrand: {
       name: '',
       url: '',
@@ -270,7 +270,7 @@ document.addEventListener('alpine:init', () => {
 
       this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
       this.brandRunning = { ...this.brandRunning, [brandId]: true };
-      this.selectedResults = new Set();
+      this.selectedResults = {};
       this.showAlerts = true;
       showToast(`Generating up to ${limit} variants…`, 'info');
 
@@ -357,7 +357,7 @@ document.addEventListener('alpine:init', () => {
       this.activeBrand = brand || null;
       this.checkProgress = { running: true, checked: 0, total: 0, foundAlive: 0, results: [], page: 1, pageSize: 50 };
       this.brandRunning = { ...this.brandRunning, [brandId]: true };
-      this.selectedResults = new Set();
+      this.selectedResults = {};
       showToast(`Uploading ${file.name}…`, 'info');
 
       const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
@@ -574,26 +574,30 @@ document.addEventListener('alpine:init', () => {
     },
 
     toggleResultSelected(domain) {
-      if (this.selectedResults.has(domain)) {
-        this.selectedResults.delete(domain);
+      if (this.selectedResults[domain]) {
+        const copy = { ...this.selectedResults };
+        delete copy[domain];
+        this.selectedResults = copy;
       } else {
-        this.selectedResults.add(domain);
+        this.selectedResults = { ...this.selectedResults, [domain]: true };
       }
-      // Trigger Alpine reactivity
-      this.selectedResults = new Set(this.selectedResults);
     },
 
     selectAllResults() {
-      this.selectedResults = new Set(this.filteredCheckResults.map(r => r.domain));
+      const sel = {};
+      this.filteredCheckResults.forEach(r => { sel[r.domain] = true; });
+      this.selectedResults = sel;
     },
 
     selectNoneResults() {
-      this.selectedResults = new Set();
+      this.selectedResults = {};
     },
 
     invertResultSelection() {
-      const all = new Set(this.filteredCheckResults.map(r => r.domain));
-      const inv = new Set([...all].filter(d => !this.selectedResults.has(d)));
+      const inv = {};
+      this.filteredCheckResults.forEach(r => {
+        if (!this.selectedResults[r.domain]) inv[r.domain] = true;
+      });
       this.selectedResults = inv;
     },
 

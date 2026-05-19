@@ -1768,7 +1768,7 @@
                     <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:2px 7px;" @click="selectNoneResults()">None</button>
                     <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:2px 7px;" @click="invertResultSelection()">Invert</button>
                     <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:2px 7px;" @click="exportCheckResultsTxt()" title="Export listed domains as .txt">⬇ .txt</button>
-                    <span class="text-xs text-muted" x-text="`${selectedResults.size} selected`"></span>
+                    <span class="text-xs text-muted" x-text="`${Object.keys(selectedResults).length} selected`"></span>
                   </div>
                 </div>
                 <div style="font-family:monospace;font-size:13px;color:var(--color-green);" x-show="checkProgress.running">
@@ -1790,7 +1790,7 @@
                   <div style="max-height:280px;overflow-y:auto;">
                     <template x-for="r in pagedCheckResults" :key="r.domain">
                       <div style="display:flex;align-items:center;gap:6px;font-family:monospace;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border-color);">
-                        <input type="checkbox" :checked="selectedResults.has(r.domain)" @change="toggleResultSelected(r.domain)" style="flex-shrink:0;" />
+                        <input type="checkbox" :checked="!!selectedResults[r.domain]" @change="toggleResultSelected(r.domain)" style="flex-shrink:0;" />
                         <span class="text-green" x-text="r.domain" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
                         <span class="text-muted" x-show="r.ip" x-text="r.ip" style="flex-shrink:0;"></span>
                         <span x-show="r.http_status" class="badge badge-blue" style="margin-left:2px;flex-shrink:0;" x-text="r.http_status"></span>
