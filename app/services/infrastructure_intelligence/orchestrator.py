@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import InfraFinding, InfraInvestigation, Integration
 from app.services.crypto import decrypt
+from app.services.infrastructure_intelligence.bgp_asn import BGPASNModule
+from app.services.infrastructure_intelligence.tech_stack import TechStackModule
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,7 @@ _MODULE_CLASSES = {
 
 _INFRA_SERVICE_TYPES = {
     "shodan", "censys", "securitytrails", "virustotal", "alienvault", "whoisxml", "leakix",
+    "fofa", "zoomeye", "criminalip",
 }
 
 
@@ -82,19 +85,25 @@ class InfraOrchestrator:
             # Load integration keys
             keys = await self._load_keys(db)
 
-            # Instantiate and run enabled modules in parallel
+            # Instantiate and run first-phase modules in parallel
             tasks = []
             task_names = []
-            for module_name in modules:
-                cls_path = _MODULE_CLASSES.get(module_name)
-                if not cls_path:
+            phase1_modules = ("dns", "network", "cert", "cloud", "bgp_asn")
+            for module_name in phase1_modules:
+                if module_name not in modules:
                     continue
-                cls = _import_class(cls_path)
-                instance = cls(keys)
+                cls_path = _MODULE_CLASSES.get(module_name)
+                if module_name == "bgp_asn":
+                    instance = BGPASNModule(keys)
+                else:
+                    if not cls_path:
+                        continue
+                    cls = _import_class(cls_path)
+                    instance = cls(keys)
                 tasks.append(instance.run(target, target_type))
                 task_names.append(module_name)
 
-            all_results = await asyncio.gather(*tasks, return_exceptions=True)
+            all_results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
             # Flatten findings and persist
             all_findings: list[dict] = []
@@ -103,6 +112,14 @@ class InfraOrchestrator:
                     logger.error("Module %s failed: %s", module_name, module_result)
                     continue
                 all_findings.extend(module_result)
+
+            if "tech_stack" in modules:
+                tech_stack = TechStackModule()
+                try:
+                    tech_findings = await tech_stack.run(target, target_type, all_findings)
+                    all_findings.extend(tech_findings)
+                except Exception as exc:
+                    logger.error("Module tech_stack failed: %s", exc)
 
             for finding in all_findings:
                 data_json = finding.get("data_json", {})
@@ -131,6 +148,8 @@ class InfraOrchestrator:
                 severity_counts[sev] += 1
 
             summary = dict(module_counts)
+            summary.setdefault("tech_stack", 0)
+            summary.setdefault("bgp_asn", 0)
             summary["total"] = len(all_findings)
             summary["critical"] = severity_counts.get(5, 0)
             summary["high"] = severity_counts.get(4, 0)
