@@ -3,6 +3,7 @@ Infrastructure Orchestrator — loads API keys from the Integration table and
 runs enabled modules in parallel.
 """
 import asyncio
+import ipaddress
 import json
 import logging
 from datetime import datetime, timezone
@@ -120,6 +121,35 @@ class InfraOrchestrator:
                     all_findings.extend(tech_findings)
                 except Exception as exc:
                     logger.error("Module tech_stack failed: %s", exc)
+
+            # Post-gather: run self-signed cert analysis on unique IPs from
+            # network findings when cert module is requested and target is not
+            # a domain (for domains the parallel gather already handled it).
+            if "cert" in modules and target_type != "domain":
+                unique_ips: set[str] = set()
+                for f in all_findings:
+                    if f.get("module") != "network":
+                        continue
+                    entity = str(f.get("entity", ""))
+                    # Strip port suffix if present (e.g. "1.2.3.4:80" → "1.2.3.4")
+                    candidate = entity.rsplit(":", 1)[0] if ":" in entity else entity
+                    try:
+                        ipaddress.ip_address(candidate)
+                        unique_ips.add(candidate)
+                    except ValueError:
+                        pass
+                if unique_ips:
+                    from app.services.infrastructure_intelligence.cert_intelligence import (
+                        CertIntelligenceModule,
+                    )
+                    cert_module = CertIntelligenceModule(keys)
+                    try:
+                        cert_findings = await cert_module.analyze_self_signed(
+                            list(unique_ips)[:32]
+                        )
+                        all_findings.extend(cert_findings)
+                    except Exception as exc:
+                        logger.error("Post-gather cert analysis failed: %s", exc)
 
             for finding in all_findings:
                 data_json = finding.get("data_json", {})

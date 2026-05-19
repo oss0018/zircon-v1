@@ -159,6 +159,11 @@ const TRANSLATIONS = {
     recursive: 'Recursive',
     connection_config: 'Connection Settings',
     index_status: 'Index Status',
+    // Certificate findings
+    self_signed_cert: 'Self-Signed Certificate',
+    expired_cert: 'Expired Certificate',
+    expiring_cert: 'Expiring Certificate',
+    tls_handshake: 'TLS Handshake',
   },
   ru: {
     // Navigation
@@ -318,6 +323,11 @@ const TRANSLATIONS = {
     recursive: 'Рекурсивно',
     connection_config: 'Настройки подключения',
     index_status: 'Статус индексации',
+    // Certificate findings
+    self_signed_cert: 'Самоподписанный сертификат',
+    expired_cert: 'Истёкший сертификат',
+    expiring_cert: 'Истекающий сертификат',
+    tls_handshake: 'TLS-рукопожатие',
   },
   uk: {
     // Navigation
