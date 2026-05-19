@@ -181,7 +181,7 @@ document.addEventListener('alpine:init', () => {
 
     navigate(p) {
       this.page = p;
-      if (p === 'deep-search' || p === 'threat-intel' || p === 'ti-dashboard') {
+      if (p === 'deep-search' || p === 'threat-intel' || p === 'ti-dashboard' || p === 'infrastructure-intelligence') {
         this.csintOpen = true;
       }
       if (p === 'watchlist' || p === 'monitoring' || p === 'brands' ||
