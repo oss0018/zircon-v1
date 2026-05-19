@@ -176,6 +176,7 @@ def test_tech_stack_detect_from_findings():
     detected = mod.detect_from_findings(findings)
     assert isinstance(detected, list)
     assert any(f.get("module") == "tech_stack" and f.get("finding_type") == "detected_tech" for f in detected)
+    assert any("Apache" in f.get("entity", "") for f in detected)
 
 
 def test_bgp_module_run_unsupported_target_type():
