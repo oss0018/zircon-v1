@@ -18,7 +18,7 @@ from app.services.infrastructure_intelligence import InfraOrchestrator
 router = APIRouter()
 
 _VALID_TARGET_TYPES = {"domain", "ip", "cidr", "asn", "org"}
-_VALID_MODULES = {"dns", "network", "cert", "cloud"}
+_VALID_MODULES = {"dns", "network", "cert", "cloud", "tech_stack", "bgp_asn"}
 
 
 def _utcnow() -> datetime:
@@ -30,7 +30,7 @@ def _utcnow() -> datetime:
 class InvestigateRequest(BaseModel):
     target: str
     target_type: str = "domain"
-    modules: List[str] = ["dns", "network", "cert", "cloud"]
+    modules: List[str] = ["dns", "network", "cert", "cloud", "tech_stack", "bgp_asn"]
 
 
 class InvestigateResponse(BaseModel):

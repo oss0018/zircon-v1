@@ -26,6 +26,12 @@ KNOWN_SERVICES = [
     {"type": "abuseipdb", "name": "AbuseIPDB", "url": "https://abuseipdb.com"},
     {"type": "alienvault", "name": "AlienVault OTX", "url": "https://otx.alienvault.com"},
     {"type": "opensquat", "name": "openSquat", "url": "https://opensquat.com"},
+    {"type": "fofa", "name": "FOFA", "url": "https://fofa.info"},
+    {"type": "zoomeye", "name": "ZoomEye", "url": "https://www.zoomeye.org"},
+    {"type": "criminalip", "name": "Criminal IP", "url": "https://www.criminalip.io"},
+    {"type": "whoisxml", "name": "WhoisXML API", "url": "https://whoisxmlapi.com"},
+    {"type": "crtsh", "name": "crt.sh (CT Logs)", "url": "https://crt.sh"},
+    {"type": "malwarebazaar", "name": "MalwareBazaar", "url": "https://bazaar.abuse.ch"},
 ]
 
 

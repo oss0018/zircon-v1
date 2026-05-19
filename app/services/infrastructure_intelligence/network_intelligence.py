@@ -182,17 +182,128 @@ class NetworkIntelligenceModule:
         return findings
 
     # ------------------------------------------------------------------
+    # FOFA
+    # ------------------------------------------------------------------
+
+    async def query_fofa(self, target: str, target_type: str) -> list[dict]:
+        if not self._has("fofa"):
+            return []
+        client = self._client("fofa")
+        findings: list[dict] = []
+        try:
+            if target_type in ("ip", "domain"):
+                res = await client.search(target, target_type)
+            elif target_type == "asn":
+                res = await client.search(f'asn="{target}"', "general")
+            elif target_type == "org":
+                res = await client.search(f'org="{target}"', "general")
+            else:
+                res = await client.search(target, "general")
+            findings.extend(self._parse_fofa_results(res))
+        except Exception as exc:
+            logger.debug("FOFA query error: %s", exc)
+        return findings
+
+    def _parse_fofa_results(self, res: dict) -> list[dict]:
+        findings: list[dict] = []
+        for row in (res.get("results") or []):
+            if not isinstance(row, list):
+                continue
+            host = row[0] if len(row) > 0 else ""
+            ip = row[1] if len(row) > 1 else ""
+            port = row[2] if len(row) > 2 else None
+            protocol = row[3] if len(row) > 3 else "tcp"
+            server = row[4] if len(row) > 4 else ""
+            title = row[5] if len(row) > 5 else ""
+            if not port:
+                continue
+            findings.append(
+                {
+                    "entity": f"{ip}:{port}" if ip else f"{host}:{port}",
+                    "module": "network",
+                    "finding_type": "open_port",
+                    "severity": _port_severity(int(port)),
+                    "source": "fofa",
+                    "data_json": {
+                        "ip": ip,
+                        "host": host,
+                        "port": port,
+                        "transport": protocol,
+                        "server": server,
+                        "title": title,
+                        "banner": " ".join([str(server), str(title)]).strip(),
+                    },
+                }
+            )
+        return findings
+
+    # ------------------------------------------------------------------
+    # ZoomEye
+    # ------------------------------------------------------------------
+
+    async def query_zoomeye(self, target: str, target_type: str) -> list[dict]:
+        if not self._has("zoomeye"):
+            return []
+        client = self._client("zoomeye")
+        findings: list[dict] = []
+        try:
+            if target_type == "ip":
+                query = f"ip:{target}"
+            elif target_type == "domain":
+                query = f"hostname:{target}"
+            elif target_type == "asn":
+                query = f"asn:{target}"
+            elif target_type == "org":
+                query = f'organization:"{target}"'
+            else:
+                query = target
+            res = await client.search(query, "general")
+            for match in (res.get("matches") or []):
+                ip = match.get("ip") or match.get("ip_str") or ""
+                portinfo = match.get("portinfo") or {}
+                port = portinfo.get("port") or match.get("port")
+                if not port:
+                    continue
+                findings.append(
+                    {
+                        "entity": f"{ip}:{port}",
+                        "module": "network",
+                        "finding_type": "open_port",
+                        "severity": _port_severity(int(port)),
+                        "source": "zoomeye",
+                        "data_json": {
+                            "ip": ip,
+                            "port": port,
+                            "transport": portinfo.get("transport", "tcp"),
+                            "service": portinfo.get("service", ""),
+                            "banner": str(portinfo.get("banner", ""))[:300],
+                        },
+                    }
+                )
+        except Exception as exc:
+            logger.debug("ZoomEye query error: %s", exc)
+        return findings
+
+    # ------------------------------------------------------------------
     # Orchestrate
     # ------------------------------------------------------------------
 
     async def run(self, target: str, target_type: str) -> list[dict]:
-        """Run Shodan + Censys in parallel, deduplicate by (ip, port)."""
+        """Run providers in parallel, deduplicate by (ip, port)."""
         shodan_task = self.query_shodan(target, target_type)
         censys_task = self.query_censys(target, target_type)
-        shodan_res, censys_res = await asyncio.gather(shodan_task, censys_task, return_exceptions=True)
+        fofa_task = self.query_fofa(target, target_type)
+        zoomeye_task = self.query_zoomeye(target, target_type)
+        shodan_res, censys_res, fofa_res, zoomeye_res = await asyncio.gather(
+            shodan_task,
+            censys_task,
+            fofa_task,
+            zoomeye_task,
+            return_exceptions=True,
+        )
 
         merged: dict[tuple, dict] = {}
-        for res in [shodan_res, censys_res]:
+        for res in [shodan_res, censys_res, fofa_res, zoomeye_res]:
             if isinstance(res, Exception):
                 logger.debug("Network module error: %s", res)
                 continue

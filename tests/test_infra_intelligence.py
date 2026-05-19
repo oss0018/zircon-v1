@@ -50,6 +50,13 @@ def test_whoisxml_client_registered():
     assert "whoisxml" in OSINT_CLIENTS
 
 
+def test_phase2_osint_clients_registered():
+    from app.services.osint import OSINT_CLIENTS
+    assert "fofa" in OSINT_CLIENTS
+    assert "zoomeye" in OSINT_CLIENTS
+    assert "criminalip" in OSINT_CLIENTS
+
+
 def test_crtsh_get_client():
     from app.services.osint import get_client
     client = get_client("crtsh")
@@ -61,6 +68,15 @@ def test_whoisxml_no_key_returns_error():
     from app.services.osint.whoisxml import WhoisXMLClient
     import asyncio
     client = WhoisXMLClient(api_key="")
+    result = asyncio.run(client.search("example.com", "domain"))
+    assert "error" in result
+    assert "API key" in result["error"]
+
+
+def test_fofa_no_key_returns_error():
+    from app.services.osint.fofa import FOFAClient
+    import asyncio
+    client = FOFAClient(api_key="")
     result = asyncio.run(client.search("example.com", "domain"))
     assert "error" in result
     assert "API key" in result["error"]
@@ -147,6 +163,29 @@ def test_network_run_no_keys_returns_empty():
     assert result == []  # No shodan/censys keys → empty
 
 
+def test_tech_stack_detect_from_findings():
+    from app.services.infrastructure_intelligence.tech_stack import TechStackModule
+    mod = TechStackModule({})
+    findings = [
+        {
+            "entity": "1.2.3.4:443",
+            "source": "shodan",
+            "data_json": {"banner": "Apache/2.4.58 OpenSSL/3.0.0"},
+        }
+    ]
+    detected = mod.detect_from_findings(findings)
+    assert isinstance(detected, list)
+    assert any(f.get("module") == "tech_stack" and f.get("finding_type") == "detected_tech" for f in detected)
+
+
+def test_bgp_module_run_unsupported_target_type():
+    from app.services.infrastructure_intelligence.bgp_asn import BGPASNModule
+    import asyncio
+    mod = BGPASNModule({})
+    result = asyncio.run(mod.run("example.com", "domain"))
+    assert result == []
+
+
 # ── Cert module ───────────────────────────────────────────────────────────────
 
 def test_cert_run_non_domain_returns_empty():
@@ -163,6 +202,12 @@ def test_orchestrator_importable():
     from app.services.infrastructure_intelligence import InfraOrchestrator
     orch = InfraOrchestrator()
     assert orch is not None
+
+
+def test_infra_package_exports_phase2_modules():
+    from app.services.infrastructure_intelligence import BGPASNModule, TechStackModule
+    assert BGPASNModule is not None
+    assert TechStackModule is not None
 
 
 # ── API router ────────────────────────────────────────────────────────────────
@@ -195,3 +240,22 @@ def test_api_router_has_summary_route():
     from app.api.infra_intel import router
     paths = [r.path for r in router.routes]
     assert "/investigations/{investigation_id}/summary" in paths
+
+
+def test_api_router_valid_modules_include_phase2():
+    from app.api.infra_intel import _VALID_MODULES, InvestigateRequest
+    assert "tech_stack" in _VALID_MODULES
+    assert "bgp_asn" in _VALID_MODULES
+    assert "tech_stack" in InvestigateRequest.model_fields["modules"].default
+    assert "bgp_asn" in InvestigateRequest.model_fields["modules"].default
+
+
+def test_known_services_include_phase2_integrations():
+    from app.api.integrations import KNOWN_SERVICES
+    known_types = {s["type"] for s in KNOWN_SERVICES}
+    assert "fofa" in known_types
+    assert "zoomeye" in known_types
+    assert "criminalip" in known_types
+    assert "whoisxml" in known_types
+    assert "crtsh" in known_types
+    assert "malwarebazaar" in known_types

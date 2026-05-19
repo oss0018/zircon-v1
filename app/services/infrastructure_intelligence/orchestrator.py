@@ -20,10 +20,12 @@ _MODULE_CLASSES = {
     "network": "app.services.infrastructure_intelligence.network_intelligence.NetworkIntelligenceModule",
     "cert": "app.services.infrastructure_intelligence.cert_intelligence.CertIntelligenceModule",
     "cloud": "app.services.infrastructure_intelligence.cloud_osint.CloudOSINTModule",
+    "bgp_asn": "app.services.infrastructure_intelligence.bgp_asn.BGPASNModule",
 }
 
 _INFRA_SERVICE_TYPES = {
     "shodan", "censys", "securitytrails", "virustotal", "alienvault", "whoisxml", "leakix",
+    "fofa", "zoomeye", "criminalip",
 }
 
 
@@ -85,7 +87,11 @@ class InfraOrchestrator:
             # Instantiate and run enabled modules in parallel
             tasks = []
             task_names = []
-            for module_name in modules:
+            run_modules = [m for m in modules if m != "tech_stack"]
+            if target_type == "asn" and "bgp_asn" not in run_modules:
+                run_modules.append("bgp_asn")
+
+            for module_name in run_modules:
                 cls_path = _MODULE_CLASSES.get(module_name)
                 if not cls_path:
                     continue
@@ -103,6 +109,21 @@ class InfraOrchestrator:
                     logger.error("Module %s failed: %s", module_name, module_result)
                     continue
                 all_findings.extend(module_result)
+
+            if "tech_stack" in modules:
+                try:
+                    tech_cls = _import_class(
+                        "app.services.infrastructure_intelligence.tech_stack.TechStackModule"
+                    )
+                    tech_instance = tech_cls(keys)
+                    tech_findings = await tech_instance.run(
+                        target,
+                        target_type,
+                        existing_findings=all_findings,
+                    )
+                    all_findings.extend(tech_findings)
+                except Exception as exc:
+                    logger.error("Module tech_stack failed: %s", exc)
 
             for finding in all_findings:
                 data_json = finding.get("data_json", {})
