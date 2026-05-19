@@ -87,6 +87,7 @@ class InfraOrchestrator:
             # Instantiate and run enabled modules in parallel
             tasks = []
             task_names = []
+            # tech_stack depends on previously collected findings and runs post-gather.
             run_modules = [m for m in modules if m != "tech_stack"]
             if target_type == "asn" and "bgp_asn" not in run_modules:
                 run_modules.append("bgp_asn")

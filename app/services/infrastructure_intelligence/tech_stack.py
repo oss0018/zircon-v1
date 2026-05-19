@@ -158,6 +158,7 @@ class TechStackModule:
         cve_findings: list[dict] = []
         high_cve_tech: set[str] = set()
 
+        # Bound outbound enrichment requests per run to keep NVD usage predictable.
         for tf in tech_findings[:10]:
             tf_cves = await self.lookup_cves(tf)
             cve_findings.extend(tf_cves)
