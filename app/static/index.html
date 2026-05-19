@@ -26,6 +26,7 @@
   <script src="/static/js/threat_intel.js"></script>
   <script src="/static/js/ti_dashboard.js"></script>
   <script src="/static/js/storage_sources.js"></script>
+  <script src="/static/js/infra_intel.js"></script>
   <script src="/static/js/logo_misuse.js"></script>
 
   <!-- Toast Container -->
@@ -5201,7 +5202,7 @@
             </div><!-- /impersonation-monitoring -->
 
             <!-- ── LOGO & CONTENT MISUSE ───────────────────────────── -->
-            <div x-show="page === 'infrastructure-intelligence'">
+            <div x-show="page === 'infrastructure-intelligence'" x-data="infraIntelApp" x-init="init()">
               <div class="flex justify-between items-center mb-4">
                 <div>
                   <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;"
@@ -5216,24 +5217,218 @@
                 <span style="color:var(--accent-green);" x-text="t('infrastructure_intelligence')"></span>
               </div>
 
-              <div class="card" style="padding:60px 40px;text-align:center;max-width:560px;margin:40px auto;">
-                <div style="margin-bottom:20px;">
-                  <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                       style="display:block;margin:0 auto;opacity:0.35;">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                          d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
-                  </svg>
+              <template x-if="activeTab !== 'detail'">
+                <div>
+                  <div class="card mb-4" style="padding:12px;">
+                    <div class="flex gap-2">
+                      <button class="btn btn-sm"
+                              :class="activeTab === 'new' ? 'btn-primary' : 'btn-secondary'"
+                              @click="activeTab = 'new'">New Investigation</button>
+                      <button class="btn btn-sm"
+                              :class="activeTab === 'list' ? 'btn-primary' : 'btn-secondary'"
+                              @click="activeTab = 'list'; loadInvestigations()">Investigations</button>
+                    </div>
+                  </div>
+
+                  <div x-show="activeTab === 'new'" class="card mb-4">
+                    <div class="card-title">New Investigation</div>
+                    <div class="form-group">
+                      <label class="form-label">Target</label>
+                      <input class="form-input" x-model="target" placeholder="domain.com, 1.2.3.4, AS12345, org name" maxlength="512" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Target Type</label>
+                      <select class="form-select" x-model="targetType">
+                        <option value="domain">domain</option>
+                        <option value="ip">ip</option>
+                        <option value="cidr">cidr</option>
+                        <option value="asn">asn</option>
+                        <option value="org">org</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Modules</label>
+                      <div class="flex gap-2" style="flex-wrap:wrap;">
+                        <label class="badge badge-gray" :style="isModuleSelected('dns') ? 'border:1px solid var(--accent-green);display:flex;align-items:center;gap:6px;' : 'display:flex;align-items:center;gap:6px;'">
+                          <input type="checkbox" :checked="isModuleSelected('dns')" @change="moduleToggle('dns')" />
+                          <span>🌐 DNS Intelligence</span>
+                        </label>
+                        <label class="badge badge-gray" :style="isModuleSelected('network') ? 'border:1px solid var(--accent-green);display:flex;align-items:center;gap:6px;' : 'display:flex;align-items:center;gap:6px;'">
+                          <input type="checkbox" :checked="isModuleSelected('network')" @change="moduleToggle('network')" />
+                          <span>🛰️ Network &amp; Ports</span>
+                        </label>
+                        <label class="badge badge-gray" :style="isModuleSelected('cert') ? 'border:1px solid var(--accent-green);display:flex;align-items:center;gap:6px;' : 'display:flex;align-items:center;gap:6px;'">
+                          <input type="checkbox" :checked="isModuleSelected('cert')" @change="moduleToggle('cert')" />
+                          <span>🔐 Certificate CT Logs</span>
+                        </label>
+                        <label class="badge badge-gray" :style="isModuleSelected('cloud') ? 'border:1px solid var(--accent-green);display:flex;align-items:center;gap:6px;' : 'display:flex;align-items:center;gap:6px;'">
+                          <input type="checkbox" :checked="isModuleSelected('cloud')" @change="moduleToggle('cloud')" />
+                          <span>☁️ Cloud OSINT</span>
+                        </label>
+                      </div>
+                    </div>
+                    <button class="btn btn-primary"
+                            @click="submitInvestigation()"
+                            :disabled="submitLoading || !target.trim() || selectedModules.length === 0">
+                      <span x-show="submitLoading" class="spinner" style="width:14px;height:14px;"></span>
+                      <span x-text="submitLoading ? 'Running…' : 'Run Investigation'"></span>
+                    </button>
+                  </div>
+
+                  <div x-show="activeTab === 'list'" class="card mb-4" style="padding:0;">
+                    <div class="flex justify-between items-center" style="padding:16px 16px 0;">
+                      <div class="card-title" style="margin-bottom:0;">Investigations</div>
+                      <button class="btn btn-sm btn-secondary" @click="loadInvestigations()">Refresh</button>
+                    </div>
+                    <div class="table-wrapper">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Target</th>
+                            <th>Type</th>
+                            <th>Modules</th>
+                            <th>Status</th>
+                            <th>Findings</th>
+                            <th>Started</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-if="investigationsLoading">
+                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
+                          </template>
+                          <template x-if="!investigationsLoading && investigations.length === 0">
+                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">No investigations yet.</td></tr>
+                          </template>
+                          <template x-for="inv in investigations" :key="inv.id">
+                            <tr>
+                              <td>
+                                <div style="font-weight:600;" x-text="inv.target"></div>
+                                <div class="text-muted text-xs">ID <span x-text="inv.id"></span></div>
+                              </td>
+                              <td><span class="badge badge-gray" x-text="inv.target_type"></span></td>
+                              <td>
+                                <div class="flex gap-1" style="flex-wrap:wrap;">
+                                  <template x-for="mod in (inv.modules || [])" :key="mod">
+                                    <span class="badge badge-blue" x-text="mod"></span>
+                                  </template>
+                                </div>
+                              </td>
+                              <td>
+                                <div class="flex items-center gap-2">
+                                  <span :class="statusBadge(inv.status)" x-text="inv.status"></span>
+                                  <span x-show="inv.status === 'running'" class="spinner" style="width:12px;height:12px;"></span>
+                                  <span x-show="inv.status === 'running'" class="pulse"></span>
+                                </div>
+                              </td>
+                              <td x-text="parseSummary(inv).total || 0"></td>
+                              <td x-text="inv.started_at ? formatDate(inv.started_at) : '—'"></td>
+                              <td>
+                                <div class="flex gap-2">
+                                  <button class="btn btn-sm btn-primary" @click="loadInvestigationDetail(inv.id)">View</button>
+                                  <button class="btn btn-sm btn-danger" @click="deleteInvestigation(inv.id)">Delete</button>
+                                </div>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
-                <div style="font-size:1.3rem;font-weight:700;color:var(--text-primary);margin-bottom:10px;">
-                  In Development
+              </template>
+
+              <template x-if="activeTab === 'detail'">
+                <div>
+                  <div class="flex items-center justify-between mb-4">
+                    <button class="btn btn-sm btn-secondary" @click="activeTab = 'list'; stopPolling()">← Back</button>
+                    <div class="text-muted text-sm">Investigation Detail</div>
+                  </div>
+
+                  <div class="card mb-4">
+                    <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:8px;">
+                      <div>
+                        <div class="card-title" style="margin-bottom:6px;" x-text="selectedInvestigation ? selectedInvestigation.target : '—'"></div>
+                        <div class="text-muted text-sm">
+                          <span class="badge badge-gray" x-text="selectedInvestigation ? selectedInvestigation.target_type : '—'"></span>
+                          <span :class="selectedInvestigation ? statusBadge(selectedInvestigation.status) : 'badge badge-gray'"
+                                style="margin-left:6px;"
+                                x-text="selectedInvestigation ? selectedInvestigation.status : '—'"></span>
+                        </div>
+                      </div>
+                      <div class="text-muted text-sm" style="text-align:right;">
+                        <div>Started: <span x-text="selectedInvestigation && selectedInvestigation.started_at ? formatDate(selectedInvestigation.started_at) : '—'"></span></div>
+                        <div>Completed: <span x-text="selectedInvestigation && selectedInvestigation.completed_at ? formatDate(selectedInvestigation.completed_at) : '—'"></span></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="stats-grid" style="margin-bottom:16px;">
+                    <div class="stat-card"><div class="stat-label">Total Findings</div><div class="stat-value" x-text="summaryData && summaryData.summary_json ? (summaryData.summary_json.total || 0) : findings.length"></div></div>
+                    <div class="stat-card"><div class="stat-label">Critical</div><div class="stat-value" style="color:var(--danger);" x-text="summaryData && summaryData.severity_counts ? (summaryData.severity_counts[5] || 0) : 0"></div></div>
+                    <div class="stat-card"><div class="stat-label">High</div><div class="stat-value" style="color:var(--warning);" x-text="summaryData && summaryData.severity_counts ? (summaryData.severity_counts[4] || 0) : 0"></div></div>
+                    <div class="stat-card"><div class="stat-label">DNS</div><div class="stat-value text-green" x-text="summaryData && summaryData.summary_json ? (summaryData.summary_json.dns || 0) : findingsCountByModule('dns')"></div></div>
+                    <div class="stat-card"><div class="stat-label">Network</div><div class="stat-value text-green" x-text="summaryData && summaryData.summary_json ? (summaryData.summary_json.network || 0) : findingsCountByModule('network')"></div></div>
+                    <div class="stat-card"><div class="stat-label">Cert</div><div class="stat-value text-green" x-text="summaryData && summaryData.summary_json ? (summaryData.summary_json.cert || 0) : findingsCountByModule('cert')"></div></div>
+                    <div class="stat-card"><div class="stat-label">Cloud</div><div class="stat-value text-green" x-text="summaryData && summaryData.summary_json ? (summaryData.summary_json.cloud || 0) : findingsCountByModule('cloud')"></div></div>
+                  </div>
+
+                  <div class="card mb-4" style="padding:12px;">
+                    <div class="flex gap-2" style="flex-wrap:wrap;">
+                      <button class="btn btn-sm" :class="activeDetailTab === 'all' ? 'btn-primary' : 'btn-secondary'" @click="activeDetailTab = 'all'">All (<span x-text="findings.length"></span>)</button>
+                      <button class="btn btn-sm" :class="activeDetailTab === 'dns' ? 'btn-primary' : 'btn-secondary'" @click="activeDetailTab = 'dns'">DNS (<span x-text="findingsCountByModule('dns')"></span>)</button>
+                      <button class="btn btn-sm" :class="activeDetailTab === 'network' ? 'btn-primary' : 'btn-secondary'" @click="activeDetailTab = 'network'">Network (<span x-text="findingsCountByModule('network')"></span>)</button>
+                      <button class="btn btn-sm" :class="activeDetailTab === 'cert' ? 'btn-primary' : 'btn-secondary'" @click="activeDetailTab = 'cert'">Cert (<span x-text="findingsCountByModule('cert')"></span>)</button>
+                      <button class="btn btn-sm" :class="activeDetailTab === 'cloud' ? 'btn-primary' : 'btn-secondary'" @click="activeDetailTab = 'cloud'">Cloud (<span x-text="findingsCountByModule('cloud')"></span>)</button>
+                    </div>
+                  </div>
+
+                  <div class="card" style="padding:0;">
+                    <div class="table-wrapper">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Severity</th>
+                            <th>Module</th>
+                            <th>Type</th>
+                            <th>Entity</th>
+                            <th>Source</th>
+                            <th>Details</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-if="investigationLoading">
+                            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
+                          </template>
+                          <template x-if="!investigationLoading && filteredFindings().length === 0">
+                            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr>
+                          </template>
+                          <template x-for="finding in filteredFindings()" :key="finding.id">
+                            <tr>
+                              <td>
+                                <span class="badge"
+                                      :class="severityClass(finding.severity)"
+                                      :style="finding.severity === 5 ? 'font-weight:700;' : ''"
+                                      x-text="severityLabel(finding.severity)"></span>
+                              </td>
+                              <td><span class="badge badge-blue" x-text="finding.module"></span></td>
+                              <td x-text="finding.finding_type"></td>
+                              <td style="max-width:260px;word-break:break-word;" x-text="finding.entity"></td>
+                              <td x-text="finding.source"></td>
+                              <td>
+                                <details>
+                                  <summary class="text-sm" style="cursor:pointer;">View</summary>
+                                  <pre class="text-xs" style="white-space:pre-wrap;max-width:420px;overflow:auto;margin-top:8px;" x-text="JSON.stringify(finding.data_json || {}, null, 2)"></pre>
+                                </details>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
-                <div class="text-muted" style="font-size:0.9rem;line-height:1.6;margin-bottom:24px;">
-                  Infrastructure Intelligence is currently under development.<br>
-                  This module will provide deep visibility into target infrastructure,
-                  including network topology, exposed services, and asset discovery.
-                </div>
-                <span class="badge badge-yellow" style="font-size:0.8rem;padding:6px 14px;">🚧 Coming Soon</span>
-              </div>
+              </template>
             </div><!-- /infrastructure-intelligence -->
 
             <div x-show="page === 'logo-content-misuse'" x-data="logoMisusePage">
