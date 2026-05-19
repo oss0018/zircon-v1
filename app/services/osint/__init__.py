@@ -38,3 +38,10 @@ def get_client(service_type: str, api_key: str = "", **kwargs):
     if cls is None:
         return None
     return cls(api_key=api_key, **kwargs)
+
+
+from app.services.osint.crtsh import CrtShClient      # noqa: E402
+from app.services.osint.whoisxml import WhoisXMLClient  # noqa: E402
+
+OSINT_CLIENTS["crtsh"] = CrtShClient
+OSINT_CLIENTS["whoisxml"] = WhoisXMLClient
