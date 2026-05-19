@@ -10,7 +10,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_TECH_PATTERNS = [
+_TECH_DETECTION_PATTERNS = [
     ("Apache", re.compile(r"\bApache(?:/?\s*|\s+)(\d+(?:\.\d+){0,3})?", re.I), "cpe:2.3:a:apache:http_server:{version}:*:*:*:*:*:*:*"),
     ("nginx", re.compile(r"\bnginx(?:/?\s*|\s+)(\d+(?:\.\d+){0,3})?", re.I), "cpe:2.3:a:nginx:nginx:{version}:*:*:*:*:*:*:*"),
     ("IIS", re.compile(r"\bIIS(?:/?\s*|\s+)(\d+(?:\.\d+){0,3})?", re.I), "cpe:2.3:a:microsoft:internet_information_services:{version}:*:*:*:*:*:*:*"),
@@ -60,7 +60,7 @@ class TechStackModule:
             if not banner_text:
                 continue
 
-            for tech_name, pattern, cpe_template in _TECH_PATTERNS:
+            for tech_name, pattern, cpe_template in _TECH_DETECTION_PATTERNS:
                 match = pattern.search(banner_text)
                 if not match:
                     continue
@@ -103,6 +103,7 @@ class TechStackModule:
         if not cpe_name:
             return []
 
+        # Public NVD API has strict unauthenticated rate limits; keep ~0.7s gap.
         await asyncio.sleep(0.7)
         url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
         params = {"cpeName": cpe_name, "resultsPerPage": 10}

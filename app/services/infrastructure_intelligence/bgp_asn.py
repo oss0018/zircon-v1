@@ -51,6 +51,7 @@ class BGPASNModule:
         data = res.get("data") or {}
         ipv4 = data.get("ipv4_prefixes") or []
         ipv6 = data.get("ipv6_prefixes") or []
+        # Cap output to keep payloads bounded for UI and DB storage.
         return (ipv4 + ipv6)[:50]
 
     async def ip_to_asn(self, ip: str) -> dict:
@@ -69,11 +70,13 @@ class BGPASNModule:
             params={"resource": f"AS{asn_num}"},
         )
         neighbours = (res.get("data") or {}).get("neighbours") or []
+        # Limit neighbours to the most relevant slice from upstream response.
         return neighbours[:20]
 
     async def search_org(self, name: str) -> list[str]:
         res = await self._get_json("https://api.bgpview.io/search", params={"query_term": name})
         asn_entries = (res.get("data") or {}).get("asns") or []
+        # Keep org discovery focused by returning top few ASN candidates only.
         return [f"AS{a.get('asn')}" for a in asn_entries if a.get("asn")][:3]
 
     async def run(self, target: str, target_type: str) -> list[dict]:
