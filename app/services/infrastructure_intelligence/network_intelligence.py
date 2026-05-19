@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 # Ports with elevated severity
 _HIGH_SEVERITY_PORTS = {23, 3389, 5900, 27017}   # severity 4
 _MED_SEVERITY_PORTS  = {9200, 6379, 5432}         # severity 3
+_MAX_BANNER_LENGTH = 300
 
 
 def _port_severity(port: int) -> int:
@@ -276,7 +277,7 @@ class NetworkIntelligenceModule:
                             "port": port,
                             "transport": portinfo.get("transport", "tcp"),
                             "service": portinfo.get("service", ""),
-                            "banner": str(portinfo.get("banner", ""))[:300],
+                            "banner": str(portinfo.get("banner", ""))[:_MAX_BANNER_LENGTH],
                         },
                     }
                 )

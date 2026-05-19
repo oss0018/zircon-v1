@@ -2,6 +2,8 @@ import base64
 
 from app.services.osint.base import BaseOSINTClient
 
+_MAX_FOFA_RESULTS = 50
+
 
 class FOFAClient(BaseOSINTClient):
     service_name = "fofa"
@@ -36,7 +38,7 @@ class FOFAClient(BaseOSINTClient):
                 "email": email,
                 "key": key,
                 "qbase64": qbase64,
-                "size": 50,
+                "size": _MAX_FOFA_RESULTS,
                 "fields": "host,ip,port,protocol,server,title",
             },
         )
