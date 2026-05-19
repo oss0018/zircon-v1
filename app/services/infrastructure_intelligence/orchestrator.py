@@ -155,5 +155,5 @@ class InfraOrchestrator:
                     investigation.error_message = str(exc)[:1000]
                     await db.commit()
             except Exception as inner:
-                logger.error("Failed to mark investigation as failed: %s", inner)
+                logger.error("Failed to mark investigation %d as failed: %s", investigation_id, inner)
             raise

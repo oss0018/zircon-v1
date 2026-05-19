@@ -122,8 +122,7 @@ def test_dns_module_returns_list():
     mod = DNSIntelligenceModule({})
     # Without any API keys, only crt.sh path runs (network call, may fail in test)
     # We just verify the return type is a list and no exception is raised
-    # Use a short timeout by patching the crtsh client
-    result = asyncio.run(mod.enumerate_subdomains.__func__(mod, "nonexistent.invalid"))
+    result = asyncio.run(mod.enumerate_subdomains("nonexistent.invalid"))
     assert isinstance(result, list)
 
 
