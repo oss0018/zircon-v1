@@ -9,6 +9,7 @@ import re
 import httpx
 
 logger = logging.getLogger(__name__)
+_MAX_CVE_ENRICHMENT_PER_RUN = 10
 
 _TECH_DETECTION_PATTERNS = [
     ("Apache", re.compile(r"\bApache(?:/?\s*|\s+)(\d+(?:\.\d+){0,3})?", re.I), "cpe:2.3:a:apache:http_server:{version}:*:*:*:*:*:*:*"),
@@ -159,7 +160,7 @@ class TechStackModule:
         high_cve_tech: set[str] = set()
 
         # Bound outbound enrichment requests per run to keep NVD usage predictable.
-        for tf in tech_findings[:10]:
+        for tf in tech_findings[:_MAX_CVE_ENRICHMENT_PER_RUN]:
             tf_cves = await self.lookup_cves(tf)
             cve_findings.extend(tf_cves)
             if any(cve.get("severity", 1) >= 4 for cve in tf_cves):

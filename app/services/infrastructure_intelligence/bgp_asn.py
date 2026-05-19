@@ -8,6 +8,9 @@ import logging
 import httpx
 
 logger = logging.getLogger(__name__)
+_MAX_PREFIX_RESULTS = 50
+_MAX_NEIGHBOR_RESULTS = 20
+_MAX_ORG_ASN_CANDIDATES = 3
 
 
 def _normalize_asn(asn: str) -> str:
@@ -52,7 +55,7 @@ class BGPASNModule:
         ipv4 = data.get("ipv4_prefixes") or []
         ipv6 = data.get("ipv6_prefixes") or []
         # Cap output to keep payloads bounded for UI and DB storage.
-        return (ipv4 + ipv6)[:50]
+        return (ipv4 + ipv6)[:_MAX_PREFIX_RESULTS]
 
     async def ip_to_asn(self, ip: str) -> dict:
         res = await self._get_json(
@@ -71,13 +74,13 @@ class BGPASNModule:
         )
         neighbours = (res.get("data") or {}).get("neighbours") or []
         # Limit neighbours to the most relevant slice from upstream response.
-        return neighbours[:20]
+        return neighbours[:_MAX_NEIGHBOR_RESULTS]
 
     async def search_org(self, name: str) -> list[str]:
         res = await self._get_json("https://api.bgpview.io/search", params={"query_term": name})
         asn_entries = (res.get("data") or {}).get("asns") or []
         # Keep org discovery focused by returning top few ASN candidates only.
-        return [f"AS{a.get('asn')}" for a in asn_entries if a.get("asn")][:3]
+        return [f"AS{a.get('asn')}" for a in asn_entries if a.get("asn")][:_MAX_ORG_ASN_CANDIDATES]
 
     async def run(self, target: str, target_type: str) -> list[dict]:
         findings: list[dict] = []
