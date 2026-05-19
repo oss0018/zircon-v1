@@ -2,6 +2,8 @@ import time
 
 from app.services.osint.base import BaseOSINTClient
 
+_JWT_CACHE_DURATION_SECONDS = 23 * 3600
+
 
 class ZoomEyeClient(BaseOSINTClient):
     service_name = "zoomeye"
@@ -17,7 +19,7 @@ class ZoomEyeClient(BaseOSINTClient):
 
         cached_token = self._jwt_cache.get("token")
         cached_ts = self._jwt_cache.get("ts", 0)
-        if cached_token and (time.time() - cached_ts) < (23 * 3600):
+        if cached_token and (time.time() - cached_ts) < _JWT_CACHE_DURATION_SECONDS:
             return cached_token
 
         # login form: "user:pass"

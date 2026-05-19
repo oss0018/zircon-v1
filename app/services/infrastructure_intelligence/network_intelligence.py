@@ -232,7 +232,7 @@ class NetworkIntelligenceModule:
                         "transport": protocol,
                         "server": server,
                         "title": title,
-                        "banner": " ".join([str(server), str(title)]).strip(),
+                        "banner": " ".join([str(server), str(title)]).strip()[:_MAX_BANNER_LENGTH],
                     },
                 }
             )

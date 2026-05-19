@@ -9,6 +9,7 @@ import re
 import httpx
 
 logger = logging.getLogger(__name__)
+# Keep per-run CVE enrichment bounded to respect NVD public rate limits.
 _MAX_CVE_ENRICHMENT_PER_RUN = 10
 
 _TECH_DETECTION_PATTERNS = [
