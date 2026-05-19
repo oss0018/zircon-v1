@@ -422,3 +422,39 @@ class StorageFileCatalog(Base):
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     source = relationship("StorageSource", back_populates="catalog_entries")
+
+
+# ── Infrastructure Intelligence ───────────────────────────────────────────────
+
+class InfraInvestigation(Base):
+    __tablename__ = "infra_investigations"
+    id = Column(Integer, primary_key=True)
+    target = Column(String(512), nullable=False)
+    target_type = Column(String(50), nullable=False)   # domain | ip | cidr | asn | org
+    modules_json = Column(Text, default='["dns","network","cert","cloud"]')
+    status = Column(String(20), default="pending")     # pending | running | completed | failed
+    summary_json = Column(Text, default="{}")
+    error_message = Column(Text, default="")
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    findings = relationship(
+        "InfraFinding",
+        back_populates="investigation",
+        cascade="all, delete-orphan",
+        order_by="InfraFinding.severity.desc()",
+    )
+
+
+class InfraFinding(Base):
+    __tablename__ = "infra_findings"
+    id = Column(Integer, primary_key=True)
+    investigation_id = Column(Integer, ForeignKey("infra_investigations.id"), nullable=False)
+    module = Column(String(50), nullable=False)        # dns | network | cert | cloud
+    finding_type = Column(String(100), nullable=False) # subdomain | open_port | historical_dns | cert_new | bucket_exposed | ...
+    entity = Column(String(512), nullable=False)       # discovered entity value
+    severity = Column(Integer, default=1)              # 1=info … 5=critical
+    source = Column(String(100), default="")           # shodan | censys | crtsh | ...
+    data_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=_utcnow)
+    investigation = relationship("InfraInvestigation", back_populates="findings")
