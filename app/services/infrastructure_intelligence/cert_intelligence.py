@@ -1,7 +1,13 @@
 """
-Certificate Intelligence Module — Certificate Transparency log search.
+Certificate Intelligence Module — Certificate Transparency log search and
+self-signed/expired certificate detection via TLS handshake.
 """
+import ipaddress
 import logging
+
+from app.services.infrastructure_intelligence.self_signed_cert_analyzer import (
+    SelfSignedCertAnalyzer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +69,21 @@ class CertIntelligenceModule:
 
         return findings
 
+    async def analyze_self_signed(self, ips: list[str]) -> list[dict]:
+        """Run self-signed/expired certificate analysis against a list of IPs."""
+        analyzer = SelfSignedCertAnalyzer()
+        return await analyzer.analyze_targets(ips)
+
     async def run(self, target: str, target_type: str) -> list[dict]:
         if target_type == "domain":
             return await self.search_ct_logs(target)
+        if target_type == "ip":
+            return await self.analyze_self_signed([target])
+        if target_type == "cidr":
+            try:
+                network = ipaddress.ip_network(target, strict=False)
+                ips = [str(h) for h in list(network.hosts())[:64]]
+            except ValueError:
+                return []
+            return await self.analyze_self_signed(ips)
         return []
