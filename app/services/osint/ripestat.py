@@ -11,7 +11,10 @@ class RIPEStatClient(BaseOSINTClient):
     def _normalize_asn(self, query: str) -> str:
         q = str(query).strip().upper()
         match = re.search(r"(\d+)", q)
-        return match.group(1) if match else q.lstrip("AS")
+        if match:
+            return match.group(1)
+        fallback = q[2:] if q.startswith("AS") else q
+        return fallback if fallback.isdigit() else ""
 
     async def search(self, query: str, query_type: str = "general") -> dict:
         ck = self._cache_key("ripestat", query_type, query)
@@ -21,6 +24,8 @@ class RIPEStatClient(BaseOSINTClient):
 
         if query_type == "asn":
             asn = self._normalize_asn(query)
+            if not asn:
+                return {"error": "Invalid ASN"}
             resource = f"AS{asn}"
             overview_task = self._request(
                 "GET",

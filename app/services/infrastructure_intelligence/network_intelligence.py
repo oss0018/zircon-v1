@@ -358,7 +358,8 @@ class NetworkIntelligenceModule:
                 if isinstance(data, str):
                     try:
                         data = json.loads(data)
-                    except Exception:
+                    except json.JSONDecodeError as exc:
+                        logger.debug("Failed to decode data_json: %s", exc)
                         data = {}
                 ip = data.get("ip", "")
                 port = data.get("port", "")

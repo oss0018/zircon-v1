@@ -6,6 +6,8 @@ import httpx
 
 
 class TechStackModule:
+    HIGH_CVE_THRESHOLD = 7.0
+    NVD_REQUEST_DELAY = 0.7
     TECH_PATTERNS = {
         "apache": [re.compile(r"\bapache(?:/?\s*httpd)?(?:[ /-]?v?(\d+(?:\.\d+){0,3}))?\b", re.I)],
         "nginx": [re.compile(r"\bnginx(?:[ /-]?v?(\d+(?:\.\d+){0,3}))?\b", re.I)],
@@ -40,6 +42,9 @@ class TechStackModule:
         "jenkins": "cpe:2.3:a:jenkins:jenkins:{version}:*:*:*:*:*:*:*",
     }
 
+    def __init__(self):
+        pass
+
     def extract_tech_from_findings(self, findings: list[dict]) -> list[dict]:
         text_blobs: list[str] = []
         for finding in findings:
@@ -63,12 +68,17 @@ class TechStackModule:
         return list(detected.values())
 
     async def query_nvd_cves(self, tech: str, version: str) -> list[dict]:
+        """Query NVD CVE API for a resolved CPE.
+
+        Uses a 0.7 second pre-request delay per call to stay within free-tier rate
+        limits and maps CVSS v3.1/v3.0/v2 scores into a normalized finding shape.
+        """
         cpe_template = self.CPE_MAP.get(tech)
         if not cpe_template:
             return []
-        cpe_name = cpe_template.format(version=version if version and version != "unknown" else "*")
+        cpe_name = cpe_template.format(version=version if version != "unknown" else "*")
 
-        await asyncio.sleep(0.7)
+        await asyncio.sleep(self.NVD_REQUEST_DELAY)
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.get(
@@ -119,8 +129,12 @@ class TechStackModule:
             return 2
         return 1
 
-    async def run(self, target: str, target_type: str, existing_findings: list[dict]) -> list[dict]:
-        del target, target_type
+    async def run(self, _target: str, _target_type: str, existing_findings: list[dict]) -> list[dict]:
+        """Run tech detection/CVE enrichment.
+
+        _target and _target_type are part of the module interface for consistency
+        with other infrastructure modules.
+        """
         findings: list[dict] = []
         techs = self.extract_tech_from_findings(existing_findings)
 
@@ -143,7 +157,7 @@ class TechStackModule:
                 continue
             for cve in cves:
                 score = float(cve.get("cvss_score") or 0.0)
-                if score < 7:
+                if score < self.HIGH_CVE_THRESHOLD:
                     continue
                 findings.append(
                     {

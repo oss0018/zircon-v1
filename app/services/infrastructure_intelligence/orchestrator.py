@@ -23,6 +23,7 @@ _MODULE_CLASSES = {
     "cert": "app.services.infrastructure_intelligence.cert_intelligence.CertIntelligenceModule",
     "cloud": "app.services.infrastructure_intelligence.cloud_osint.CloudOSINTModule",
 }
+_PARALLEL_MODULES = (*_MODULE_CLASSES.keys(), "bgp_asn")
 
 _INFRA_SERVICE_TYPES = {
     "shodan", "censys", "securitytrails", "virustotal", "alienvault", "whoisxml", "leakix",
@@ -88,8 +89,7 @@ class InfraOrchestrator:
             # Instantiate and run first-phase modules in parallel
             tasks = []
             task_names = []
-            phase1_modules = ("dns", "network", "cert", "cloud", "bgp_asn")
-            for module_name in phase1_modules:
+            for module_name in _PARALLEL_MODULES:
                 if module_name not in modules:
                     continue
                 cls_path = _MODULE_CLASSES.get(module_name)

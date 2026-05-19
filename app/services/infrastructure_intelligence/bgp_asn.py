@@ -7,17 +7,22 @@ from app.services.osint.ripestat import RIPEStatClient
 
 
 class BGPASNModule:
-    def __init__(self, keys: dict[str, str]):
-        del keys
+    def __init__(self, _keys: dict[str, str]):
         self.ripestat = RIPEStatClient(api_key="")
         self.bgpview = BGPViewClient(api_key="")
 
     def _normalize_asn(self, asn: str) -> str:
         match = re.search(r"(\d+)", str(asn))
-        return match.group(1) if match else str(asn).upper().lstrip("AS")
+        if match:
+            return match.group(1)
+        clean = str(asn).upper()
+        fallback = clean[2:] if clean.startswith("AS") else clean
+        return fallback if fallback.isdigit() else ""
 
     async def lookup_asn(self, asn: str) -> list[dict]:
         asn_n = self._normalize_asn(asn)
+        if not asn_n:
+            return []
         ripe_task = self.ripestat.search(asn_n, "asn")
         bgp_task = self.bgpview.search(asn_n, "asn")
         ripe_res, bgp_res = await asyncio.gather(ripe_task, bgp_task, return_exceptions=True)
@@ -103,7 +108,12 @@ class BGPASNModule:
 
     async def lookup_ip(self, ip: str) -> list[dict]:
         network_info = await self.ripestat.search(ip, "ip")
-        asns = network_info.get("data", {}).get("asns") or []
+        if not isinstance(network_info, dict):
+            return []
+        data = network_info.get("data")
+        if not isinstance(data, dict):
+            return []
+        asns = data.get("asns") or []
         if not asns:
             return []
         return await self.lookup_asn(str(asns[0]))
