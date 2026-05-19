@@ -13,6 +13,11 @@ from app.services.osint.alienvault import AlienVaultClient
 from app.services.osint.malwarebazaar import MalwareBazaarClient
 from app.services.osint.threatfox import ThreatFoxClient
 from app.services.osint.opensquat import OpenSquatClient
+from app.services.osint.fofa import FOFAClient
+from app.services.osint.zoomeye import ZoomEyeClient
+from app.services.osint.criminalip import CriminalIPClient
+from app.services.osint.ripestat import RIPEStatClient
+from app.services.osint.bgpview import BGPViewClient
 
 OSINT_CLIENTS = {
     "hibp": HIBPClient,
@@ -30,6 +35,11 @@ OSINT_CLIENTS = {
     "malwarebazaar": MalwareBazaarClient,
     "threatfox": ThreatFoxClient,
     "opensquat": OpenSquatClient,
+    "fofa": FOFAClient,
+    "zoomeye": ZoomEyeClient,
+    "criminalip": CriminalIPClient,
+    "ripestat": RIPEStatClient,
+    "bgpview": BGPViewClient,
 }
 
 
