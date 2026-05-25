@@ -76,6 +76,24 @@ class RulePatch(BaseModel):
         return v
 
 
+class RulePreviewBody(BaseModel):
+    protected_domain: str
+    algorithms: Optional[List[str]] = []
+    tld_list: Optional[str] = "top100"
+    attack_words: Optional[str] = "core"
+    include_idn: Optional[bool] = True
+    include_bitsquatting: Optional[bool] = True
+    max_variants: Optional[int] = 10000
+    similarity_threshold_pct: Optional[int] = 70
+
+    @field_validator("similarity_threshold_pct")
+    @classmethod
+    def validate_threshold(cls, v):
+        if v is not None and not (30 <= v <= 100):
+            raise ValueError("similarity_threshold_pct must be between 30 and 100")
+        return v
+
+
 class DomainPatch(BaseModel):
     is_false_positive: Optional[bool] = None
     fp_reason: Optional[str] = None
@@ -283,6 +301,33 @@ async def update_rule(
     await db.commit()
     await db.refresh(rule)
     return _rule_to_dict(rule)
+
+
+@router.post("/preview")
+async def preview_rule_draft(
+    body: RulePreviewBody,
+    _: User = Depends(get_current_user),
+):
+    """Preview variant counts for an unsaved rule draft."""
+    from app.services.lookalike.generators import GenerationConfig, PermutationEngine
+
+    config = GenerationConfig(
+        tld_list=body.tld_list or "top100",
+        attack_words=body.attack_words or "core",
+        include_idn=body.include_idn if body.include_idn is not None else True,
+        include_bitsquatting=body.include_bitsquatting if body.include_bitsquatting is not None else True,
+        max_variants=body.max_variants or 10000,
+        similarity_threshold_pct=body.similarity_threshold_pct or 70,
+        algorithms=body.algorithms or [],
+    )
+    engine = PermutationEngine(config)
+    gen_result = engine.generate_and_filter(body.protected_domain)
+    return {
+        "raw_count": gen_result.raw_count,
+        "filtered_count": gen_result.filtered_count,
+        "threshold_pct": gen_result.threshold_pct,
+        "filtered_out": gen_result.filtered_out,
+    }
 
 
 @router.delete("/rules/{rule_id}", status_code=204)
@@ -575,6 +620,7 @@ async def preview_rule(
 @router.get("/rules/{rule_id}/domains")
 async def list_rule_domains(
     rule_id: int,
+    fqdn: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     min_threat_score: Optional[int] = Query(None, ge=0, le=100),
     severity: Optional[int] = Query(None, ge=1, le=5),
@@ -593,6 +639,9 @@ async def list_rule_domains(
 
     if status:
         query = query.where(LookalikeDomain.status == status)
+    if fqdn:
+        safe_fqdn = sanitize_string(fqdn, max_length=253)
+        query = query.where(LookalikeDomain.fqdn.ilike(f"%{safe_fqdn}%"))
     if min_threat_score is not None:
         query = query.where(LookalikeDomain.threat_score >= min_threat_score)
     if severity is not None:
