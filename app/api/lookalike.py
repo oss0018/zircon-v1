@@ -46,6 +46,7 @@ class RuleCreate(BaseModel):
     include_bitsquatting: Optional[bool] = True
     max_variants: Optional[int] = 10000
     similarity_threshold_pct: Optional[int] = 70
+    alert_threshold: Optional[int] = 50
     active: Optional[bool] = True
 
     @field_validator("similarity_threshold_pct")
@@ -53,6 +54,13 @@ class RuleCreate(BaseModel):
     def validate_threshold(cls, v):
         if v is not None and not (30 <= v <= 100):
             raise ValueError("similarity_threshold_pct must be between 30 and 100")
+        return v
+
+    @field_validator("alert_threshold")
+    @classmethod
+    def validate_alert_threshold(cls, v):
+        if v is not None and not (30 <= v <= 100):
+            raise ValueError("alert_threshold must be between 30 and 100")
         return v
 
 
@@ -67,6 +75,7 @@ class RulePatch(BaseModel):
     include_bitsquatting: Optional[bool] = None
     max_variants: Optional[int] = None
     similarity_threshold_pct: Optional[int] = None
+    alert_threshold: Optional[int] = None
     active: Optional[bool] = None
 
     @field_validator("similarity_threshold_pct")
@@ -74,6 +83,13 @@ class RulePatch(BaseModel):
     def validate_threshold(cls, v):
         if v is not None and not (30 <= v <= 100):
             raise ValueError("similarity_threshold_pct must be between 30 and 100")
+        return v
+
+    @field_validator("alert_threshold")
+    @classmethod
+    def validate_alert_threshold(cls, v):
+        if v is not None and not (30 <= v <= 100):
+            raise ValueError("alert_threshold must be between 30 and 100")
         return v
 
 
@@ -99,6 +115,10 @@ class DomainPatch(BaseModel):
     is_false_positive: Optional[bool] = None
     fp_reason: Optional[str] = None
     status: Optional[str] = None
+
+
+class AlertDispatchBody(BaseModel):
+    domain_id: Optional[int] = None
 
 
 class TrustedDomainCreate(BaseModel):
@@ -130,6 +150,7 @@ def _rule_to_dict(rule: LookalikeRule) -> dict:
         "include_bitsquatting": rule.include_bitsquatting,
         "max_variants": rule.max_variants,
         "similarity_threshold_pct": rule.similarity_threshold_pct,
+        "alert_threshold": rule.alert_threshold,
         "active": rule.active,
         "last_scan_at": rule.last_scan_at.isoformat() if rule.last_scan_at else None,
         "created_at": rule.created_at.isoformat() if rule.created_at else None,
@@ -230,6 +251,7 @@ async def create_rule(
         include_bitsquatting=body.include_bitsquatting if body.include_bitsquatting is not None else True,
         max_variants=body.max_variants or 10000,
         similarity_threshold_pct=body.similarity_threshold_pct or 70,
+        alert_threshold=body.alert_threshold or 50,
         active=body.active if body.active is not None else True,
     )
     db.add(rule)
@@ -303,6 +325,8 @@ async def update_rule(
         rule.max_variants = body.max_variants
     if body.similarity_threshold_pct is not None:
         rule.similarity_threshold_pct = body.similarity_threshold_pct
+    if body.alert_threshold is not None:
+        rule.alert_threshold = body.alert_threshold
     if body.active is not None:
         rule.active = body.active
 
@@ -995,6 +1019,7 @@ async def download_takedown(
 @router.post("/rules/{rule_id}/alert")
 async def trigger_alerts(
     rule_id: int,
+    body: Optional[AlertDispatchBody] = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -1016,8 +1041,15 @@ async def trigger_alerts(
         )
     )
     domains = list(domains_res.scalars().all())
+    if body and body.domain_id is not None:
+        domains = [domain for domain in domains if domain.id == body.domain_id]
 
-    result = await dispatch_lookalike_alerts(rule_id, domains, db)
+    result = await dispatch_lookalike_alerts(
+        rule_id,
+        domains,
+        db,
+        alert_threshold=rule.alert_threshold or 50,
+    )
     return result
 
 

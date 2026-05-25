@@ -1823,6 +1823,12 @@
                             <td><span :class="statusBadge(domain.status)" x-text="domain.status"></span></td>
                             <td style="min-width:140px;">
                               <div class="text-sm" style="margin-bottom:6px;" x-text="domain.threat_score ?? '—'"></div>
+                              <div class="flex gap-1" style="flex-wrap:wrap;margin-bottom:6px;">
+                                <span x-show="domain.country_code" class="badge badge-gray text-xs" :title="domain.country_code" x-text="countryFlag(domain.country_code) + ' ' + domain.country_code"></span>
+                                <span x-show="domain.domain_age_days !== null && domain.domain_age_days !== undefined && Number(domain.domain_age_days) < 30" class="badge badge-red text-xs">NEW</span>
+                                <span x-show="domain.screenshot_url" class="badge badge-blue text-xs" title="Screenshot captured">📷</span>
+                                <span x-show="domain.whois_privacy === true" class="badge badge-yellow text-xs" title="WHOIS privacy shield">🛡️</span>
+                              </div>
                               <div style="height:8px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden;">
                                 <div :style="threatBarStyle(domain.threat_score)"></div>
                               </div>
@@ -1975,6 +1981,11 @@
                     <input type="range" min="30" max="100" step="1" x-model.number="ruleForm.similarity_threshold_pct" @input="scheduleRulePreview()" style="width:100%;" />
                     <div class="text-muted text-sm" style="margin-top:8px;" x-text="thresholdHint()"></div>
                   </div>
+                  <div class="form-group">
+                    <label class="form-label">Alert Threshold (%)</label>
+                    <input class="form-input" type="number" min="30" max="100" x-model.number="ruleForm.alert_threshold" />
+                    <div class="text-muted text-sm" style="margin-top:6px;">Domains above this threat score will trigger alerts.</div>
+                  </div>
                   <div class="card" style="padding:12px;">
                     <div class="flex justify-between items-center mb-2">
                       <div class="card-title" style="margin-bottom:0;">Estimated Variant Count</div>
@@ -2051,78 +2062,169 @@
                     <button class="btn btn-sm btn-secondary" @click="markFalsePositive()" :disabled="!selectedDomain">Mark FP</button>
                     <button class="btn btn-sm btn-secondary" @click="clearFalsePositive()" x-show="selectedDomain && selectedDomain.is_false_positive">Clear FP</button>
                     <button class="btn btn-sm btn-primary" @click="markTrusted()" :disabled="!selectedDomain">Mark Trusted</button>
+                    <button class="btn btn-sm btn-secondary" @click="enrichSelectedDomain()" :disabled="!selectedDomain || enrichLoading">
+                      <span x-show="enrichLoading" class="spinner" style="width:14px;height:14px;"></span>
+                      <span>✨ Enrich</span>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" @click="downloadTakedownPackage()" x-show="selectedDomain && canShowTakedown()">
+                      <span>⬇️ Takedown Package</span>
+                    </button>
+                    <button class="btn btn-sm btn-primary" @click="sendDomainAlert()" x-show="selectedDomain && canSendAlert()" :disabled="alertLoading">
+                      <span x-show="alertLoading" class="spinner" style="width:14px;height:14px;"></span>
+                      <span>🔔 Send Alert</span>
+                    </button>
                   </div>
                 </div>
                 <div class="scan-drawer-body">
                   <div x-show="drawerLoading" class="text-muted"><span class="spinner" style="width:16px;height:16px;margin-right:8px;"></span>Loading...</div>
                   <template x-if="selectedDomain">
                     <div style="display:grid;gap:12px;">
-                      <div class="card" style="padding:12px;">
-                        <div class="card-title">Detection</div>
-                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-                          <div><div class="text-muted text-xs">Similarity</div><div x-text="selectedDomain.similarity_score ?? '—'"></div></div>
-                          <div><div class="text-muted text-xs">Levenshtein</div><div x-text="selectedDomain.levenshtein_distance ?? '—'"></div></div>
-                          <div><div class="text-muted text-xs">Algorithms</div><div class="text-sm" x-text="algorithmsPreview(selectedDomain.algorithms)"></div></div>
-                          <div><div class="text-muted text-xs">Unicode Form</div><div class="text-sm" x-text="selectedDomain.unicode_form || '—'"></div></div>
-                        </div>
+                      <div class="ti-tabs">
+                        <button class="btn btn-sm" :class="drawerTab === 'overview' ? 'btn-primary' : 'btn-secondary'" @click="setDrawerTab('overview')">Overview</button>
+                        <button class="btn btn-sm" :class="drawerTab === 'dns' ? 'btn-primary' : 'btn-secondary'" @click="setDrawerTab('dns')">DNS</button>
+                        <button class="btn btn-sm" :class="drawerTab === 'http' ? 'btn-primary' : 'btn-secondary'" @click="setDrawerTab('http')">HTTP</button>
+                        <button class="btn btn-sm" :class="drawerTab === 'ssl' ? 'btn-primary' : 'btn-secondary'" @click="setDrawerTab('ssl')">SSL</button>
+                        <button class="btn btn-sm" :class="drawerTab === 'whois' ? 'btn-primary' : 'btn-secondary'" @click="setDrawerTab('whois')">WHOIS</button>
+                        <button class="btn btn-sm" :class="drawerTab === 'geoip' ? 'btn-primary' : 'btn-secondary'" @click="setDrawerTab('geoip')">GeoIP</button>
+                        <button class="btn btn-sm" :class="drawerTab === 'screenshot' ? 'btn-primary' : 'btn-secondary'" @click="setDrawerTab('screenshot')">Screenshot</button>
                       </div>
-                      <div class="card" style="padding:12px;">
-                        <div class="card-title">Signals</div>
-                        <div class="flex gap-2" style="flex-wrap:wrap;" x-show="selectedDomain.signals_fired && selectedDomain.signals_fired.length">
-                          <template x-for="signal in selectedDomain.signals_fired" :key="signal">
-                            <span class="badge badge-yellow" x-text="signal"></span>
-                          </template>
+                      <template x-if="drawerTab === 'overview'">
+                        <div style="display:grid;gap:12px;">
+                          <div class="card" style="padding:12px;">
+                            <div class="card-title">Detection</div>
+                            <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                              <div><div class="text-muted text-xs">Similarity</div><div x-text="selectedDomain.similarity_score ?? '—'"></div></div>
+                              <div><div class="text-muted text-xs">Levenshtein</div><div x-text="selectedDomain.levenshtein_distance ?? '—'"></div></div>
+                              <div><div class="text-muted text-xs">Algorithms</div><div class="text-sm" x-text="algorithmsPreview(selectedDomain.algorithms)"></div></div>
+                              <div><div class="text-muted text-xs">Unicode Form</div><div class="text-sm" x-text="selectedDomain.unicode_form || '—'"></div></div>
+                            </div>
+                          </div>
+                          <div class="card" style="padding:12px;">
+                            <div class="card-title">Signals</div>
+                            <div class="flex gap-2" style="flex-wrap:wrap;" x-show="selectedDomain.signals_fired && selectedDomain.signals_fired.length">
+                              <template x-for="signal in selectedDomain.signals_fired" :key="signal">
+                                <span class="badge badge-yellow" x-text="signal"></span>
+                              </template>
+                            </div>
+                            <div class="text-muted text-sm" x-show="!selectedDomain.signals_fired || selectedDomain.signals_fired.length === 0">No detection signals recorded.</div>
+                          </div>
                         </div>
-                        <div class="text-muted text-sm" x-show="!selectedDomain.signals_fired || selectedDomain.signals_fired.length === 0">No detection signals recorded.</div>
-                      </div>
-                      <div class="card" style="padding:12px;">
-                        <div class="card-title">DNS</div>
-                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-                          <div><div class="text-muted text-xs">Has A</div><div x-text="boolLabel(selectedDomain.has_a_record)"></div></div>
-                          <div><div class="text-muted text-xs">Has MX</div><div x-text="boolLabel(selectedDomain.has_mx_record)"></div></div>
-                          <div><div class="text-muted text-xs">Has NS</div><div x-text="boolLabel(selectedDomain.has_ns_record)"></div></div>
-                          <div><div class="text-muted text-xs">IP</div><div class="font-mono text-sm" x-text="selectedDomain.ip || '—'"></div></div>
+                      </template>
+                      <template x-if="drawerTab === 'dns'">
+                        <div class="card" style="padding:12px;">
+                          <div class="card-title">DNS</div>
+                          <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                            <div><div class="text-muted text-xs">Has A</div><div x-text="boolLabel(selectedDomain.has_a_record)"></div></div>
+                            <div><div class="text-muted text-xs">Has MX</div><div x-text="boolLabel(selectedDomain.has_mx_record)"></div></div>
+                            <div><div class="text-muted text-xs">Has NS</div><div x-text="boolLabel(selectedDomain.has_ns_record)"></div></div>
+                            <div><div class="text-muted text-xs">IP</div><div class="font-mono text-sm" x-text="selectedDomain.ip || '—'"></div></div>
+                          </div>
                         </div>
-                      </div>
-                      <div class="card" style="padding:12px;">
-                        <div class="card-title">HTTP</div>
-                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-                          <div><div class="text-muted text-xs">HTTP Status</div><div x-text="selectedDomain.http_status || '—'"></div></div>
-                          <div><div class="text-muted text-xs">Page Title</div><div x-text="selectedDomain.page_title || '—'"></div></div>
-                          <div><div class="text-muted text-xs">Final URL</div><div class="text-sm" style="word-break:break-all;" x-text="selectedDomain.final_url || '—'"></div></div>
-                          <div><div class="text-muted text-xs">Server Header</div><div x-text="selectedDomain.server_header || '—'"></div></div>
-                          <div><div class="text-muted text-xs">Redirect Detected</div><div x-text="boolLabel(selectedDomain.redirect_detected)"></div></div>
-                          <div><div class="text-muted text-xs">Redirects to Legitimate</div><div x-text="boolLabel(selectedDomain.redirects_to_legitimate)"></div></div>
+                      </template>
+                      <template x-if="drawerTab === 'http'">
+                        <div class="card" style="padding:12px;">
+                          <div class="card-title">HTTP</div>
+                          <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                            <div><div class="text-muted text-xs">HTTP Status</div><div x-text="selectedDomain.http_status || '—'"></div></div>
+                            <div><div class="text-muted text-xs">Page Title</div><div x-text="selectedDomain.page_title || '—'"></div></div>
+                            <div><div class="text-muted text-xs">Final URL</div><div class="text-sm" style="word-break:break-all;" x-text="selectedDomain.final_url || '—'"></div></div>
+                            <div><div class="text-muted text-xs">Server Header</div><div x-text="selectedDomain.server_header || '—'"></div></div>
+                            <div><div class="text-muted text-xs">Redirect Detected</div><div x-text="boolLabel(selectedDomain.redirect_detected)"></div></div>
+                            <div><div class="text-muted text-xs">Redirects to Legitimate</div><div x-text="boolLabel(selectedDomain.redirects_to_legitimate)"></div></div>
+                          </div>
                         </div>
-                      </div>
-                      <div class="card" style="padding:12px;">
-                        <div class="card-title">SSL</div>
-                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-                          <div><div class="text-muted text-xs">Valid</div><div x-text="boolLabel(selectedDomain.ssl_valid)"></div></div>
-                          <div><div class="text-muted text-xs">Issuer</div><div x-text="selectedDomain.ssl_issuer || '—'"></div></div>
-                          <div><div class="text-muted text-xs">Let's Encrypt</div><div x-text="boolLabel(selectedDomain.ssl_uses_lets_encrypt)"></div></div>
-                          <div><div class="text-muted text-xs">Self-signed</div><div x-text="boolLabel(selectedDomain.ssl_is_self_signed)"></div></div>
-                          <div><div class="text-muted text-xs">Cert Age (days)</div><div x-text="selectedDomain.ssl_cert_age_days ?? '—'"></div></div>
+                      </template>
+                      <template x-if="drawerTab === 'ssl'">
+                        <div class="card" style="padding:12px;">
+                          <div class="card-title">SSL</div>
+                          <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                            <div><div class="text-muted text-xs">Valid</div><div x-text="boolLabel(selectedDomain.ssl_valid)"></div></div>
+                            <div><div class="text-muted text-xs">Issuer</div><div x-text="selectedDomain.ssl_issuer || '—'"></div></div>
+                            <div><div class="text-muted text-xs">Let's Encrypt</div><div x-text="boolLabel(selectedDomain.ssl_uses_lets_encrypt)"></div></div>
+                            <div><div class="text-muted text-xs">Self-signed</div><div x-text="boolLabel(selectedDomain.ssl_is_self_signed)"></div></div>
+                            <div><div class="text-muted text-xs">Cert Age (days)</div><div x-text="selectedDomain.ssl_cert_age_days ?? '—'"></div></div>
+                          </div>
                         </div>
-                      </div>
-                      <div class="card" style="padding:12px;">
-                        <div class="card-title">GeoIP</div>
-                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-                          <div><div class="text-muted text-xs">Country</div><div x-text="selectedDomain.country_code || '—'"></div></div>
-                          <div><div class="text-muted text-xs">High-risk Country</div><div x-text="boolLabel(selectedDomain.is_high_risk_country)"></div></div>
-                          <div><div class="text-muted text-xs">ASN</div><div x-text="selectedDomain.asn || '—'"></div></div>
-                          <div><div class="text-muted text-xs">Organisation</div><div x-text="selectedDomain.org || '—'"></div></div>
+                      </template>
+                      <template x-if="drawerTab === 'whois'">
+                        <div class="card" style="padding:12px;">
+                          <div class="card-title">WHOIS</div>
+                          <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                            <div><div class="text-muted text-xs">Registrar</div><div x-text="selectedDomain.registrar || '—'"></div></div>
+                            <div><div class="text-muted text-xs">Registrant Org</div><div x-text="selectedDomain.registrant_org || '—'"></div></div>
+                            <div><div class="text-muted text-xs">Creation Date</div><div x-text="formatYmd(selectedDomain.creation_date)"></div></div>
+                            <div><div class="text-muted text-xs">Expiry Date</div><div x-text="formatYmd(selectedDomain.expiry_date)"></div></div>
+                            <div>
+                              <div class="text-muted text-xs">Domain Age</div>
+                              <div class="flex gap-2" style="flex-wrap:wrap;align-items:center;">
+                                <span x-text="selectedDomain.domain_age_days !== null && selectedDomain.domain_age_days !== undefined ? (Number(selectedDomain.domain_age_days) < 30 ? selectedDomain.domain_age_days + ' days — NEW' : selectedDomain.domain_age_days + ' days') : '—'"></span>
+                                <span x-show="selectedDomain.domain_age_days !== null && selectedDomain.domain_age_days !== undefined && Number(selectedDomain.domain_age_days) < 30" class="badge badge-red">NEW</span>
+                              </div>
+                            </div>
+                            <div>
+                              <div class="text-muted text-xs">WHOIS Privacy</div>
+                              <div class="flex gap-2" style="flex-wrap:wrap;align-items:center;">
+                                <span x-text="boolLabel(selectedDomain.whois_privacy)"></span>
+                                <span x-show="selectedDomain.whois_privacy === true" class="badge badge-yellow">⚠️ PRIVACY SHIELD</span>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      <div class="card" style="padding:12px;">
-                        <div class="card-title">WHOIS</div>
-                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-                          <div><div class="text-muted text-xs">Registrar</div><div x-text="selectedDomain.registrar || '—'"></div></div>
-                          <div><div class="text-muted text-xs">Domain Age (days)</div><div x-text="selectedDomain.domain_age_days ?? '—'"></div></div>
-                          <div><div class="text-muted text-xs">WHOIS Privacy</div><div x-text="boolLabel(selectedDomain.whois_privacy)"></div></div>
-                          <div><div class="text-muted text-xs">Last Checked</div><div x-text="selectedDomain.last_checked_at ? formatDate(selectedDomain.last_checked_at) : '—'"></div></div>
+                      </template>
+                      <template x-if="drawerTab === 'geoip'">
+                        <div class="card" style="padding:12px;">
+                          <div class="card-title">GeoIP</div>
+                          <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                            <div>
+                              <div class="text-muted text-xs">Country</div>
+                              <div class="flex gap-2" style="align-items:center;flex-wrap:wrap;">
+                                <span x-text="countryFlag(selectedDomain.country_code)"></span>
+                                <span x-text="selectedDomain.country_code || '—'"></span>
+                              </div>
+                            </div>
+                            <div>
+                              <div class="text-muted text-xs">Risk</div>
+                              <div>
+                                <span x-show="selectedDomain.is_high_risk_country === true" class="badge badge-red">HIGH RISK</span>
+                                <span x-show="selectedDomain.is_high_risk_country !== true" class="badge badge-gray">Normal</span>
+                              </div>
+                            </div>
+                            <div><div class="text-muted text-xs">ASN</div><div x-text="selectedDomain.asn || '—'"></div></div>
+                            <div><div class="text-muted text-xs">Organisation</div><div x-text="selectedDomain.org || '—'"></div></div>
+                          </div>
                         </div>
-                      </div>
+                      </template>
+                      <template x-if="drawerTab === 'screenshot'">
+                        <div class="card" style="padding:12px;">
+                          <div class="card-title">Screenshot</div>
+                          <div style="display:grid;gap:10px;">
+                            <img x-show="selectedDomain.screenshot_url" :src="selectedDomain.screenshot_url" alt="Screenshot" style="max-height:320px;width:100%;object-fit:contain;border-radius:10px;border:1px solid var(--border-color);" />
+                            <div class="flex gap-2" style="flex-wrap:wrap;">
+                              <a x-show="selectedDomain.urlscan_uuid" :href="`https://urlscan.io/result/${selectedDomain.urlscan_uuid}/`" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-secondary">Open URLScan</a>
+                              <span x-show="selectedDomain.urlscan_score !== null && selectedDomain.urlscan_score !== undefined" class="badge badge-blue" x-text="'URLScan score ' + selectedDomain.urlscan_score"></span>
+                            </div>
+                            <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                              <div>
+                                <div class="text-muted text-xs">pHash Distance</div>
+                                <div class="flex gap-2" style="flex-wrap:wrap;align-items:center;">
+                                  <span x-text="selectedDomain.phash_distance ?? '—'"></span>
+                                  <span :class="phashRisk(selectedDomain.phash_distance).tone" x-text="phashRisk(selectedDomain.phash_distance).label"></span>
+                                </div>
+                              </div>
+                              <div>
+                                <div class="text-muted text-xs">Visual Similarity</div>
+                                <div class="text-sm" x-text="selectedDomain.visual_similarity_pct !== null && selectedDomain.visual_similarity_pct !== undefined ? Number(selectedDomain.visual_similarity_pct).toFixed(1) + '%' : '—'"></div>
+                                <div style="height:8px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden;">
+                                  <div :style="similarityBarStyle(selectedDomain.visual_similarity_pct)"></div>
+                                </div>
+                              </div>
+                            </div>
+                            <div class="text-muted text-sm" x-show="!selectedDomain.screenshot_url && !selectedDomain.urlscan_uuid && (selectedDomain.urlscan_score === null || selectedDomain.urlscan_score === undefined) && (selectedDomain.phash_distance === null || selectedDomain.phash_distance === undefined) && (selectedDomain.visual_similarity_pct === null || selectedDomain.visual_similarity_pct === undefined)">
+                              No screenshot captured yet — use Enrich to fetch
+                            </div>
+                          </div>
+                        </div>
+                      </template>
                     </div>
                   </template>
                 </div>

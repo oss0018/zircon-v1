@@ -26,6 +26,11 @@ def test_lookalike_domains_component_targets_expected_frontend_flows():
     assert "/lookalike/rules/${rule.id}/scan" in js
     assert "/lookalike/rules/${this.domainsFilters.ruleId}/domains" in js
     assert "/lookalike/domains/${domain.id}" in js
+    assert "/lookalike/rules/${this.selectedDomain.rule_id}/domains/${this.selectedDomain.id}/enrich" in js
+    assert "/lookalike/rules/${this.selectedDomain.rule_id}/alert" in js
+    assert "/lookalike/rules/${this.selectedDomain.rule_id}/domains/${this.selectedDomain.id}/takedown" in js
+    assert "drawerTab" in js
+    assert "alert_threshold" in js
     assert "markFalsePositive" in js
     assert "markTrusted" in js
 
@@ -37,3 +42,17 @@ def test_lookalike_api_supports_ui_preview_and_fqdn_filtering():
     assert 'class RulePreviewBody' in api_source
     assert 'fqdn: Optional[str] = Query(None)' in api_source
     assert 'LookalikeDomain.fqdn.ilike' in api_source
+    assert 'alert_threshold' in api_source
+    assert 'class AlertDispatchBody' in api_source
+
+
+def test_index_contains_phase2_drawer_tabs_and_actions():
+    html = INDEX_HTML.read_text(encoding='utf-8')
+
+    assert "Screenshot" in html
+    assert "WHOIS" in html
+    assert "GeoIP" in html
+    assert "No screenshot captured yet — use Enrich to fetch" in html
+    assert "Takedown Package" in html
+    assert "Send Alert" in html
+    assert "Alert Threshold (%)" in html

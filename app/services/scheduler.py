@@ -149,14 +149,19 @@ def start_scheduler():
                             select(LookalikeDomain).where(
                                 LookalikeDomain.rule_id == rule.id,
                                 LookalikeDomain.status == "registered",
-                                LookalikeDomain.threat_score >= 50,
+                                LookalikeDomain.threat_score >= (rule.alert_threshold or 50),
                                 LookalikeDomain.last_checked_at >= cutoff,
                             )
                         )
                         domains = list(domains_res.scalars().all())
                         if not domains:
                             continue
-                        summary = await dispatch_lookalike_alerts(rule.id, domains, db)
+                        summary = await dispatch_lookalike_alerts(
+                            rule.id,
+                            domains,
+                            db,
+                            alert_threshold=rule.alert_threshold or 50,
+                        )
                         print(
                             f"[scheduler] Lookalike alerts rule {rule.id}: "
                             f"sent={summary.get('sent', 0)} failed={summary.get('failed', 0)}"

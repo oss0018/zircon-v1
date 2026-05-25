@@ -57,6 +57,9 @@
       trustedEntries: [],
       showDrawer: false,
       selectedDomain: null,
+      drawerTab: 'overview',
+      enrichLoading: false,
+      alertLoading: false,
       scanProgress: {
         running: false,
         ruleId: null,
@@ -101,6 +104,7 @@
           include_bitsquatting: true,
           max_variants: 10000,
           similarity_threshold_pct: 70,
+          alert_threshold: 50,
           active: true,
         };
       },
@@ -200,6 +204,51 @@
         return normalizeBool(value);
       },
 
+      formatYmd(value) {
+        if (!value) return '—';
+        const text = String(value);
+        if (text.includes('T')) return text.slice(0, 10);
+        return text.slice(0, 10);
+      },
+
+      countryFlag(value) {
+        const code = String(value || '').trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(code)) return '🌐';
+        return String.fromCodePoint(...[...code].map((ch) => 127397 + ch.charCodeAt(0)));
+      },
+
+      phashRisk(distance) {
+        const value = Number(distance);
+        if (!Number.isFinite(value)) return { label: '—', tone: 'badge badge-gray' };
+        if (value <= 10) return { label: 'Low', tone: 'badge badge-green' };
+        if (value <= 20) return { label: 'Medium', tone: 'badge badge-yellow' };
+        return { label: 'High', tone: 'badge badge-red' };
+      },
+
+      similarityBarStyle(value) {
+        const pct = Math.max(0, Math.min(100, Number(value || 0)));
+        let color = 'var(--accent-green)';
+        if (pct >= 75) color = 'var(--danger)';
+        else if (pct >= 45) color = 'var(--warning)';
+        return `width:${pct}%;background:${color};height:100%;border-radius:999px;`;
+      },
+
+      setDrawerTab(tab) {
+        this.drawerTab = tab;
+      },
+
+      canShowTakedown() {
+        if (!this.selectedDomain) return false;
+        const score = Number(this.selectedDomain.threat_score || 0);
+        return score >= 40 || this.selectedDomain.status === 'registered';
+      },
+
+      canSendAlert() {
+        if (!this.selectedDomain) return false;
+        const score = Number(this.selectedDomain.threat_score || 0);
+        return score >= 50;
+      },
+
       async loadBrands() {
         try {
           this.brands = await api.get('/brands/');
@@ -274,6 +323,7 @@
           include_bitsquatting: rule.include_bitsquatting !== false,
           max_variants: rule.max_variants || 10000,
           similarity_threshold_pct: rule.similarity_threshold_pct || 70,
+          alert_threshold: rule.alert_threshold || 50,
           active: rule.active !== false,
         };
         this.previewData = null;
@@ -299,6 +349,7 @@
           include_bitsquatting: !!this.ruleForm.include_bitsquatting,
           max_variants: Number(this.ruleForm.max_variants || 0),
           similarity_threshold_pct: Number(this.ruleForm.similarity_threshold_pct || 0),
+          alert_threshold: Number(this.ruleForm.alert_threshold || 50),
           active: !!this.ruleForm.active,
         };
       },
@@ -517,6 +568,7 @@
         this.showDrawer = true;
         this.drawerLoading = true;
         this.selectedDomain = null;
+        this.drawerTab = 'overview';
         try {
           this.selectedDomain = await api.get(`/lookalike/domains/${domain.id}`);
         } catch (e) {
@@ -556,6 +608,62 @@
 
       markTrusted() {
         this.updateSelectedDomain({ status: 'trusted' }, 'Domain marked as trusted');
+      },
+
+      async enrichSelectedDomain() {
+        if (!this.selectedDomain || this.enrichLoading) return;
+        this.enrichLoading = true;
+        try {
+          this.selectedDomain = await lookalikeFetch(
+            `/lookalike/rules/${this.selectedDomain.rule_id}/domains/${this.selectedDomain.id}/enrich`,
+            { method: 'POST' }
+          );
+          await this.loadDomains();
+          showToast('Domain enrichment complete', 'success');
+        } catch (e) {
+          showToast(e.message || 'Enrichment failed', 'error');
+        } finally {
+          this.enrichLoading = false;
+        }
+      },
+
+      async downloadTakedownPackage() {
+        if (!this.selectedDomain) return;
+        try {
+          const resp = await lookalikeFetch(
+            `/lookalike/rules/${this.selectedDomain.rule_id}/domains/${this.selectedDomain.id}/takedown`,
+            {},
+            false
+          );
+          const blob = await resp.blob();
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `takedown_rule${this.selectedDomain.rule_id}_domain${this.selectedDomain.id}.txt`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.URL.revokeObjectURL(url);
+        } catch (e) {
+          showToast(e.message || 'Failed to download takedown package', 'error');
+        }
+      },
+
+      async sendDomainAlert() {
+        if (!this.selectedDomain || this.alertLoading) return;
+        this.alertLoading = true;
+        try {
+          await lookalikeFetch(`/lookalike/rules/${this.selectedDomain.rule_id}/alert`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain_id: this.selectedDomain.id }),
+          });
+          showToast('Alert dispatched', 'success');
+        } catch (e) {
+          showToast(e.message || 'Alert dispatch failed', 'error');
+        } finally {
+          this.alertLoading = false;
+        }
       },
 
       async loadTrusted() {
