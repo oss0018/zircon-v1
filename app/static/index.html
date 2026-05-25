@@ -28,6 +28,7 @@
   <script src="/static/js/storage_sources.js"></script>
   <script src="/static/js/infra_intel.js"></script>
   <script src="/static/js/logo_misuse.js"></script>
+  <script src="/static/js/lookalike_domains.js"></script>
 
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container"></div>
@@ -129,7 +130,7 @@
                   <span x-text="t('monitoring')"></span>
                 </div>
 
-                <div class="nav-sub-item" :class="page === 'brands' ? 'active' : ''" @click="navigate('brands')" @contextmenu.prevent="openPageInNewWindow('brands')">
+                <div class="nav-sub-item" :class="page === 'lookalike-domains' ? 'active' : ''" @click="navigate('lookalike-domains')" @contextmenu.prevent="openPageInNewWindow('lookalike-domains')">
                   <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
                   <span x-text="t('look_alike_domains')"></span>
                 </div>
@@ -237,7 +238,7 @@
           <div class="topbar">
             <div class="topbar-title">
               <span class="pulse" style="margin-right:8px;"></span>
-              <span x-text="page === 'brands' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'storage-sources' ? 'System › ' + t('storage_sources') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
+              <span x-text="page === 'lookalike-domains' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'storage-sources' ? 'System › ' + t('storage_sources') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
             </div>
             <div class="topbar-actions">
               <span class="text-muted text-sm" x-text="new Date().toLocaleDateString()"></span>
@@ -1594,6 +1595,536 @@
                     <button class="btn btn-secondary" @click="showModal = false" x-text="t('cancel')"></button>
                     <button class="btn btn-primary" @click="saveJob()" x-text="t('save')"></button>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ── LOOK-ALIKE DOMAINS ──────────────────────────────── -->
+            <div x-show="page === 'lookalike-domains'" x-data="lookalikeDomainsPage" x-init="init()">
+              <div class="flex items-center gap-1 mb-4 text-sm" style="color:var(--text-muted);">
+                <span>Brand Protection</span>
+                <span style="margin:0 4px;">›</span>
+                <span style="color:var(--accent-green);" x-text="t('look_alike_domains')"></span>
+              </div>
+
+              <div class="flex justify-between items-center mb-4" style="flex-wrap:wrap;gap:12px;">
+                <div class="text-muted" style="max-width:760px;font-size:0.92rem;line-height:1.6;">
+                  Manage look-alike detection rules, run SSE-backed scans, review enriched domains, and maintain trusted domain patterns without leaving the SPA.
+                </div>
+                <button class="btn btn-primary" @click="openCreateRuleModal()">+ New Rule</button>
+              </div>
+
+              <div class="card mb-4" style="padding:12px;">
+                <div class="ti-tabs">
+                  <button class="btn btn-sm" :class="activeTab === 'rules' ? 'btn-primary' : 'btn-secondary'" @click="setTab('rules')">Rules</button>
+                  <button class="btn btn-sm" :class="activeTab === 'domains' ? 'btn-primary' : 'btn-secondary'" @click="setTab('domains')">Domains</button>
+                  <button class="btn btn-sm" :class="activeTab === 'trusted' ? 'btn-primary' : 'btn-secondary'" @click="setTab('trusted')">Trusted Domains</button>
+                </div>
+              </div>
+
+              <div x-show="scanProgress.running || scanProgress.summary" class="card mb-4">
+                <div class="flex justify-between items-center mb-3" style="flex-wrap:wrap;gap:8px;">
+                  <div class="card-title" style="margin-bottom:0;">
+                    Scan Progress
+                    <span class="text-muted text-sm" style="font-weight:400;" x-text="scanProgress.ruleId ? '— Rule #' + scanProgress.ruleId : ''"></span>
+                  </div>
+                  <span :class="scanProgress.running ? 'badge badge-yellow' : 'badge badge-green'" x-text="scanProgress.running ? 'Running' : 'Completed'"></span>
+                </div>
+                <div style="height:10px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden;margin-bottom:8px;">
+                  <div :style="`width:${progressPct()}%;background:var(--accent-green);height:100%;`"></div>
+                </div>
+                <div class="text-sm text-muted" style="margin-bottom:10px;">
+                  <span x-text="progressPct() + '%'"></span>
+                  · <span x-text="scanProgress.checked"></span>/<span x-text="scanProgress.total"></span>
+                  <span x-show="scanProgress.latestFqdn"> · Last: <span class="font-mono" x-text="scanProgress.latestFqdn"></span></span>
+                </div>
+                <div class="flex gap-2 mb-3" style="flex-wrap:wrap;" x-show="scanProgress.summary">
+                  <span class="badge badge-blue">Total <span x-text="scanProgress.summary && scanProgress.summary.total"></span></span>
+                  <span class="badge badge-red">Registered <span x-text="scanProgress.summary && scanProgress.summary.registered"></span></span>
+                  <span class="badge badge-green">Trusted <span x-text="scanProgress.summary && scanProgress.summary.trusted"></span></span>
+                  <span class="badge badge-gray">Unregistered <span x-text="scanProgress.summary && scanProgress.summary.unregistered"></span></span>
+                </div>
+                <div x-show="scanProgress.results.length > 0" style="max-height:180px;overflow:auto;">
+                  <template x-for="item in scanProgress.results" :key="item.fqdn + '-' + item.checked">
+                    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-color);font-size:12px;">
+                      <span class="font-mono" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;" x-text="item.fqdn"></span>
+                      <span :class="statusBadge(item.status)" x-text="item.status"></span>
+                      <span class="badge badge-blue" x-text="'Threat ' + (item.threat_score ?? '—')"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'rules'">
+                <div x-show="quickPreview" class="card mb-4">
+                  <div class="flex justify-between items-center mb-3">
+                    <div class="card-title" style="margin-bottom:0;">Preview Summary</div>
+                    <span class="text-muted text-sm" x-text="quickPreview && quickPreview.ruleName"></span>
+                  </div>
+                  <template x-if="quickPreview && quickPreview.loading">
+                    <div class="text-muted"><span class="spinner" style="width:14px;height:14px;margin-right:8px;"></span>Loading preview...</div>
+                  </template>
+                  <template x-if="quickPreview && !quickPreview.loading && quickPreview.data">
+                    <div class="flex gap-2" style="flex-wrap:wrap;">
+                      <span class="badge badge-blue">Raw <span x-text="quickPreview.data.raw_count"></span></span>
+                      <span class="badge badge-green">Filtered <span x-text="quickPreview.data.filtered_count"></span></span>
+                      <span class="badge badge-gray">Filtered out <span x-text="quickPreview.data.filtered_out"></span></span>
+                      <span class="badge badge-yellow">Threshold <span x-text="quickPreview.data.threshold_pct"></span>%</span>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="card" style="padding:0;">
+                  <div class="flex justify-between items-center" style="padding:16px 16px 0;flex-wrap:wrap;gap:8px;">
+                    <div class="card-title" style="margin-bottom:0;">Rules</div>
+                    <button class="btn btn-sm btn-secondary" @click="loadRules()">Refresh</button>
+                  </div>
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Protected Domain</th>
+                          <th>Brand</th>
+                          <th>TLD List</th>
+                          <th>Threshold%</th>
+                          <th>Last Scan</th>
+                          <th>Active</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-if="rulesLoading">
+                          <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
+                        </template>
+                        <template x-if="!rulesLoading && rules.length === 0">
+                          <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted);">No look-alike rules yet.</td></tr>
+                        </template>
+                        <template x-for="rule in rules" :key="rule.id">
+                          <tr>
+                            <td>
+                              <div style="font-weight:600;" x-text="rule.name"></div>
+                              <div class="text-muted text-xs" x-text="'ID ' + rule.id"></div>
+                            </td>
+                            <td class="font-mono" x-text="rule.protected_domain"></td>
+                            <td x-text="brandName(rule.brand_id)"></td>
+                            <td>
+                              <div x-text="formatTldLabel(rule.tld_list)"></div>
+                              <div class="text-muted text-xs" x-text="formatAttackWordsLabel(rule.attack_words) + ' words'"></div>
+                            </td>
+                            <td><span class="badge badge-blue" x-text="rule.similarity_threshold_pct + '%'"></span></td>
+                            <td x-text="rule.last_scan_at ? formatDate(rule.last_scan_at) : '—'"></td>
+                            <td><span :class="rule.active ? 'badge badge-green' : 'badge badge-gray'" x-text="rule.active ? 'Yes' : 'No'"></span></td>
+                            <td>
+                              <div class="flex gap-2" style="flex-wrap:wrap;">
+                                <button class="btn btn-sm btn-primary" @click="runRuleScan(rule)" :disabled="scanProgress.running">Scan</button>
+                                <button class="btn btn-sm btn-secondary" @click="previewRule(rule)">Preview</button>
+                                <button class="btn btn-sm btn-secondary" @click="viewRuleDomains(rule)">View Domains</button>
+                                <button class="btn btn-sm btn-secondary" @click="openEditRuleModal(rule)">Edit</button>
+                                <button class="btn btn-sm btn-danger" @click="deleteRule(rule)">Delete</button>
+                              </div>
+                            </td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'domains'">
+                <div class="card mb-4">
+                  <div class="flex gap-2" style="flex-wrap:wrap;align-items:end;">
+                    <div class="form-group" style="min-width:180px;flex:1;">
+                      <label class="form-label">Rule</label>
+                      <select class="form-select" x-model="domainsFilters.ruleId" @change="domainsFilters.page = 1; loadDomains()">
+                        <template x-for="rule in rules" :key="'domains-rule-' + rule.id">
+                          <option :value="String(rule.id)" x-text="rule.name"></option>
+                        </template>
+                      </select>
+                    </div>
+                    <div class="form-group" style="min-width:150px;">
+                      <label class="form-label">Status</label>
+                      <select class="form-select" x-model="domainsFilters.status" @change="domainsFilters.page = 1; loadDomains()">
+                        <option value="all">All</option>
+                        <option value="registered">Registered</option>
+                        <option value="unregistered">Unregistered</option>
+                        <option value="trusted">Trusted</option>
+                      </select>
+                    </div>
+                    <div class="form-group" style="min-width:140px;">
+                      <label class="form-label">Severity</label>
+                      <select class="form-select" x-model="domainsFilters.severity" @change="domainsFilters.page = 1; loadDomains()">
+                        <option value="">Any</option>
+                        <option value="1">Info</option>
+                        <option value="2">Low</option>
+                        <option value="3">Medium</option>
+                        <option value="4">High</option>
+                        <option value="5">Critical</option>
+                      </select>
+                    </div>
+                    <div class="form-group" style="min-width:220px;flex:1;">
+                      <label class="form-label">FQDN Search</label>
+                      <input class="form-input" x-model="domainsFilters.query" @keyup.enter="domainsFilters.page = 1; loadDomains()" placeholder="brand-example.com" />
+                    </div>
+                    <div class="form-group" style="min-width:130px;">
+                      <label class="form-label">Export</label>
+                      <div class="flex gap-2">
+                        <select class="form-select" x-model="exportFormat">
+                          <option value="csv">CSV</option>
+                          <option value="json">JSON</option>
+                        </select>
+                        <button class="btn btn-secondary btn-sm" @click="exportDomains()">Go</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <div class="flex justify-between items-center text-sm" style="margin-bottom:6px;">
+                      <label class="form-label" style="margin-bottom:0;">Min Threat Score</label>
+                      <span class="badge badge-yellow" x-text="domainsFilters.minThreatScore"></span>
+                    </div>
+                    <input type="range" min="0" max="100" step="5" x-model.number="domainsFilters.minThreatScore" @change="domainsFilters.page = 1; loadDomains()" style="width:100%;" />
+                  </div>
+                </div>
+
+                <div class="card" style="padding:0;">
+                  <div class="flex justify-between items-center" style="padding:16px 16px 0;">
+                    <div class="card-title" style="margin-bottom:0;">Domains</div>
+                    <div class="text-muted text-sm" x-text="(domainsResult.total || 0) + ' result(s)'"></div>
+                  </div>
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>FQDN</th>
+                          <th>Status</th>
+                          <th>Threat Score</th>
+                          <th>Severity</th>
+                          <th>IP</th>
+                          <th>HTTP Status</th>
+                          <th>SSL</th>
+                          <th>Algorithms</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-if="domainsLoading">
+                          <tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
+                        </template>
+                        <template x-if="!domainsLoading && domainsResult.items.length === 0">
+                          <tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">No domains match the current filters.</td></tr>
+                        </template>
+                        <template x-for="domain in domainsResult.items" :key="domain.id">
+                          <tr>
+                            <td class="font-mono">
+                              <span x-text="domain.fqdn"></span>
+                              <span x-show="domain.is_idn" class="badge badge-blue" style="margin-left:6px;font-size:10px;">IDN</span>
+                            </td>
+                            <td><span :class="statusBadge(domain.status)" x-text="domain.status"></span></td>
+                            <td style="min-width:140px;">
+                              <div class="text-sm" style="margin-bottom:6px;" x-text="domain.threat_score ?? '—'"></div>
+                              <div style="height:8px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden;">
+                                <div :style="threatBarStyle(domain.threat_score)"></div>
+                              </div>
+                            </td>
+                            <td><span :class="severityBadge(domain.severity)" x-text="severityLabel(domain.severity)"></span></td>
+                            <td class="font-mono text-xs" x-text="domain.ip || '—'"></td>
+                            <td x-text="domain.http_status || '—'"></td>
+                            <td x-text="domain.ssl_valid === true ? '🔒' : domain.ssl_valid === false ? '⚠️' : '—'"></td>
+                            <td class="text-xs" x-text="algorithmsPreview(domain.algorithms)"></td>
+                            <td><button class="btn btn-sm btn-secondary" @click="openDomainDrawer(domain)">Details</button></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="flex justify-between items-center" style="padding:12px 16px;">
+                    <div class="text-muted text-sm">Page <span x-text="domainsFilters.page"></span> of <span x-text="pagedDomainsTotal()"></span></div>
+                    <div class="flex gap-2">
+                      <button class="btn btn-sm btn-secondary" @click="prevDomainsPage()" :disabled="domainsFilters.page <= 1">‹ Prev</button>
+                      <button class="btn btn-sm btn-secondary" @click="nextDomainsPage()" :disabled="domainsFilters.page >= pagedDomainsTotal()">Next ›</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'trusted'">
+                <div class="card mb-4">
+                  <div class="flex justify-between items-end" style="flex-wrap:wrap;gap:12px;">
+                    <div class="form-group" style="min-width:220px;flex:1;margin-bottom:0;">
+                      <label class="form-label">Rule</label>
+                      <select class="form-select" x-model="trustedRuleId" @change="loadTrusted()">
+                        <template x-for="rule in rules" :key="'trusted-rule-' + rule.id">
+                          <option :value="String(rule.id)" x-text="rule.name"></option>
+                        </template>
+                      </select>
+                    </div>
+                    <button class="btn btn-primary" @click="openTrustedModal()">+ Add</button>
+                  </div>
+                </div>
+
+                <div class="card" style="padding:0;">
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Pattern</th>
+                          <th>Match Type</th>
+                          <th>Reason</th>
+                          <th>Verified</th>
+                          <th>Added</th>
+                          <th>Delete</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-if="trustedLoading">
+                          <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
+                        </template>
+                        <template x-if="!trustedLoading && trustedEntries.length === 0">
+                          <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted);">No trusted domains configured.</td></tr>
+                        </template>
+                        <template x-for="entry in trustedEntries" :key="entry.id">
+                          <tr>
+                            <td class="font-mono" x-text="entry.fqdn_pattern"></td>
+                            <td><span class="badge badge-blue" x-text="entry.match_type"></span></td>
+                            <td x-text="entry.reason || '—'"></td>
+                            <td><span :class="entry.verified ? 'badge badge-green' : 'badge badge-gray'" x-text="entry.verified ? 'Yes' : 'No'"></span></td>
+                            <td x-text="entry.created_at ? formatDate(entry.created_at) : '—'"></td>
+                            <td><button class="btn btn-sm btn-danger" @click="deleteTrusted(entry)">Delete</button></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div x-show="showRuleModal" class="modal-overlay" @click.self="closeRuleModal()">
+                <div class="modal" style="max-width:760px;max-height:90vh;overflow:auto;">
+                  <div class="modal-title" x-text="ruleModalMode === 'edit' ? 'Edit Look-alike Rule' : 'Create Look-alike Rule'"></div>
+                  <div class="form-group">
+                    <label class="form-label">Brand</label>
+                    <select class="form-select" x-model="ruleForm.brand_id" :disabled="ruleModalMode === 'edit'">
+                      <option value="">Select a brand</option>
+                      <template x-for="brand in brands" :key="'brand-option-' + brand.id">
+                        <option :value="brand.id" x-text="brand.name"></option>
+                      </template>
+                    </select>
+                    <div x-show="ruleModalMode === 'edit'" class="text-muted text-xs" style="margin-top:6px;">Brand assignment is fixed after rule creation.</div>
+                  </div>
+                  <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
+                    <div class="form-group">
+                      <label class="form-label">Rule Name</label>
+                      <input class="form-input" x-model="ruleForm.name" placeholder="Acme Main Domain" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Protected Domain</label>
+                      <input class="form-input" x-model="ruleForm.protected_domain" @input="scheduleRulePreview()" placeholder="acme.com" />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Brand Terms</label>
+                    <input class="form-input" x-model="ruleForm.brand_terms_text" @input="scheduleRulePreview()" placeholder="acme, acme cloud, acmecorp" />
+                    <div class="flex gap-2" style="flex-wrap:wrap;margin-top:8px;" x-show="parsedBrandTerms().length > 0">
+                      <template x-for="term in parsedBrandTerms()" :key="term">
+                        <span class="badge badge-gray" x-text="term"></span>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
+                    <div class="form-group">
+                      <label class="form-label">TLD List</label>
+                      <select class="form-select" x-model="ruleForm.tld_list" @change="scheduleRulePreview()">
+                        <option value="top30">Top 30</option>
+                        <option value="top100">Top 100</option>
+                        <option value="top500">Top 500</option>
+                        <option value="full1500">Full 1500</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Attack Words</label>
+                      <select class="form-select" x-model="ruleForm.attack_words" @change="scheduleRulePreview()">
+                        <option value="core">Core</option>
+                        <option value="extended">Extended</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="grid" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">
+                    <label class="card" style="padding:12px;display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" x-model="ruleForm.include_idn" @change="scheduleRulePreview()" />
+                      <span>Include IDN</span>
+                    </label>
+                    <label class="card" style="padding:12px;display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" x-model="ruleForm.include_bitsquatting" @change="scheduleRulePreview()" />
+                      <span>Include Bitsquatting</span>
+                    </label>
+                    <label class="card" style="padding:12px;display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" x-model="ruleForm.active" />
+                      <span>Active</span>
+                    </label>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Max Variants</label>
+                    <input class="form-input" type="number" min="1" max="50000" x-model.number="ruleForm.max_variants" @input="scheduleRulePreview()" />
+                  </div>
+                  <div class="form-group">
+                    <div class="flex justify-between items-center" style="margin-bottom:8px;">
+                      <label class="form-label" style="margin-bottom:0;">Similarity Threshold</label>
+                      <span :class="thresholdBadgeClass()" x-text="ruleForm.similarity_threshold_pct + '%'"></span>
+                    </div>
+                    <input type="range" min="30" max="100" step="1" x-model.number="ruleForm.similarity_threshold_pct" @input="scheduleRulePreview()" style="width:100%;" />
+                    <div class="text-muted text-sm" style="margin-top:8px;" x-text="thresholdHint()"></div>
+                  </div>
+                  <div class="card" style="padding:12px;">
+                    <div class="flex justify-between items-center mb-2">
+                      <div class="card-title" style="margin-bottom:0;">Estimated Variant Count</div>
+                      <span x-show="previewLoading" class="spinner" style="width:14px;height:14px;"></span>
+                    </div>
+                    <div x-show="previewError" class="badge badge-red" x-text="previewError"></div>
+                    <template x-if="previewData">
+                      <div>
+                        <div class="flex gap-2 mb-2" style="flex-wrap:wrap;">
+                          <span class="badge badge-blue">Raw <span x-text="previewData.raw_count"></span></span>
+                          <span class="badge badge-green">Filtered <span x-text="previewData.filtered_count"></span></span>
+                          <span class="badge badge-gray">Filtered out <span x-text="previewData.filtered_out"></span></span>
+                        </div>
+                        <div class="text-muted text-sm">Preview updates after 600ms when threshold or generation options change.</div>
+                      </div>
+                    </template>
+                    <template x-if="!previewData && !previewError && !previewLoading">
+                      <div class="text-muted text-sm">Enter a protected domain to calculate an estimated variant count.</div>
+                    </template>
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="closeRuleModal()" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="saveRule()" :disabled="ruleSaving">
+                      <span x-show="ruleSaving" class="spinner" style="width:14px;height:14px;"></span>
+                      <span x-text="ruleModalMode === 'edit' ? 'Save Changes' : 'Create Rule'"></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div x-show="showTrustedModal" class="modal-overlay" @click.self="showTrustedModal = false">
+                <div class="modal" style="max-width:520px;">
+                  <div class="modal-title">Add Trusted Domain</div>
+                  <div class="form-group">
+                    <label class="form-label">FQDN Pattern</label>
+                    <input class="form-input" x-model="trustedForm.fqdn_pattern" placeholder="login.acme.com or *.acme.com" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Match Type</label>
+                    <select class="form-select" x-model="trustedForm.match_type">
+                      <option value="exact">Exact</option>
+                      <option value="wildcard">Wildcard</option>
+                      <option value="suffix">Suffix</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Reason</label>
+                    <textarea class="form-input" x-model="trustedForm.reason" rows="3" placeholder="Corporate login domain"></textarea>
+                  </div>
+                  <div class="modal-footer">
+                    <button class="btn btn-secondary" @click="showTrustedModal = false" x-text="t('cancel')"></button>
+                    <button class="btn btn-primary" @click="saveTrusted()">Add</button>
+                  </div>
+                </div>
+              </div>
+
+              <div x-show="showDrawer" class="scan-drawer-overlay" @click="closeDrawer()"></div>
+              <div x-show="showDrawer" class="scan-drawer" @click.stop="">
+                <div class="scan-drawer-header">
+                  <div class="flex items-center justify-between mb-2">
+                    <div>
+                      <div class="card-title" style="margin-bottom:4px;">Domain Details</div>
+                      <div class="font-mono text-sm" x-text="selectedDomain ? selectedDomain.fqdn : 'Loading…'"></div>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" @click="closeDrawer()">✕</button>
+                  </div>
+                  <div class="flex gap-2 mb-3" style="flex-wrap:wrap;" x-show="selectedDomain">
+                    <span :class="selectedDomain ? statusBadge(selectedDomain.status) : 'badge badge-gray'" x-text="selectedDomain ? selectedDomain.status : '—'"></span>
+                    <span class="badge badge-blue" x-text="selectedDomain ? 'Threat ' + (selectedDomain.threat_score ?? '—') : 'Threat —'"></span>
+                    <span :class="selectedDomain ? severityBadge(selectedDomain.severity) : 'badge badge-gray'" x-text="selectedDomain ? severityLabel(selectedDomain.severity) : '—'"></span>
+                    <span x-show="selectedDomain && selectedDomain.is_false_positive" class="badge badge-yellow">False Positive</span>
+                  </div>
+                  <div class="flex gap-2" style="flex-wrap:wrap;">
+                    <button class="btn btn-sm btn-secondary" @click="markFalsePositive()" :disabled="!selectedDomain">Mark FP</button>
+                    <button class="btn btn-sm btn-secondary" @click="clearFalsePositive()" x-show="selectedDomain && selectedDomain.is_false_positive">Clear FP</button>
+                    <button class="btn btn-sm btn-primary" @click="markTrusted()" :disabled="!selectedDomain">Mark Trusted</button>
+                  </div>
+                </div>
+                <div class="scan-drawer-body">
+                  <div x-show="drawerLoading" class="text-muted"><span class="spinner" style="width:16px;height:16px;margin-right:8px;"></span>Loading...</div>
+                  <template x-if="selectedDomain">
+                    <div style="display:grid;gap:12px;">
+                      <div class="card" style="padding:12px;">
+                        <div class="card-title">Detection</div>
+                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                          <div><div class="text-muted text-xs">Similarity</div><div x-text="selectedDomain.similarity_score ?? '—'"></div></div>
+                          <div><div class="text-muted text-xs">Levenshtein</div><div x-text="selectedDomain.levenshtein_distance ?? '—'"></div></div>
+                          <div><div class="text-muted text-xs">Algorithms</div><div class="text-sm" x-text="algorithmsPreview(selectedDomain.algorithms)"></div></div>
+                          <div><div class="text-muted text-xs">Unicode Form</div><div class="text-sm" x-text="selectedDomain.unicode_form || '—'"></div></div>
+                        </div>
+                      </div>
+                      <div class="card" style="padding:12px;">
+                        <div class="card-title">Signals</div>
+                        <div class="flex gap-2" style="flex-wrap:wrap;" x-show="selectedDomain.signals_fired && selectedDomain.signals_fired.length">
+                          <template x-for="signal in selectedDomain.signals_fired" :key="signal">
+                            <span class="badge badge-yellow" x-text="signal"></span>
+                          </template>
+                        </div>
+                        <div class="text-muted text-sm" x-show="!selectedDomain.signals_fired || selectedDomain.signals_fired.length === 0">No detection signals recorded.</div>
+                      </div>
+                      <div class="card" style="padding:12px;">
+                        <div class="card-title">DNS</div>
+                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                          <div><div class="text-muted text-xs">Has A</div><div x-text="boolLabel(selectedDomain.has_a_record)"></div></div>
+                          <div><div class="text-muted text-xs">Has MX</div><div x-text="boolLabel(selectedDomain.has_mx_record)"></div></div>
+                          <div><div class="text-muted text-xs">Has NS</div><div x-text="boolLabel(selectedDomain.has_ns_record)"></div></div>
+                          <div><div class="text-muted text-xs">IP</div><div class="font-mono text-sm" x-text="selectedDomain.ip || '—'"></div></div>
+                        </div>
+                      </div>
+                      <div class="card" style="padding:12px;">
+                        <div class="card-title">HTTP</div>
+                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                          <div><div class="text-muted text-xs">HTTP Status</div><div x-text="selectedDomain.http_status || '—'"></div></div>
+                          <div><div class="text-muted text-xs">Page Title</div><div x-text="selectedDomain.page_title || '—'"></div></div>
+                          <div><div class="text-muted text-xs">Final URL</div><div class="text-sm" style="word-break:break-all;" x-text="selectedDomain.final_url || '—'"></div></div>
+                          <div><div class="text-muted text-xs">Server Header</div><div x-text="selectedDomain.server_header || '—'"></div></div>
+                          <div><div class="text-muted text-xs">Redirect Detected</div><div x-text="boolLabel(selectedDomain.redirect_detected)"></div></div>
+                          <div><div class="text-muted text-xs">Redirects to Legitimate</div><div x-text="boolLabel(selectedDomain.redirects_to_legitimate)"></div></div>
+                        </div>
+                      </div>
+                      <div class="card" style="padding:12px;">
+                        <div class="card-title">SSL</div>
+                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                          <div><div class="text-muted text-xs">Valid</div><div x-text="boolLabel(selectedDomain.ssl_valid)"></div></div>
+                          <div><div class="text-muted text-xs">Issuer</div><div x-text="selectedDomain.ssl_issuer || '—'"></div></div>
+                          <div><div class="text-muted text-xs">Let's Encrypt</div><div x-text="boolLabel(selectedDomain.ssl_uses_lets_encrypt)"></div></div>
+                          <div><div class="text-muted text-xs">Self-signed</div><div x-text="boolLabel(selectedDomain.ssl_is_self_signed)"></div></div>
+                          <div><div class="text-muted text-xs">Cert Age (days)</div><div x-text="selectedDomain.ssl_cert_age_days ?? '—'"></div></div>
+                        </div>
+                      </div>
+                      <div class="card" style="padding:12px;">
+                        <div class="card-title">GeoIP</div>
+                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                          <div><div class="text-muted text-xs">Country</div><div x-text="selectedDomain.country_code || '—'"></div></div>
+                          <div><div class="text-muted text-xs">High-risk Country</div><div x-text="boolLabel(selectedDomain.is_high_risk_country)"></div></div>
+                          <div><div class="text-muted text-xs">ASN</div><div x-text="selectedDomain.asn || '—'"></div></div>
+                          <div><div class="text-muted text-xs">Organisation</div><div x-text="selectedDomain.org || '—'"></div></div>
+                        </div>
+                      </div>
+                      <div class="card" style="padding:12px;">
+                        <div class="card-title">WHOIS</div>
+                        <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                          <div><div class="text-muted text-xs">Registrar</div><div x-text="selectedDomain.registrar || '—'"></div></div>
+                          <div><div class="text-muted text-xs">Domain Age (days)</div><div x-text="selectedDomain.domain_age_days ?? '—'"></div></div>
+                          <div><div class="text-muted text-xs">WHOIS Privacy</div><div x-text="boolLabel(selectedDomain.whois_privacy)"></div></div>
+                          <div><div class="text-muted text-xs">Last Checked</div><div x-text="selectedDomain.last_checked_at ? formatDate(selectedDomain.last_checked_at) : '—'"></div></div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </div>
             </div>

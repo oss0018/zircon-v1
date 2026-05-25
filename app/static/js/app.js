@@ -184,7 +184,7 @@ document.addEventListener('alpine:init', () => {
       if (p === 'deep-search' || p === 'threat-intel' || p === 'ti-dashboard' || p === 'infrastructure-intelligence') {
         this.csintOpen = true;
       }
-      if (p === 'watchlist' || p === 'monitoring' || p === 'brands' ||
+      if (p === 'watchlist' || p === 'monitoring' || p === 'brands' || p === 'lookalike-domains' ||
           p === 'impersonation-monitoring' || p === 'logo-content-misuse') {
         this.automationOpen = true;
       }
