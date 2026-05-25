@@ -25,7 +25,7 @@ _MODULE_CLASSES = {
 
 _INFRA_SERVICE_TYPES = {
     "shodan", "censys", "securitytrails", "virustotal", "alienvault", "whoisxml", "leakix",
-    "fofa", "zoomeye", "criminalip",
+    "fofa", "zoomeye", "criminalip", "grayhatwarfare",
 }
 
 

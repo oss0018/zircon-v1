@@ -37,6 +37,13 @@ class CloudOSINTModule:
     def __init__(self, keys: dict[str, str]):
         self._keys = keys
 
+    def _has(self, service: str) -> bool:
+        return bool(self._keys.get(service))
+
+    def _client(self, service: str):
+        from app.services.osint import get_client
+        return get_client(service, self._keys.get(service, ""))
+
     def generate_permutations(self, brand: str) -> list[str]:
         brand = re.sub(r"[^a-z0-9-]", "", brand.lower())
         names: list[str] = [brand]
@@ -155,4 +162,44 @@ class CloudOSINTModule:
             tasks.append(_check_azure(name))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        return [r for r in results if r is not None and not isinstance(r, Exception)]
+        findings = [r for r in results if r is not None and not isinstance(r, Exception)]
+
+        # Passive bucket enumeration via GrayhatWarfare (requires API key)
+        ghw_findings = await self.query_grayhatwarfare(brand)
+        findings.extend(ghw_findings)
+
+        return findings
+
+    async def query_grayhatwarfare(self, keyword: str) -> list[dict]:
+        """Search GrayhatWarfare for publicly exposed buckets matching keyword."""
+        if not self._has("grayhatwarfare"):
+            return []
+        client = self._client("grayhatwarfare")
+        findings: list[dict] = []
+        try:
+            res = await client.search(keyword, "general")
+            for bucket in (res.get("buckets") or []):
+                if not isinstance(bucket, dict):
+                    continue
+                name = bucket.get("bucket") or bucket.get("name") or ""
+                provider = (bucket.get("type") or "").lower()
+                url = bucket.get("url") or ""
+                findings.append(
+                    {
+                        "entity": name,
+                        "module": "cloud",
+                        "finding_type": "bucket_exposed",
+                        "severity": 5,
+                        "source": "grayhatwarfare",
+                        "data_json": {
+                            "provider": provider,
+                            "bucket": name,
+                            "url": url,
+                            "public": True,
+                            "indexed_files": bucket.get("fileCount") or bucket.get("files") or 0,
+                        },
+                    }
+                )
+        except Exception as exc:
+            logger.debug("GrayhatWarfare query error: %s", exc)
+        return findings

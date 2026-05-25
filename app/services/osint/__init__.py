@@ -16,6 +16,7 @@ from app.services.osint.opensquat import OpenSquatClient
 from app.services.osint.fofa import FOFAClient
 from app.services.osint.zoomeye import ZoomEyeClient
 from app.services.osint.criminalip import CriminalIPClient
+from app.services.osint.grayhatwarfare import GrayhatWarfareClient
 
 OSINT_CLIENTS = {
     "hibp": HIBPClient,
@@ -36,6 +37,7 @@ OSINT_CLIENTS = {
     "fofa": FOFAClient,
     "zoomeye": ZoomEyeClient,
     "criminalip": CriminalIPClient,
+    "grayhatwarfare": GrayhatWarfareClient,
 }
 
 

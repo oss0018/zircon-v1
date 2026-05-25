@@ -32,6 +32,7 @@ KNOWN_SERVICES = [
     {"type": "whoisxml", "name": "WhoisXML API", "url": "https://whoisxmlapi.com"},
     {"type": "crtsh", "name": "crt.sh (CT Logs)", "url": "https://crt.sh"},
     {"type": "malwarebazaar", "name": "MalwareBazaar", "url": "https://bazaar.abuse.ch"},
+    {"type": "grayhatwarfare", "name": "GrayhatWarfare", "url": "https://buckets.grayhatwarfare.com"},
 ]
 
 
