@@ -32,8 +32,12 @@ document.addEventListener('alpine:init', () => {
     FREE_CONNECTORS_COUNT: 4,
 
     async init() {
+      this.$cleanup(() => {
+        Object.values(this._charts).forEach(c => { try { c.destroy(); } catch (_) {} });
+        this._charts = {};
+      });
       await this.loadDashboards();
-      await this.loadData();
+      if (this.dashboards.length > 0) await this.loadData();
     },
 
     async loadDashboards() {
@@ -45,7 +49,9 @@ document.addEventListener('alpine:init', () => {
             this.dashboards.find(d => d.is_default) || this.dashboards[0];
         }
       } catch (e) {
-        console.error('Failed to load TI dashboards', e);
+        if (e.name !== 'AbortError') {
+          console.error('Failed to load TI dashboards', e);
+        }
       } finally {
         this.loading = false;
       }

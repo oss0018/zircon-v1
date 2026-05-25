@@ -25,7 +25,7 @@ document.addEventListener('alpine:init', () => {
       query_type: 'general',
     },
     editModal: false,
-    editIntegration: null,
+    editIntegration: { name: '', api_key: '', base_url: '', rate_limit: null, cache_ttl: null, is_active: false },
 
     queryTypes: ['general', 'email', 'domain', 'ip', 'url', 'hash'],
 
