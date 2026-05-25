@@ -3,6 +3,7 @@ Infrastructure Orchestrator — loads API keys from the Integration table and
 runs enabled modules in parallel.
 """
 import asyncio
+import ipaddress
 import json
 import logging
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import InfraFinding, InfraInvestigation, Integration
 from app.services.crypto import decrypt
+from app.services.infrastructure_intelligence.bgp_asn import BGPASNModule
+from app.services.infrastructure_intelligence.tech_stack import TechStackModule
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +23,8 @@ _MODULE_CLASSES = {
     "network": "app.services.infrastructure_intelligence.network_intelligence.NetworkIntelligenceModule",
     "cert": "app.services.infrastructure_intelligence.cert_intelligence.CertIntelligenceModule",
     "cloud": "app.services.infrastructure_intelligence.cloud_osint.CloudOSINTModule",
-    "bgp_asn": "app.services.infrastructure_intelligence.bgp_asn.BGPASNModule",
 }
+_PARALLEL_MODULES = (*_MODULE_CLASSES.keys(), "bgp_asn")
 
 _INFRA_SERVICE_TYPES = {
     "shodan", "censys", "securitytrails", "virustotal", "alienvault", "whoisxml", "leakix",
@@ -84,24 +87,24 @@ class InfraOrchestrator:
             # Load integration keys
             keys = await self._load_keys(db)
 
-            # Instantiate and run enabled modules in parallel
+            # Instantiate and run first-phase modules in parallel
             tasks = []
             task_names = []
-            # tech_stack depends on previously collected findings and runs post-gather.
-            run_modules = [m for m in modules if m != "tech_stack"]
-            if target_type == "asn" and "bgp_asn" not in run_modules:
-                run_modules.append("bgp_asn")
-
-            for module_name in run_modules:
-                cls_path = _MODULE_CLASSES.get(module_name)
-                if not cls_path:
+            for module_name in _PARALLEL_MODULES:
+                if module_name not in modules:
                     continue
-                cls = _import_class(cls_path)
-                instance = cls(keys)
+                cls_path = _MODULE_CLASSES.get(module_name)
+                if module_name == "bgp_asn":
+                    instance = BGPASNModule(keys)
+                else:
+                    if not cls_path:
+                        continue
+                    cls = _import_class(cls_path)
+                    instance = cls(keys)
                 tasks.append(instance.run(target, target_type))
                 task_names.append(module_name)
 
-            all_results = await asyncio.gather(*tasks, return_exceptions=True)
+            all_results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
             # Flatten findings and persist
             all_findings: list[dict] = []
@@ -112,19 +115,41 @@ class InfraOrchestrator:
                 all_findings.extend(module_result)
 
             if "tech_stack" in modules:
+                tech_stack = TechStackModule()
                 try:
-                    tech_cls = _import_class(
-                        "app.services.infrastructure_intelligence.tech_stack.TechStackModule"
-                    )
-                    tech_instance = tech_cls(keys)
-                    tech_findings = await tech_instance.run(
-                        target,
-                        target_type,
-                        existing_findings=all_findings,
-                    )
+                    tech_findings = await tech_stack.run(target, target_type, all_findings)
                     all_findings.extend(tech_findings)
                 except Exception as exc:
                     logger.error("Module tech_stack failed: %s", exc)
+
+            # Post-gather: run self-signed cert analysis on unique IPs from
+            # network findings when cert module is requested and target is not
+            # a domain (for domains the parallel gather already handled it).
+            if "cert" in modules and target_type != "domain":
+                unique_ips: set[str] = set()
+                for f in all_findings:
+                    if f.get("module") != "network":
+                        continue
+                    entity = str(f.get("entity", ""))
+                    # Strip port suffix if present (e.g. "1.2.3.4:80" → "1.2.3.4")
+                    candidate = entity.rsplit(":", 1)[0] if ":" in entity else entity
+                    try:
+                        ipaddress.ip_address(candidate)
+                        unique_ips.add(candidate)
+                    except ValueError:
+                        pass
+                if unique_ips:
+                    from app.services.infrastructure_intelligence.cert_intelligence import (
+                        CertIntelligenceModule,
+                    )
+                    cert_module = CertIntelligenceModule(keys)
+                    try:
+                        cert_findings = await cert_module.analyze_self_signed(
+                            list(unique_ips)[:32]
+                        )
+                        all_findings.extend(cert_findings)
+                    except Exception as exc:
+                        logger.error("Post-gather cert analysis failed: %s", exc)
 
             for finding in all_findings:
                 data_json = finding.get("data_json", {})
@@ -153,6 +178,8 @@ class InfraOrchestrator:
                 severity_counts[sev] += 1
 
             summary = dict(module_counts)
+            summary.setdefault("tech_stack", 0)
+            summary.setdefault("bgp_asn", 0)
             summary["total"] = len(all_findings)
             summary["critical"] = severity_counts.get(5, 0)
             summary["high"] = severity_counts.get(4, 0)

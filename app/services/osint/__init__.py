@@ -17,6 +17,8 @@ from app.services.osint.fofa import FOFAClient
 from app.services.osint.zoomeye import ZoomEyeClient
 from app.services.osint.criminalip import CriminalIPClient
 from app.services.osint.grayhatwarfare import GrayhatWarfareClient
+from app.services.osint.ripestat import RIPEStatClient
+from app.services.osint.bgpview import BGPViewClient
 
 OSINT_CLIENTS = {
     "hibp": HIBPClient,
@@ -38,6 +40,8 @@ OSINT_CLIENTS = {
     "zoomeye": ZoomEyeClient,
     "criminalip": CriminalIPClient,
     "grayhatwarfare": GrayhatWarfareClient,
+    "ripestat": RIPEStatClient,
+    "bgpview": BGPViewClient,
 }
 
 

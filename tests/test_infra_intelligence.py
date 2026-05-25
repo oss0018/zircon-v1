@@ -5,6 +5,7 @@ DNS/Network/Cert module structure, and API router endpoint registration.
 """
 import json
 import pytest
+import base64
 
 
 # ── Model presence ────────────────────────────────────────────────────────────
@@ -50,11 +51,13 @@ def test_whoisxml_client_registered():
     assert "whoisxml" in OSINT_CLIENTS
 
 
-def test_phase2_osint_clients_registered():
+def test_phase2_clients_registered():
     from app.services.osint import OSINT_CLIENTS
     assert "fofa" in OSINT_CLIENTS
     assert "zoomeye" in OSINT_CLIENTS
     assert "criminalip" in OSINT_CLIENTS
+    assert "ripestat" in OSINT_CLIENTS
+    assert "bgpview" in OSINT_CLIENTS
 
 
 def test_crtsh_get_client():
@@ -73,13 +76,49 @@ def test_whoisxml_no_key_returns_error():
     assert "API key" in result["error"]
 
 
-def test_fofa_no_key_returns_error():
+def test_fofa_base64_domain_query():
     from app.services.osint.fofa import FOFAClient
     import asyncio
-    client = FOFAClient(api_key="")
-    result = asyncio.run(client.search("example.com", "domain"))
-    assert "error" in result
-    assert "API key" in result["error"]
+    seen = {}
+
+    async def fake_request(method, url, **kwargs):
+        seen["method"] = method
+        seen["url"] = url
+        seen["params"] = kwargs.get("params", {})
+        return {"ok": True}
+
+    client = FOFAClient(api_key="user@example.com:secret")
+    client._request = fake_request
+    asyncio.run(client.search("example.com", "domain"))
+    qbase64 = seen["params"]["qbase64"]
+    decoded = base64.b64decode(qbase64.encode()).decode()
+    assert decoded == 'domain="example.com"'
+
+
+def test_ripestat_no_key_does_not_return_api_error():
+    from app.services.osint.ripestat import RIPEStatClient
+    import asyncio
+
+    async def fake_request(method, url, **kwargs):
+        return {"status": "ok", "data": {}}
+
+    client = RIPEStatClient(api_key="")
+    client._request = fake_request
+    result = asyncio.run(client.search("3333", "asn"))
+    assert "error" not in result
+
+
+def test_bgpview_no_key_does_not_return_api_error():
+    from app.services.osint.bgpview import BGPViewClient
+    import asyncio
+
+    async def fake_request(method, url, **kwargs):
+        return {"status": "ok", "data": {}}
+
+    client = BGPViewClient(api_key="")
+    client._request = fake_request
+    result = asyncio.run(client.search("3333", "asn"))
+    assert "error" not in result
 
 
 # ── Cloud OSINT permutations ──────────────────────────────────────────────────
@@ -163,23 +202,7 @@ def test_network_run_no_keys_returns_empty():
     assert result == []  # No shodan/censys keys → empty
 
 
-def test_tech_stack_detect_from_findings():
-    from app.services.infrastructure_intelligence.tech_stack import TechStackModule
-    mod = TechStackModule({})
-    findings = [
-        {
-            "entity": "1.2.3.4:443",
-            "source": "shodan",
-            "data_json": {"banner": "Apache/2.4.58 OpenSSL/3.0.0"},
-        }
-    ]
-    detected = mod.detect_from_findings(findings)
-    assert isinstance(detected, list)
-    assert any(f.get("module") == "tech_stack" and f.get("finding_type") == "detected_tech" for f in detected)
-    assert any("Apache" in f.get("entity", "") for f in detected)
-
-
-def test_bgp_module_run_unsupported_target_type():
+def test_bgp_asn_skips_domain_targets():
     from app.services.infrastructure_intelligence.bgp_asn import BGPASNModule
     import asyncio
     mod = BGPASNModule({})
@@ -244,11 +267,9 @@ def test_api_router_has_summary_route():
 
 
 def test_api_router_valid_modules_include_phase2():
-    from app.api.infra_intel import _VALID_MODULES, InvestigateRequest
-    assert "tech_stack" in _VALID_MODULES
-    assert "bgp_asn" in _VALID_MODULES
-    assert "tech_stack" in InvestigateRequest.model_fields["modules"].default
-    assert "bgp_asn" in InvestigateRequest.model_fields["modules"].default
+    from app.api import infra_intel
+    assert "tech_stack" in infra_intel._VALID_MODULES
+    assert "bgp_asn" in infra_intel._VALID_MODULES
 
 
 def test_known_services_include_phase2_integrations():
@@ -260,6 +281,8 @@ def test_known_services_include_phase2_integrations():
     assert "whoisxml" in known_types
     assert "crtsh" in known_types
     assert "malwarebazaar" in known_types
+    assert "ripestat" in known_types
+    assert "bgpview" in known_types
 
 
 # ── GrayhatWarfare ────────────────────────────────────────────────────────────

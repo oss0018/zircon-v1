@@ -30,7 +30,7 @@ def _utcnow() -> datetime:
 class InvestigateRequest(BaseModel):
     target: str
     target_type: str = "domain"
-    modules: List[str] = ["dns", "network", "cert", "cloud", "tech_stack", "bgp_asn"]
+    modules: List[str] = ["dns", "network", "cert", "cloud", "bgp_asn", "tech_stack"]
 
 
 class InvestigateResponse(BaseModel):

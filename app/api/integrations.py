@@ -30,8 +30,10 @@ KNOWN_SERVICES = [
     {"type": "zoomeye", "name": "ZoomEye", "url": "https://www.zoomeye.org"},
     {"type": "criminalip", "name": "Criminal IP", "url": "https://www.criminalip.io"},
     {"type": "whoisxml", "name": "WhoisXML API", "url": "https://whoisxmlapi.com"},
-    {"type": "crtsh", "name": "crt.sh (CT Logs)", "url": "https://crt.sh"},
+    {"type": "crtsh", "name": "crt.sh", "url": "https://crt.sh"},
     {"type": "malwarebazaar", "name": "MalwareBazaar", "url": "https://bazaar.abuse.ch"},
+    {"type": "ripestat", "name": "RIPEstat", "url": "https://stat.ripe.net"},
+    {"type": "bgpview", "name": "BGPView", "url": "https://bgpview.io"},
     {"type": "grayhatwarfare", "name": "GrayhatWarfare", "url": "https://buckets.grayhatwarfare.com"},
 ]
 
