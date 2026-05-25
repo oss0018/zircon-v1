@@ -458,3 +458,104 @@ class InfraFinding(Base):
     data_json = Column(Text, default="{}")
     created_at = Column(DateTime, default=_utcnow)
     investigation = relationship("InfraInvestigation", back_populates="findings")
+
+
+# ── Look-alike Domains — Brand Protection (TS-LAD-001 v1.1) ──────────────────
+
+class LookalikeRule(Base):
+    """Per-brand monitoring rule for look-alike domain detection."""
+    __tablename__ = "lookalike_rules"
+    id = Column(Integer, primary_key=True)
+    brand_id = Column(Integer, ForeignKey("brands.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    protected_domain = Column(String(253), nullable=False)   # e.g. "kyivstar.ua"
+    brand_terms = Column(Text, default="[]")                 # JSON list of terms
+    # Generation config
+    algorithms = Column(Text, default="[]")                  # JSON list; empty = all
+    tld_list = Column(String(20), default="top100")          # top30|top100|top500|full1500
+    attack_words = Column(String(20), default="core")        # core|extended
+    include_idn = Column(Boolean, default=True)
+    include_bitsquatting = Column(Boolean, default=True)
+    max_variants = Column(Integer, default=10000)
+    similarity_threshold_pct = Column(Integer, default=70)   # 30–100
+    # State
+    active = Column(Boolean, default=True)
+    last_scan_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    # Relationships
+    domains = relationship("LookalikeDomain", back_populates="rule", cascade="all, delete-orphan")
+    trusted_domains = relationship("RuleTrustedDomain", back_populates="rule", cascade="all, delete-orphan")
+
+
+class LookalikeDomain(Base):
+    """One row per generated+checked variant domain."""
+    __tablename__ = "lookalike_domains"
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("lookalike_rules.id"), nullable=False)
+    fqdn = Column(String(253), nullable=False)
+    label = Column(String(63), nullable=False)              # part before TLD
+    tld = Column(String(63), nullable=False)
+    algorithms = Column(Text, default="[]")                 # JSON list of alg IDs
+    levenshtein_distance = Column(Integer, nullable=True)
+    similarity_score = Column(Float, nullable=True)         # 0.0–1.0 composite score
+    is_idn = Column(Boolean, default=False)
+    unicode_form = Column(String(253), nullable=True)
+    # Status
+    status = Column(String(20), default="unregistered")     # unregistered|registered|trusted|error
+    # DNS
+    dns_checked_at = Column(DateTime, nullable=True)
+    has_a_record = Column(Boolean, nullable=True)
+    has_mx_record = Column(Boolean, nullable=True)
+    has_ns_record = Column(Boolean, nullable=True)
+    ip = Column(String(64), nullable=True)
+    # HTTP
+    http_status = Column(Integer, nullable=True)
+    page_title = Column(String(512), nullable=True)
+    final_url = Column(String(2048), nullable=True)
+    server_header = Column(String(256), nullable=True)
+    redirect_detected = Column(Boolean, nullable=True)
+    redirects_to_legitimate = Column(Boolean, nullable=True)
+    brand_in_title = Column(Boolean, nullable=True)
+    phishing_keywords_in_title = Column(Boolean, nullable=True)
+    # SSL
+    ssl_valid = Column(Boolean, nullable=True)
+    ssl_issuer = Column(String(256), nullable=True)
+    ssl_uses_lets_encrypt = Column(Boolean, nullable=True)
+    ssl_cert_age_days = Column(Integer, nullable=True)
+    ssl_is_self_signed = Column(Boolean, nullable=True)
+    # GeoIP
+    country_code = Column(String(5), nullable=True)
+    asn = Column(String(50), nullable=True)
+    org = Column(String(256), nullable=True)
+    is_high_risk_country = Column(Boolean, nullable=True)
+    # WHOIS
+    registrar = Column(String(256), nullable=True)
+    domain_age_days = Column(Integer, nullable=True)
+    whois_privacy = Column(Boolean, nullable=True)
+    # Threat score
+    threat_score = Column(Integer, nullable=True)           # 0–100
+    severity = Column(Integer, nullable=True)               # 1–5
+    signals_fired = Column(Text, default="[]")              # JSON list of signal IDs
+    # Timestamps
+    first_seen_at = Column(DateTime, default=_utcnow)
+    last_checked_at = Column(DateTime, nullable=True)
+    # False-positive / trusted flag
+    is_false_positive = Column(Boolean, default=False)
+    fp_reason = Column(String(256), nullable=True)
+    rule = relationship("LookalikeRule", back_populates="domains")
+
+
+class RuleTrustedDomain(Base):
+    """Trusted domain registry, scoped per rule (§10.5)."""
+    __tablename__ = "rule_trusted_domains"
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("lookalike_rules.id"), nullable=False)
+    fqdn_pattern = Column(String(253), nullable=False)
+    match_type = Column(String(10), nullable=False, default="exact")  # exact|wildcard|suffix
+    reason = Column(Text, nullable=True)
+    added_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    verified = Column(Boolean, default=False)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    rule = relationship("LookalikeRule", back_populates="trusted_domains")
