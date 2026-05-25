@@ -28,7 +28,7 @@ _PARALLEL_MODULES = (*_MODULE_CLASSES.keys(), "bgp_asn")
 
 _INFRA_SERVICE_TYPES = {
     "shodan", "censys", "securitytrails", "virustotal", "alienvault", "whoisxml", "leakix",
-    "fofa", "zoomeye", "criminalip",
+    "fofa", "zoomeye", "criminalip", "grayhatwarfare",
 }
 
 

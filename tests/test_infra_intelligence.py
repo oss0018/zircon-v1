@@ -228,6 +228,12 @@ def test_orchestrator_importable():
     assert orch is not None
 
 
+def test_infra_package_exports_phase2_modules():
+    from app.services.infrastructure_intelligence import BGPASNModule, TechStackModule
+    assert BGPASNModule is not None
+    assert TechStackModule is not None
+
+
 # ── API router ────────────────────────────────────────────────────────────────
 
 def test_api_router_importable():
@@ -264,3 +270,88 @@ def test_api_router_valid_modules_include_phase2():
     from app.api import infra_intel
     assert "tech_stack" in infra_intel._VALID_MODULES
     assert "bgp_asn" in infra_intel._VALID_MODULES
+
+
+def test_known_services_include_phase2_integrations():
+    from app.api.integrations import KNOWN_SERVICES
+    known_types = {s["type"] for s in KNOWN_SERVICES}
+    assert "fofa" in known_types
+    assert "zoomeye" in known_types
+    assert "criminalip" in known_types
+    assert "whoisxml" in known_types
+    assert "crtsh" in known_types
+    assert "malwarebazaar" in known_types
+    assert "ripestat" in known_types
+    assert "bgpview" in known_types
+
+
+# ── GrayhatWarfare ────────────────────────────────────────────────────────────
+
+def test_grayhatwarfare_client_registered():
+    from app.services.osint import OSINT_CLIENTS
+    assert "grayhatwarfare" in OSINT_CLIENTS
+
+
+def test_grayhatwarfare_no_key_returns_error():
+    from app.services.osint.grayhatwarfare import GrayhatWarfareClient
+    import asyncio
+    client = GrayhatWarfareClient(api_key="")
+    result = asyncio.run(client.search("example", "general"))
+    assert "error" in result
+    assert "API key" in result["error"]
+
+
+def test_grayhatwarfare_no_key_files_returns_error():
+    from app.services.osint.grayhatwarfare import GrayhatWarfareClient
+    import asyncio
+    client = GrayhatWarfareClient(api_key="")
+    result = asyncio.run(client.search_files("passwords"))
+    assert "error" in result
+    assert "API key" in result["error"]
+
+
+def test_grayhatwarfare_in_known_services():
+    from app.api.integrations import KNOWN_SERVICES
+    known_types = {s["type"] for s in KNOWN_SERVICES}
+    assert "grayhatwarfare" in known_types
+
+
+def test_grayhatwarfare_in_infra_service_types():
+    from app.services.infrastructure_intelligence.orchestrator import _INFRA_SERVICE_TYPES
+    assert "grayhatwarfare" in _INFRA_SERVICE_TYPES
+
+
+def test_cloud_module_query_grayhatwarfare_no_key():
+    """Without a key, query_grayhatwarfare should return an empty list silently."""
+    from app.services.infrastructure_intelligence.cloud_osint import CloudOSINTModule
+    import asyncio
+    mod = CloudOSINTModule({})
+    result = asyncio.run(mod.query_grayhatwarfare("acme"))
+    assert result == []
+
+
+def test_cloud_module_query_grayhatwarfare_parses_buckets():
+    """Verify bucket list parsing logic with a mock response."""
+    from app.services.infrastructure_intelligence.cloud_osint import CloudOSINTModule
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    mock_response = {
+        "buckets": [
+            {"bucket": "acme-dev", "type": "aws_s3", "url": "https://acme-dev.s3.amazonaws.com", "fileCount": 12},
+        ]
+    }
+
+    mod = CloudOSINTModule({"grayhatwarfare": "fakekey"})
+    with patch("app.services.osint.grayhatwarfare.GrayhatWarfareClient.search", new=AsyncMock(return_value=mock_response)):
+        result = asyncio.run(mod.query_grayhatwarfare("acme"))
+
+    assert len(result) == 1
+    finding = result[0]
+    assert finding["module"] == "cloud"
+    assert finding["finding_type"] == "bucket_exposed"
+    assert finding["severity"] == 5
+    assert finding["source"] == "grayhatwarfare"
+    assert finding["data_json"]["bucket"] == "acme-dev"
+    assert finding["data_json"]["provider"] == "aws_s3"
+    assert finding["data_json"]["indexed_files"] == 12
