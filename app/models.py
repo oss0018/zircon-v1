@@ -533,6 +533,15 @@ class LookalikeDomain(Base):
     registrar = Column(String(256), nullable=True)
     domain_age_days = Column(Integer, nullable=True)
     whois_privacy = Column(Boolean, nullable=True)
+    registrant_org = Column(String(256), nullable=True)
+    creation_date = Column(DateTime, nullable=True)
+    expiry_date = Column(DateTime, nullable=True)
+    # Screenshot / visual similarity (Phase 2)
+    screenshot_url = Column(Text, nullable=True)
+    urlscan_uuid = Column(String(64), nullable=True)
+    urlscan_score = Column(Float, nullable=True)
+    phash_distance = Column(Integer, nullable=True)
+    visual_similarity_pct = Column(Float, nullable=True)
     # Threat score
     threat_score = Column(Integer, nullable=True)           # 0–100
     severity = Column(Integer, nullable=True)               # 1–5

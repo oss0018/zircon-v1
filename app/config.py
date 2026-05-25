@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     telegram_bot_token: str = ""
 
+    urlscan_api_key: str = ""
+    slack_webhook_url: str = ""
+
     class Config:
         env_file = ".env"
         env_prefix = "ZIRCON_"
