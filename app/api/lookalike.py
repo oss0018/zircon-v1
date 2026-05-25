@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import io
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -174,6 +175,14 @@ def _domain_to_dict(d: LookalikeDomain) -> dict:
         "registrar": d.registrar,
         "domain_age_days": d.domain_age_days,
         "whois_privacy": d.whois_privacy,
+        "registrant_org": d.registrant_org,
+        "creation_date": d.creation_date.isoformat() if d.creation_date else None,
+        "expiry_date": d.expiry_date.isoformat() if d.expiry_date else None,
+        "screenshot_url": d.screenshot_url,
+        "urlscan_uuid": d.urlscan_uuid,
+        "urlscan_score": d.urlscan_score,
+        "phash_distance": d.phash_distance,
+        "visual_similarity_pct": d.visual_similarity_pct,
         "threat_score": d.threat_score,
         "severity": d.severity,
         "signals_fired": json.loads(d.signals_fired or "[]"),
@@ -467,6 +476,25 @@ async def scan_rule(
                     redirects_to_legit = http_result.get("redirects_to_legitimate")
                     ssl_valid = http_result.get("ssl_valid")
 
+                # Phase 2: GeoIP + WHOIS enrichment for live domains
+                geoip_data: dict = {}
+                whois_data: dict = {}
+                if has_a:
+                    try:
+                        from app.services.lookalike.geoip_enricher import enrich_geoip
+                        from app.services.lookalike.whois_enricher import enrich_whois
+                        geoip_data, whois_data = await asyncio.gather(
+                            enrich_geoip(ip),
+                            enrich_whois(fqdn),
+                            return_exceptions=True,
+                        )
+                        if isinstance(geoip_data, Exception):
+                            geoip_data = {}
+                        if isinstance(whois_data, Exception):
+                            whois_data = {}
+                    except Exception:
+                        pass
+
                 domain_data = {
                     "fqdn": fqdn,
                     "label": label,
@@ -488,6 +516,18 @@ async def scan_rule(
                     "redirect_detected": redirect_detected,
                     "redirects_to_legitimate": redirects_to_legit,
                     "ssl_valid": ssl_valid,
+                    # GeoIP
+                    "country_code": geoip_data.get("country_code"),
+                    "asn": geoip_data.get("asn"),
+                    "org": geoip_data.get("org"),
+                    "is_high_risk_country": geoip_data.get("is_high_risk_country"),
+                    # WHOIS
+                    "registrar": whois_data.get("registrar"),
+                    "domain_age_days": whois_data.get("domain_age_days"),
+                    "whois_privacy": whois_data.get("whois_privacy"),
+                    "registrant_org": whois_data.get("registrant_org"),
+                    "creation_date": whois_data.get("creation_date"),
+                    "expiry_date": whois_data.get("expiry_date"),
                 }
 
                 # Compute threat score for checked domains
@@ -851,6 +891,134 @@ async def delete_trusted(
     await db.delete(entry)
     await db.commit()
     return None
+
+
+# ── Phase 2: Enrich, Takedown, Alert endpoints ───────────────────────────────
+
+@router.post("/rules/{rule_id}/domains/{domain_id}/enrich")
+async def enrich_domain(
+    rule_id: int,
+    domain_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Run WHOIS + GeoIP + URLScan enrichment on a single domain and re-score it.
+
+    The domain row is updated in the DB and the full updated dict is returned.
+    """
+    from app.config import settings as _settings
+    from app.services.lookalike.geoip_enricher import enrich_geoip
+    from app.services.lookalike.whois_enricher import enrich_whois
+    from app.services.lookalike.screenshot_analyzer import fetch_screenshot_urlscan
+    from app.services.lookalike.threat_scorer import ThreatScorer
+
+    result = await db.execute(
+        select(LookalikeDomain).where(
+            LookalikeDomain.id == domain_id,
+            LookalikeDomain.rule_id == rule_id,
+        )
+    )
+    domain = result.scalar_one_or_none()
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    # Run enrichment tasks concurrently
+    geoip_task = enrich_geoip(domain.ip)
+    whois_task = enrich_whois(domain.fqdn)
+    screenshot_task = fetch_screenshot_urlscan(domain.fqdn, _settings.urlscan_api_key)
+
+    geoip_data, whois_data, screenshot_data = await asyncio.gather(
+        geoip_task, whois_task, screenshot_task, return_exceptions=True
+    )
+    if isinstance(geoip_data, Exception):
+        geoip_data = {}
+    if isinstance(whois_data, Exception):
+        whois_data = {}
+    if isinstance(screenshot_data, Exception):
+        screenshot_data = {}
+
+    # Apply enrichment results to the domain row
+    for field, value in geoip_data.items():
+        if hasattr(domain, field):
+            setattr(domain, field, value)
+    for field in ("registrar", "domain_age_days", "whois_privacy", "registrant_org",
+                  "creation_date", "expiry_date"):
+        if field in whois_data and hasattr(domain, field):
+            setattr(domain, field, whois_data[field])
+    if screenshot_data.get("screenshot_url"):
+        domain.screenshot_url = screenshot_data.get("screenshot_url")
+    if screenshot_data.get("urlscan_uuid"):
+        domain.urlscan_uuid = screenshot_data.get("urlscan_uuid")
+    if screenshot_data.get("urlscan_score") is not None:
+        domain.urlscan_score = screenshot_data.get("urlscan_score")
+
+    # Re-score
+    scorer = ThreatScorer()
+    domain_dict = {col.name: getattr(domain, col.name) for col in domain.__table__.columns}
+    ts, sev, signals = scorer.score(domain_dict)
+    domain.threat_score = ts
+    domain.severity = sev
+    domain.signals_fired = json.dumps(signals)
+    domain.last_checked_at = _utcnow()
+
+    await db.commit()
+    await db.refresh(domain)
+    return _domain_to_dict(domain)
+
+
+@router.get("/rules/{rule_id}/domains/{domain_id}/takedown")
+async def download_takedown(
+    rule_id: int,
+    domain_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Stream a UDRP-style plain-text evidence package for a domain.
+    """
+    from app.services.lookalike.takedown import generate_takedown_package
+
+    try:
+        content = await generate_takedown_package(rule_id, domain_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    filename = f"takedown_rule{rule_id}_domain{domain_id}.txt"
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.post("/rules/{rule_id}/alert")
+async def trigger_alerts(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Manually trigger alert dispatch for all registered domains above threshold
+    for a rule.
+    """
+    from app.services.lookalike.alert_engine import dispatch_lookalike_alerts
+
+    rule_res = await db.execute(select(LookalikeRule).where(LookalikeRule.id == rule_id))
+    rule = rule_res.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    domains_res = await db.execute(
+        select(LookalikeDomain).where(
+            LookalikeDomain.rule_id == rule_id,
+            LookalikeDomain.status == "registered",
+        )
+    )
+    domains = list(domains_res.scalars().all())
+
+    result = await dispatch_lookalike_alerts(rule_id, domains, db)
+    return result
 
 
 # ── Internal DNS/HTTP helpers ─────────────────────────────────────────────────

@@ -124,6 +124,48 @@ def start_scheduler():
         except Exception as exc:
             print(f"[scheduler] Social listening scheduler error: {exc}")
 
+    async def _run_lookalike_alerts():
+        """Dispatch look-alike domain alerts every 30 minutes."""
+        try:
+            from datetime import timedelta
+            from app.database import AsyncSessionLocal
+            from app.models import LookalikeRule, LookalikeDomain
+            from app.services.lookalike.alert_engine import dispatch_lookalike_alerts
+            from sqlalchemy import select
+            from datetime import datetime, timezone
+
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            cutoff = now - timedelta(hours=2)
+
+            async with AsyncSessionLocal() as db:
+                rules_res = await db.execute(
+                    select(LookalikeRule).where(LookalikeRule.active.is_(True))
+                )
+                rules = rules_res.scalars().all()
+
+                for rule in rules:
+                    try:
+                        domains_res = await db.execute(
+                            select(LookalikeDomain).where(
+                                LookalikeDomain.rule_id == rule.id,
+                                LookalikeDomain.status == "registered",
+                                LookalikeDomain.threat_score >= 50,
+                                LookalikeDomain.last_checked_at >= cutoff,
+                            )
+                        )
+                        domains = list(domains_res.scalars().all())
+                        if not domains:
+                            continue
+                        summary = await dispatch_lookalike_alerts(rule.id, domains, db)
+                        print(
+                            f"[scheduler] Lookalike alerts rule {rule.id}: "
+                            f"sent={summary.get('sent', 0)} failed={summary.get('failed', 0)}"
+                        )
+                    except Exception as exc:
+                        print(f"[scheduler] Lookalike alert rule {rule.id} error: {exc}")
+        except Exception as exc:
+            print(f"[scheduler] Lookalike alerts scheduler error: {exc}")
+
     _scheduler.add_job(_scan_monitored, IntervalTrigger(minutes=15), id="scan_monitored", replace_existing=True, max_instances=1, misfire_grace_time=60)
     _scheduler.add_job(_scan_all_watched_folders, IntervalTrigger(minutes=8), id="scan_watched_folders", replace_existing=True, max_instances=1, misfire_grace_time=60)
     _scheduler.add_job(
@@ -146,6 +188,14 @@ def start_scheduler():
         _run_social_listening_rules,
         IntervalTrigger(minutes=15),
         id="run_social_listening_rules",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=60,
+    )
+    _scheduler.add_job(
+        _run_lookalike_alerts,
+        IntervalTrigger(minutes=30),
+        id="run_lookalike_alerts",
         replace_existing=True,
         max_instances=1,
         misfire_grace_time=60,
