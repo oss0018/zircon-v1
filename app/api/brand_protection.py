@@ -423,8 +423,12 @@ async def check_from_file(
 
 @router.get("/alerts/all", response_model=List[BrandAlertOut])
 async def get_all_alerts(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    result = await db.execute(select(BrandAlert).order_by(BrandAlert.created_at.desc()))
-    return result.scalars().all()
+    try:
+        result = await db.execute(select(BrandAlert).order_by(BrandAlert.created_at.desc()))
+        return result.scalars().all()
+    except Exception as exc:
+        logger.exception("Error fetching all brand alerts: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch alerts")
 
 
 @router.patch("/alerts/{alert_id}")
@@ -774,10 +778,14 @@ async def export_results(
 @router.get("/{brand_id}/alerts", response_model=List[BrandAlertOut])
 async def get_brand_alerts(brand_id: int, db: AsyncSession = Depends(get_db),
                             _: User = Depends(get_current_user)):
-    result = await db.execute(
-        select(BrandAlert).where(BrandAlert.brand_id == brand_id).order_by(BrandAlert.created_at.desc())
-    )
-    return result.scalars().all()
+    try:
+        result = await db.execute(
+            select(BrandAlert).where(BrandAlert.brand_id == brand_id).order_by(BrandAlert.created_at.desc())
+        )
+        return result.scalars().all()
+    except Exception as exc:
+        logger.exception("Error fetching alerts for brand %s: %s", brand_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch alerts")
 
 
 # ── Per-brand Owned / Trusted Domains ────────────────────────────────────────

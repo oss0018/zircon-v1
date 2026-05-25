@@ -14,7 +14,7 @@ document.addEventListener('alpine:init', () => {
     page: 0,
     limit: 20,
     editModal: false,
-    editFile: null,
+    editFile: { name: '', tags: '', project_id: null },
     projectModal: false,
     newProjectName: '',
     newProjectDesc: '',

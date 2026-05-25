@@ -23,7 +23,7 @@ document.addEventListener('alpine:init', () => {
       recursive: true,
       config: {},
     },
-    editSource: null,
+    editSource: { name: '', schedule: '@hourly', max_file_size_mb: 25, recursive: true },
     editConfig: {},
 
     indexingStatus: {},  // source_id → {loading, result}
