@@ -478,6 +478,7 @@ class LookalikeRule(Base):
     include_bitsquatting = Column(Boolean, default=True)
     max_variants = Column(Integer, default=10000)
     similarity_threshold_pct = Column(Integer, default=70)   # 30–100
+    alert_threshold = Column(Integer, default=50)            # 30–100
     # State
     active = Column(Boolean, default=True)
     last_scan_at = Column(DateTime, nullable=True)

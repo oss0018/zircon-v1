@@ -227,6 +227,24 @@ def _migrate_monitoring(conn) -> None:
         logger.warning("Could not migrate monitoring tables: %s", exc)
 
 
+def _migrate_lookalike_rules(conn) -> None:
+    """Add alert_threshold column to lookalike_rules if it is missing."""
+    from sqlalchemy import inspect, text
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+        if "lookalike_rules" not in tables:
+            return
+        existing_cols = {c["name"] for c in inspector.get_columns("lookalike_rules")}
+        if "alert_threshold" not in existing_cols:
+            conn.execute(
+                text("ALTER TABLE lookalike_rules ADD COLUMN alert_threshold INTEGER DEFAULT 50")
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate lookalike_rules: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -244,3 +262,5 @@ async def init_db():
         await conn.run_sync(_migrate_integrations)
         # Add monitoring runs/findings tables/columns if upgrading from older version
         await conn.run_sync(_migrate_monitoring)
+        # Add alert threshold to lookalike rules if upgrading from older version
+        await conn.run_sync(_migrate_lookalike_rules)
