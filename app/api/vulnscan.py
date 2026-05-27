@@ -18,6 +18,7 @@ _VALID_SCOPES = {"SELF", "INTERNAL", "THREAT_INTEL"}
 _VALID_PROFILES = {"quick", "standard", "deep"}
 _VALID_SCAN_STATUS = {"pending", "running", "completed", "failed", "cancelled"}
 _VALID_FINDING_STATUS = {"new", "confirmed", "false_positive", "accepted_risk", "remediated", "retest_pending"}
+_VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
 
 
 class TargetCreate(BaseModel):
@@ -395,7 +396,10 @@ async def list_scan_findings(
 ):
     query = select(VSFinding).where(VSFinding.scan_id == scan_id).order_by(VSFinding.severity_numeric.desc(), VSFinding.id.desc())
     if severity:
-        query = query.where(VSFinding.severity == severity.upper())
+        severity = severity.upper()
+        if severity not in _VALID_SEVERITIES:
+            raise HTTPException(status_code=400, detail="Invalid severity")
+        query = query.where(VSFinding.severity == severity)
     if status:
         query = query.where(VSFinding.status == status)
     if scanner:

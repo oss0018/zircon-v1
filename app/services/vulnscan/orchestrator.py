@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -24,6 +25,8 @@ PROFILE_SCANNERS = {
     "standard": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive"],
     "deep": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive", "openvas"],
 }
+
+logger = logging.getLogger(__name__)
 
 
 class VulnScanOrchestrator:
@@ -84,10 +87,15 @@ class VulnScanOrchestrator:
                 await db.commit()
 
                 raw_findings: list[dict] = []
+                if not scanners:
+                    scan.progress_pct = 100
+                    await db.commit()
                 total_scanners = max(len(scanners), 1)
                 for idx, scanner_name in enumerate(scanners, start=1):
                     try:
                         raw_findings.extend(await self._run_scanner(scanner_name, target, scan.profile))
+                    except Exception:
+                        logger.exception("Scanner %s failed for scan %s", scanner_name, scan_id)
                     finally:
                         scan.progress_pct = min(95, int((idx / total_scanners) * 90))
                         await db.commit()
@@ -136,6 +144,7 @@ class VulnScanOrchestrator:
                 await db.commit()
 
             except Exception as exc:
+                logger.exception("Vulnerability scan %s failed", scan_id)
                 if scan is not None:
                     scan.status = "failed"
                     scan.error_message = str(exc)

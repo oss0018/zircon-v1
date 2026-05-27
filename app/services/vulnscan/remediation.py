@@ -125,9 +125,11 @@ class RemediationEngine:
                 break
 
         if rem:
-            finding.remediation_summary = rem.get("summary", finding.remediation_summary or "")
+            if "summary" in rem:
+                finding.remediation_summary = rem["summary"]
             finding.remediation_steps_json = json.dumps(rem.get("steps", []))
-            finding.remediation_effort = rem.get("effort", finding.remediation_effort or "MEDIUM")
+            if "effort" in rem:
+                finding.remediation_effort = rem["effort"]
             finding.patch_available = bool(rem.get("patch_available", finding.patch_available))
             if rem.get("patch_url"):
                 finding.patch_url = rem.get("patch_url")

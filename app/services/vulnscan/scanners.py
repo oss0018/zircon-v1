@@ -52,7 +52,7 @@ class HeaderScanner:
         findings: list[dict] = []
 
         try:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
                 response = await client.get(normalized_url)
         except Exception as exc:
             return [
@@ -60,7 +60,7 @@ class HeaderScanner:
                     "headers",
                     "headers-fetch-failed",
                     "Unable to fetch target headers",
-                    f"Header scan could not fetch target: {exc}",
+                    f"Header scan could not fetch target ({type(exc).__name__}).",
                     "EXPOSURE",
                     "LOW",
                     normalized_url,
@@ -223,7 +223,11 @@ class TestSSLScanner:
     @staticmethod
     async def scan(hostname: str, port: int = 443) -> list[dict]:
         # TODO: replace with real subprocess call
-        target_url, host, resolved_port = _target_parts(f"https://{hostname}:{port}")
+        base_url = _as_url(hostname)
+        parsed = urlparse(base_url)
+        safe_host = parsed.hostname or hostname
+        scheme = parsed.scheme or "https"
+        target_url, host, resolved_port = _target_parts(f"{scheme}://{safe_host}:{port}")
         return [
             _base_finding(
                 "testssl",
