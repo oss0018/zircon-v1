@@ -27,6 +27,7 @@
   <script src="/static/js/ti_dashboard.js"></script>
   <script src="/static/js/storage_sources.js"></script>
   <script src="/static/js/infra_intel.js"></script>
+  <script src="/static/js/vulnscan.js"></script>
   <script src="/static/js/logo_misuse.js"></script>
   <script src="/static/js/lookalike_domains.js"></script>
 
@@ -113,6 +114,11 @@
             <div class="nav-item" :class="page === 'infrastructure-intelligence' ? 'active' : ''" @click="navigate('infrastructure-intelligence')" @contextmenu.prevent="openPageInNewWindow('infrastructure-intelligence')">
               <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
               <span x-text="t('infrastructure_intelligence')"></span>
+            </div>
+
+            <div class="nav-item" :class="page === 'vulnscan' ? 'active' : ''" @click="navigate('vulnscan')" @contextmenu.prevent="openPageInNewWindow('vulnscan')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l8 4v6c0 5.25-3.438 9.813-8 11-4.562-1.187-8-5.75-8-11V6l8-4z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.5 12.5l2 2 3-4"/></svg>
+              <span>Vuln Scanner</span>
             </div>
 
             <!-- ── Brand Protection Section (collapsible) ── -->
@@ -6063,6 +6069,377 @@
                 </div>
               </template>
             </div><!-- /infrastructure-intelligence -->
+
+            <div x-show="page === 'vulnscan'" x-data="vulnscanApp()" x-init="init()">
+              <div class="flex justify-between items-center mb-4">
+                <div>
+                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;">Vuln Scanner</h2>
+                </div>
+                <div class="flex gap-2">
+                  <button class="btn btn-secondary btn-sm" @click="loadDashboard(); loadScans(); loadAllFindings();">Refresh</button>
+                </div>
+              </div>
+
+              <div class="card mb-4" style="padding:12px;">
+                <div class="flex gap-2" style="flex-wrap:wrap;">
+                  <button class="btn btn-sm" :class="activeTab === 'dashboard' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'dashboard'">Dashboard</button>
+                  <button class="btn btn-sm" :class="activeTab === 'targets' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'targets'; loadTargets()">Targets</button>
+                  <button class="btn btn-sm" :class="activeTab === 'scans' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'scans'; loadScans()">Scans</button>
+                  <button class="btn btn-sm" :class="activeTab === 'findings' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'findings'; loadAllFindings()">Findings</button>
+                  <button class="btn btn-sm" :class="activeTab === 'templates' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'templates'; loadTemplates()">Templates</button>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'dashboard'">
+                <div class="stats-grid" style="margin-bottom:16px;">
+                  <div class="stat-card"><div class="stat-label">Targets</div><div class="stat-value" x-text="dashboardStats ? (dashboardStats.total_targets || 0) : 0"></div></div>
+                  <div class="stat-card"><div class="stat-label">Critical</div><div class="stat-value" style="color:var(--danger);" x-text="dashboardStats ? (dashboardStats.findings_by_severity?.CRITICAL || 0) : 0"></div></div>
+                  <div class="stat-card"><div class="stat-label">High</div><div class="stat-value" style="color:var(--warning);" x-text="dashboardStats ? (dashboardStats.findings_by_severity?.HIGH || 0) : 0"></div></div>
+                  <div class="stat-card"><div class="stat-label">Medium</div><div class="stat-value" x-text="dashboardStats ? (dashboardStats.findings_by_severity?.MEDIUM || 0) : 0"></div></div>
+                  <div class="stat-card"><div class="stat-label">Low</div><div class="stat-value" x-text="dashboardStats ? (dashboardStats.findings_by_severity?.LOW || 0) : 0"></div></div>
+                </div>
+
+                <div class="card" style="padding:0;">
+                  <div class="flex justify-between items-center" style="padding:16px 16px 0;">
+                    <div class="card-title" style="margin-bottom:0;">Recent Scans</div>
+                  </div>
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Target</th>
+                          <th>Status</th>
+                          <th>Profile</th>
+                          <th>Risk</th>
+                          <th>Findings</th>
+                          <th>Created</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-if="!dashboardStats || !dashboardStats.recent_scans || dashboardStats.recent_scans.length === 0">
+                          <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">No scans yet.</td></tr>
+                        </template>
+                        <template x-for="scan in (dashboardStats && dashboardStats.recent_scans ? dashboardStats.recent_scans : [])" :key="scan.id">
+                          <tr>
+                            <td x-text="scan.id"></td>
+                            <td x-text="scan.target_id"></td>
+                            <td><span :class="statusBadgeClass(scan.status)" x-text="scan.status"></span></td>
+                            <td x-text="profileLabel(scan.profile)"></td>
+                            <td x-text="scan.overall_risk || '—'"></td>
+                            <td x-text="scan.findings_total || 0"></td>
+                            <td x-text="scan.created_at ? formatDate(scan.created_at) : '—'"></td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'targets'" class="card" style="padding:0;">
+                <div class="flex justify-between items-center" style="padding:16px 16px 0;">
+                  <div class="card-title" style="margin-bottom:0;">Targets</div>
+                  <button class="btn btn-primary btn-sm" @click="openCreateTarget()">+ Add Target</button>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Target</th>
+                        <th>Scope</th>
+                        <th>Default Profile</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="targets.length === 0"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">No targets.</td></tr></template>
+                      <template x-for="target in targets" :key="target.id">
+                        <tr>
+                          <td><div style="font-weight:600;" x-text="target.name"></div><div class="text-muted text-xs">ID <span x-text="target.id"></span></div></td>
+                          <td><span class="badge badge-gray" x-text="target.target_type"></span></td>
+                          <td style="max-width:280px;word-break:break-word;" x-text="target.target_value"></td>
+                          <td><span class="badge badge-blue" x-text="target.scope"></span></td>
+                          <td x-text="profileLabel(target.default_profile)"></td>
+                          <td>
+                            <div class="flex gap-2">
+                              <button class="btn btn-sm btn-secondary" @click="openLaunchScan(target)">Launch</button>
+                              <button class="btn btn-sm btn-primary" @click="openEditTarget(target)">Edit</button>
+                              <button class="btn btn-sm btn-danger" @click="deleteTarget(target.id)">Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'scans'" class="card" style="padding:0;">
+                <div class="flex justify-between items-center" style="padding:16px 16px 0;">
+                  <div class="card-title" style="margin-bottom:0;">Scans</div>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Target</th>
+                        <th>Status</th>
+                        <th>Progress</th>
+                        <th>Profile</th>
+                        <th>Duration</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="scans.length === 0"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">No scans.</td></tr></template>
+                      <template x-for="scan in scans" :key="scan.id">
+                        <tr>
+                          <td x-text="scan.id"></td>
+                          <td x-text="scan.target_id"></td>
+                          <td><span :class="statusBadgeClass(scan.status)" x-text="scan.status"></span></td>
+                          <td style="min-width:140px;">
+                            <div style="background:var(--border);height:8px;border-radius:999px;overflow:hidden;">
+                              <div style="height:8px;background:var(--accent-green);" :style="`width:${scan.progress_pct || 0}%`"></div>
+                            </div>
+                            <div class="text-muted text-xs" style="margin-top:4px;" x-text="`${scan.progress_pct || 0}%`"></div>
+                          </td>
+                          <td x-text="profileLabel(scan.profile)"></td>
+                          <td x-text="formatDuration(scan.duration_ms)"></td>
+                          <td>
+                            <div class="flex gap-2">
+                              <button class="btn btn-sm btn-primary" @click="openScanDetail(scan)">View</button>
+                              <button class="btn btn-sm btn-danger" x-show="scan.status === 'running' || scan.status === 'pending'" @click="cancelScan(scan.id)">Cancel</button>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'findings'" class="card" style="padding:0;">
+                <div class="flex justify-between items-center" style="padding:16px 16px 0;gap:8px;flex-wrap:wrap;">
+                  <div class="card-title" style="margin-bottom:0;">Findings (Recent Scan)</div>
+                  <div class="flex gap-2" style="flex-wrap:wrap;">
+                    <select class="form-select" style="min-width:120px;" x-model="allFindingsFilter.severity">
+                      <option value="">Severity</option>
+                      <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>INFO</option>
+                    </select>
+                    <input class="form-input" style="min-width:140px;" placeholder="Status" x-model="allFindingsFilter.status" />
+                    <input class="form-input" style="min-width:140px;" placeholder="Scanner" x-model="allFindingsFilter.scanner" />
+                  </div>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Title</th>
+                        <th>Severity</th>
+                        <th>Status</th>
+                        <th>Scanner</th>
+                        <th>Target</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="filteredAllFindings().length === 0"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr></template>
+                      <template x-for="finding in filteredAllFindings()" :key="finding.id">
+                        <tr>
+                          <td x-text="finding.id"></td>
+                          <td style="max-width:280px;word-break:break-word;" x-text="finding.title"></td>
+                          <td><span :class="severityBadgeClass(finding.severity)" x-text="finding.severity"></span></td>
+                          <td><span :class="statusBadgeClass(finding.status)" x-text="finding.status"></span></td>
+                          <td x-text="scannerLabel(finding.scanner_source)"></td>
+                          <td x-text="finding.target_url || '—'"></td>
+                          <td><button class="btn btn-sm btn-primary" @click="openFindingDetail(finding)">Detail</button></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'templates'" class="card" style="padding:0;">
+                <div class="flex justify-between items-center" style="padding:16px 16px 0;">
+                  <div class="card-title" style="margin-bottom:0;">Templates</div>
+                  <button class="btn btn-primary btn-sm" @click="openCreateTemplate()">+ Add Template</button>
+                </div>
+                <div class="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Template ID</th>
+                        <th>Severity</th>
+                        <th>Tags</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="templates.length === 0"><tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-muted);">No templates.</td></tr></template>
+                      <template x-for="tpl in templates" :key="tpl.id">
+                        <tr>
+                          <td x-text="tpl.name"></td>
+                          <td><code x-text="tpl.template_id"></code></td>
+                          <td><span :class="severityBadgeClass(tpl.severity)"><span x-text="(tpl.severity || '').toUpperCase()"></span></span></td>
+                          <td x-text="(tpl.tags || []).join(', ')"></td>
+                          <td>
+                            <div class="flex gap-2">
+                              <button class="btn btn-sm btn-primary" @click="openEditTemplate(tpl)">Edit</button>
+                              <button class="btn btn-sm btn-danger" @click="deleteTemplate(tpl.id)">Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div x-show="targetFormVisible" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:80;" @click.self="targetFormVisible = false">
+                <div class="card" style="width:min(680px,95vw);max-height:90vh;overflow:auto;">
+                  <div class="card-title" x-text="editingTarget ? 'Edit Target' : 'Create Target'"></div>
+                  <div class="form-group"><label class="form-label">Name</label><input class="form-input" x-model="targetForm.name" /></div>
+                  <div class="form-group"><label class="form-label">Target Type</label><select class="form-select" x-model="targetForm.target_type"><option value="web">web</option><option value="network">network</option><option value="api">api</option><option value="cidr">cidr</option></select></div>
+                  <div class="form-group"><label class="form-label">Target Value</label><input class="form-input" x-model="targetForm.target_value" placeholder="https://example.com" /></div>
+                  <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="form-group"><label class="form-label">Scope</label><select class="form-select" x-model="targetForm.scope"><option value="SELF">SELF</option><option value="INTERNAL">INTERNAL</option><option value="THREAT_INTEL">THREAT_INTEL</option></select></div>
+                    <div class="form-group"><label class="form-label">Default Profile</label><select class="form-select" x-model="targetForm.default_profile"><option value="quick">quick</option><option value="standard">standard</option><option value="deep">deep</option></select></div>
+                  </div>
+                  <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input class="form-input" x-model="targetForm.tags" placeholder="prod, critical" /></div>
+                  <div class="form-group"><label class="form-label">Schedule Cron</label><input class="form-input" x-model="targetForm.schedule_cron" placeholder="0 3 * * *" /></div>
+                  <div class="flex gap-2"><button class="btn btn-primary" @click="saveTarget()">Save</button><button class="btn btn-secondary" @click="targetFormVisible = false">Cancel</button></div>
+                </div>
+              </div>
+
+              <div x-show="launchModal.visible" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:80;" @click.self="launchModal.visible = false">
+                <div class="card" style="width:min(560px,95vw);">
+                  <div class="card-title">Launch Scan</div>
+                  <div class="text-muted text-sm" style="margin-bottom:12px;">Target: <strong x-text="launchModal.targetName"></strong></div>
+                  <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="form-group"><label class="form-label">Profile</label><select class="form-select" x-model="launchModal.profile"><option value="quick">quick</option><option value="standard">standard</option><option value="deep">deep</option></select></div>
+                    <div class="form-group"><label class="form-label">Scope</label><select class="form-select" x-model="launchModal.scope"><option value="SELF">SELF</option><option value="INTERNAL">INTERNAL</option><option value="THREAT_INTEL">THREAT_INTEL</option></select></div>
+                  </div>
+                  <div class="form-group"><label class="form-label">Comment</label><textarea class="form-input" rows="3" x-model="launchModal.comment"></textarea></div>
+                  <div class="flex gap-2"><button class="btn btn-primary" :disabled="launchSubmitting" @click="submitLaunchScan()"><span x-text="launchSubmitting ? 'Submitting…' : 'Launch'"></span></button><button class="btn btn-secondary" @click="launchModal.visible = false">Cancel</button></div>
+                </div>
+              </div>
+
+              <div x-show="scanDrawerVisible" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;" @click.self="closeScanDrawer()">
+                <div class="card" style="position:absolute;right:0;top:0;height:100%;width:min(860px,95vw);overflow:auto;border-radius:0;">
+                  <div class="flex justify-between items-center mb-3"><div class="card-title" style="margin-bottom:0;">Scan Detail</div><button class="btn btn-secondary btn-sm" @click="closeScanDrawer()">Close</button></div>
+                  <template x-if="selectedScan">
+                    <div>
+                      <div class="flex gap-2 items-center mb-3" style="flex-wrap:wrap;">
+                        <span class="badge badge-gray">ID <span x-text="selectedScan.id"></span></span>
+                        <span :class="statusBadgeClass(selectedScan.status)" x-text="selectedScan.status"></span>
+                        <span class="badge badge-blue" x-text="profileLabel(selectedScan.profile)"></span>
+                        <span class="text-muted text-sm">Started: <span x-text="selectedScan.started_at ? formatDate(selectedScan.started_at) : '—'"></span></span>
+                        <span class="text-muted text-sm">Completed: <span x-text="selectedScan.completed_at ? formatDate(selectedScan.completed_at) : '—'"></span></span>
+                      </div>
+
+                      <div class="card mb-3" style="padding:12px;">
+                        <div class="flex gap-2" style="flex-wrap:wrap;">
+                          <button class="btn btn-sm" :class="activeScanTab === 'overview' ? 'btn-primary' : 'btn-secondary'" @click="activeScanTab = 'overview'">Overview</button>
+                          <button class="btn btn-sm" :class="activeScanTab === 'findings' ? 'btn-primary' : 'btn-secondary'" @click="activeScanTab = 'findings'">Findings</button>
+                        </div>
+                      </div>
+
+                      <div x-show="activeScanTab === 'overview'" class="stats-grid" style="margin-bottom:16px;">
+                        <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" x-text="selectedScan.findings_total || 0"></div></div>
+                        <div class="stat-card"><div class="stat-label">Critical</div><div class="stat-value" style="color:var(--danger);" x-text="selectedScan.findings_critical || 0"></div></div>
+                        <div class="stat-card"><div class="stat-label">High</div><div class="stat-value" style="color:var(--warning);" x-text="selectedScan.findings_high || 0"></div></div>
+                        <div class="stat-card"><div class="stat-label">Risk</div><div class="stat-value" x-text="selectedScan.overall_risk || '—'"></div></div>
+                      </div>
+
+                      <div x-show="activeScanTab === 'findings'" class="card" style="padding:0;">
+                        <div class="flex justify-between items-center" style="padding:12px;gap:8px;flex-wrap:wrap;">
+                          <div class="text-muted text-sm">Scan Findings</div>
+                          <div class="flex gap-2" style="flex-wrap:wrap;">
+                            <select class="form-select" style="min-width:120px;" x-model="findingsFilter.severity"><option value="">Severity</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>INFO</option></select>
+                            <input class="form-input" style="min-width:130px;" placeholder="Status" x-model="findingsFilter.status" />
+                            <input class="form-input" style="min-width:130px;" placeholder="Scanner" x-model="findingsFilter.scanner" />
+                          </div>
+                        </div>
+                        <div class="table-wrapper">
+                          <table>
+                            <thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Scanner</th><th>Actions</th></tr></thead>
+                            <tbody>
+                              <template x-if="filteredScanFindings().length === 0"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr></template>
+                              <template x-for="finding in filteredScanFindings()" :key="finding.id">
+                                <tr>
+                                  <td x-text="finding.id"></td>
+                                  <td style="max-width:260px;word-break:break-word;" x-text="finding.title"></td>
+                                  <td><span :class="severityBadgeClass(finding.severity)" x-text="finding.severity"></span></td>
+                                  <td><span :class="statusBadgeClass(finding.status)" x-text="finding.status"></span></td>
+                                  <td x-text="scannerLabel(finding.scanner_source)"></td>
+                                  <td><button class="btn btn-sm btn-primary" @click="openFindingDetail(finding)">Detail</button></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div x-show="findingDrawerVisible" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:95;" @click.self="closeFindingDrawer()">
+                <div class="card" style="position:absolute;right:0;top:0;height:100%;width:min(760px,95vw);overflow:auto;border-radius:0;">
+                  <div class="flex justify-between items-center mb-3"><div class="card-title" style="margin-bottom:0;">Finding Detail</div><button class="btn btn-secondary btn-sm" @click="closeFindingDrawer()">Close</button></div>
+                  <template x-if="selectedFinding">
+                    <div>
+                      <div style="font-size:1rem;font-weight:600;margin-bottom:8px;" x-text="selectedFinding.title"></div>
+                      <div class="flex gap-2 mb-3" style="flex-wrap:wrap;">
+                        <span :class="severityBadgeClass(selectedFinding.severity)" x-text="selectedFinding.severity"></span>
+                        <span :class="statusBadgeClass(selectedFinding.status)" x-text="selectedFinding.status"></span>
+                        <span class="badge badge-gray" x-text="scannerLabel(selectedFinding.scanner_source)"></span>
+                      </div>
+                      <div class="text-muted text-sm" style="margin-bottom:10px;" x-text="selectedFinding.description || 'No description'"></div>
+                      <div class="card mb-3" style="padding:12px;">
+                        <div class="card-title" style="font-size:0.9rem;">Remediation</div>
+                        <div class="text-muted text-sm" x-text="selectedFinding.remediation_summary || 'No remediation summary available.'"></div>
+                        <ul style="margin-top:8px;padding-left:18px;">
+                          <template x-for="(step, idx) in (selectedFinding.remediation_steps || [])" :key="idx">
+                            <li class="text-sm" x-text="step"></li>
+                          </template>
+                        </ul>
+                      </div>
+                      <div class="card" style="padding:12px;">
+                        <div class="card-title" style="font-size:0.9rem;">Update Status</div>
+                        <div class="flex gap-2" style="flex-wrap:wrap;">
+                          <button class="btn btn-sm btn-secondary" @click="updateFindingStatus(selectedFinding.id, 'confirmed')">Confirm</button>
+                          <button class="btn btn-sm btn-secondary" @click="updateFindingStatus(selectedFinding.id, 'false_positive', selectedFinding.false_positive_reason || prompt('False positive reason') || '')">False Positive</button>
+                          <button class="btn btn-sm btn-secondary" @click="updateFindingStatus(selectedFinding.id, 'accepted_risk', selectedFinding.accepted_risk_reason || prompt('Accepted risk reason') || '')">Accept Risk</button>
+                          <button class="btn btn-sm btn-primary" @click="updateFindingStatus(selectedFinding.id, 'remediated')">Mark Remediated</button>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div x-show="templateFormVisible" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:80;" @click.self="templateFormVisible = false">
+                <div class="card" style="width:min(760px,95vw);max-height:90vh;overflow:auto;">
+                  <div class="card-title" x-text="editingTemplate ? 'Edit Template' : 'Create Template'"></div>
+                  <div class="form-group"><label class="form-label">Name</label><input class="form-input" x-model="templateForm.name" /></div>
+                  <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" x-model="templateForm.template_id" :disabled="editingTemplate !== null" /></div>
+                  <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="form-group"><label class="form-label">Severity</label><select class="form-select" x-model="templateForm.severity"><option value="critical">critical</option><option value="high">high</option><option value="medium">medium</option><option value="low">low</option><option value="info">info</option></select></div>
+                    <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input class="form-input" x-model="templateForm.tags" /></div>
+                  </div>
+                  <div class="form-group"><label class="form-label">YAML Content</label><textarea class="form-input" rows="12" style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace;" x-model="templateForm.yaml_content"></textarea></div>
+                  <div class="flex gap-2"><button class="btn btn-primary" @click="saveTemplate()">Save</button><button class="btn btn-secondary" @click="templateFormVisible = false">Cancel</button></div>
+                </div>
+              </div>
+            </div><!-- /vulnscan -->
 
             <div x-show="page === 'logo-content-misuse'" x-data="logoMisusePage">
 
