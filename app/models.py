@@ -569,3 +569,146 @@ class RuleTrustedDomain(Base):
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
     rule = relationship("LookalikeRule", back_populates="trusted_domains")
+
+
+# ── Vulnerability Scanner (TS-VS-001) ─────────────────────────────────────────
+
+class VSScanTarget(Base):
+    __tablename__ = "vs_scan_targets"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    target_type = Column(String(20), nullable=False, default="web")  # web | network | api | cidr
+    target_value = Column(Text, nullable=False)
+    scope = Column(String(20), nullable=False, default="SELF")       # SELF | INTERNAL | THREAT_INTEL
+    tags_json = Column(Text, default="[]")
+    default_profile = Column(String(20), nullable=False, default="standard")
+    schedule_cron = Column(String(100), nullable=True)
+    notify_channels_json = Column(Text, default='["email","telegram"]')
+    active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    scans = relationship("VSScan", back_populates="target", cascade="all, delete-orphan")
+
+
+class VSScan(Base):
+    __tablename__ = "vs_scans"
+    id = Column(Integer, primary_key=True)
+    target_id = Column(Integer, ForeignKey("vs_scan_targets.id"), nullable=False)
+    profile = Column(String(20), nullable=False, default="standard")  # quick | standard | deep
+    scope = Column(String(20), nullable=False, default="SELF")
+    status = Column(String(20), nullable=False, default="pending")
+    # pending | running | completed | failed | cancelled
+    scanners_used_json = Column(Text, default="[]")
+    progress_pct = Column(Integer, default=0)
+    findings_total = Column(Integer, default=0)
+    findings_critical = Column(Integer, default=0)
+    findings_high = Column(Integer, default=0)
+    findings_medium = Column(Integer, default=0)
+    findings_low = Column(Integer, default=0)
+    findings_info = Column(Integer, default=0)
+    findings_new = Column(Integer, default=0)
+    findings_fixed = Column(Integer, default=0)
+    findings_persisted = Column(Integer, default=0)
+    overall_risk = Column(String(10), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    error_message = Column(Text, default="")
+    initiated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    comment = Column(Text, default="")
+    created_at = Column(DateTime, default=_utcnow)
+    target = relationship("VSScanTarget", back_populates="scans")
+    findings = relationship("VSFinding", back_populates="scan", cascade="all, delete-orphan")
+    reports = relationship("VSReport", back_populates="scan", cascade="all, delete-orphan")
+
+
+class VSFinding(Base):
+    __tablename__ = "vs_findings"
+    id = Column(Integer, primary_key=True)
+    scan_id = Column(Integer, ForeignKey("vs_scans.id"), nullable=False)
+    target_id = Column(Integer, ForeignKey("vs_scan_targets.id"), nullable=False)
+
+    # Classification
+    scanner_source = Column(String(30), nullable=False)        # nuclei|openvas|zap|nikto|testssl|headers|dns_sec
+    scanner_finding_id = Column(String(255), default="")
+    title = Column(Text, nullable=False)
+    description = Column(Text, default="")
+    finding_type = Column(String(50), nullable=False)          # CVE|MISCONFIGURATION|EXPOSURE|MISSING_HEADER|SSL_ISSUE|INJECTION|INFORMATION_DISCLOSURE
+    owasp_category = Column(String(5), nullable=True)
+
+    # Severity
+    severity = Column(String(10), nullable=False, default="INFO")  # CRITICAL|HIGH|MEDIUM|LOW|INFO
+    severity_numeric = Column(Integer, nullable=False, default=1)   # 5|4|3|2|1
+    cvss_score = Column(Float, nullable=True)
+    cvss_vector = Column(Text, default="")
+
+    # Identifiers
+    cve_ids_json = Column(Text, default="[]")
+    cwe_ids_json = Column(Text, default="[]")
+    wasc_id = Column(String(20), nullable=True)
+
+    # Target details
+    target_url = Column(Text, nullable=False, default="")
+    target_host = Column(String(512), nullable=False, default="")
+    target_ip = Column(String(64), nullable=True)
+    target_port = Column(Integer, nullable=True)
+    affected_parameter = Column(Text, nullable=True)
+
+    # Evidence
+    request_excerpt = Column(Text, nullable=True)
+    response_excerpt = Column(Text, nullable=True)
+    evidence = Column(Text, nullable=True)
+    curl_command = Column(Text, nullable=True)
+
+    # Remediation
+    remediation_summary = Column(Text, default="")
+    remediation_steps_json = Column(Text, default="[]")
+    remediation_effort = Column(String(10), default="MEDIUM")   # LOW|MEDIUM|HIGH
+    patch_available = Column(Boolean, default=False)
+    patch_url = Column(Text, nullable=True)
+    references_json = Column(Text, default="[]")
+
+    # Status
+    status = Column(String(30), nullable=False, default="new")  # new|confirmed|false_positive|accepted_risk|remediated|retest_pending
+    false_positive_reason = Column(Text, nullable=True)
+    accepted_risk_reason = Column(Text, nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    # Deduplication
+    fingerprint = Column(String(64), nullable=False, default="")
+    first_seen = Column(DateTime, default=_utcnow)
+    last_seen = Column(DateTime, default=_utcnow)
+    occurrence_count = Column(Integer, default=1)
+
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    scan = relationship("VSScan", back_populates="findings")
+
+
+class VSReport(Base):
+    __tablename__ = "vs_reports"
+    id = Column(Integer, primary_key=True)
+    scan_id = Column(Integer, ForeignKey("vs_scans.id"), nullable=False)
+    format = Column(String(10), nullable=False)   # pdf | html | json | csv | kql
+    file_path = Column(Text, nullable=False, default="")
+    file_size_bytes = Column(Integer, nullable=True)
+    generated_at = Column(DateTime, default=_utcnow)
+    generated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    scan = relationship("VSScan", back_populates="reports")
+
+
+class VSCustomTemplate(Base):
+    __tablename__ = "vs_custom_templates"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    template_id = Column(String(100), nullable=False, unique=True)
+    yaml_content = Column(Text, nullable=False)
+    severity = Column(String(10), nullable=False, default="medium")
+    tags_json = Column(Text, default="[]")
+    is_active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
