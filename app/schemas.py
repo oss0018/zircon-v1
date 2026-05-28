@@ -418,6 +418,22 @@ class BrandAlertOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Look-alike Domains ─────────────────────────────────────────────────────────
+class LookalikeDomainOut(BaseModel):
+    id: int
+    rule_id: int
+    fqdn: str
+    vt_malicious: Optional[int] = None
+    vt_suspicious: Optional[int] = None
+    vt_harmless: Optional[int] = None
+    vt_undetected: Optional[int] = None
+    vt_engines: Optional[str] = None
+    vt_community_score: Optional[int] = None
+    vt_last_analysis_date: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
 # ── Owned / Trusted Domains ───────────────────────────────────────────────────
 class OwnedDomainCreate(BaseModel):
     brand_id: int
