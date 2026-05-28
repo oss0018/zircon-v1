@@ -1,7 +1,11 @@
 import json
+import asyncio
 from urllib.parse import urlparse
 
 import httpx
+import dns.dnssec
+import dns.rdatatype
+import dns.resolver
 
 
 def _as_url(target: str) -> str:
@@ -191,32 +195,244 @@ class HeaderScanner:
 class DNSSecScanner:
     @staticmethod
     async def scan(domain: str) -> list[dict]:
-        # TODO: replace with real subprocess call
         target_url, host, port = _target_parts(domain)
-        return [
-            _base_finding(
-                "dns_sec",
-                "dnssec-001",
-                "DNSSEC not configured",
-                "No DNSSEC DS records detected for target domain.",
-                "MISCONFIGURATION",
-                "LOW",
-                target_url,
-                host,
-                port,
-            ),
-            _base_finding(
-                "dns_sec",
-                "dmarc-001",
-                "Missing DMARC policy",
-                "Domain does not publish a DMARC record.",
+        findings: list[dict] = []
+        loop = asyncio.get_event_loop()
+        resolver = dns.resolver.Resolver()
+
+        def _txt_record_value(rdata) -> str:
+            if hasattr(rdata, "strings"):
+                return b"".join(rdata.strings).decode("utf-8", errors="ignore")
+            return str(rdata).replace('"', "").strip()
+
+        async def _resolve(name: str, rdtype: str | dns.rdatatype.RdataType):
+            return await loop.run_in_executor(None, resolver.resolve, name, rdtype)
+
+        def _append_finding(
+            scanner_finding_id: str,
+            title: str,
+            description: str,
+            finding_type: str,
+            severity: str,
+            remediation_summary: str,
+            references: list[str],
+            cwe_ids: list[str] | None = None,
+        ) -> None:
+            findings.append(
+                {
+                    **_base_finding(
+                        "dns_sec",
+                        scanner_finding_id,
+                        title,
+                        description,
+                        finding_type,
+                        severity,
+                        target_url,
+                        host,
+                        port,
+                        cwe_ids=cwe_ids,
+                    ),
+                    "remediation_summary": remediation_summary,
+                    "references_json": json.dumps(references),
+                }
+            )
+
+        try:
+            txt_answers = await _resolve(host, "TXT")
+            spf_record = next(
+                (
+                    _txt_record_value(r).strip()
+                    for r in txt_answers
+                    if _txt_record_value(r).strip().lower().startswith("v=spf1")
+                ),
+                None,
+            )
+            if not spf_record:
+                _append_finding(
+                    "spf-missing",
+                    "Missing SPF Record",
+                    "Domain does not publish an SPF record, increasing the risk of email spoofing.",
+                    "SPF_MISSING",
+                    "MEDIUM",
+                    "Publish a TXT SPF record that authorizes only legitimate mail senders and ends with a strict -all policy.",
+                    ["https://www.rfc-editor.org/rfc/rfc7208"],
+                    cwe_ids=["CWE-350"],
+                )
+            else:
+                spf_lower = spf_record.lower()
+                mechanisms = [part.strip() for part in spf_lower.split() if part.strip()]
+                has_permissive_all = "+all" in mechanisms
+                ends_softfail = bool(mechanisms) and mechanisms[-1] == "~all"
+                has_hardfail = "-all" in mechanisms
+                if has_permissive_all or (ends_softfail and not has_hardfail):
+                    _append_finding(
+                        "spf-weak",
+                        "Weak SPF Policy",
+                        "SPF policy uses softfail (~all) or allows all senders (+all), which can let spoofed email pass some filters.",
+                        "SPF_WEAK",
+                        "LOW",
+                        "Update SPF to explicitly authorize trusted senders and end with -all to reject unauthorized sources.",
+                        ["https://www.rfc-editor.org/rfc/rfc7208"],
+                    )
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            _append_finding(
+                "spf-missing",
+                "Missing SPF Record",
+                "Domain does not publish an SPF record, increasing the risk of email spoofing.",
+                "SPF_MISSING",
+                "MEDIUM",
+                "Publish a TXT SPF record that authorizes only legitimate mail senders and ends with a strict -all policy.",
+                ["https://www.rfc-editor.org/rfc/rfc7208"],
+                cwe_ids=["CWE-350"],
+            )
+        except (dns.exception.Timeout, Exception):
+            pass
+
+        try:
+            dmarc_answers = await _resolve(f"_dmarc.{host}", "TXT")
+            dmarc_record = next(
+                (
+                    _txt_record_value(r).strip()
+                    for r in dmarc_answers
+                    if _txt_record_value(r).strip().lower().startswith("v=dmarc1")
+                ),
+                None,
+            )
+            if not dmarc_record:
+                _append_finding(
+                    "dmarc-missing",
+                    "Missing DMARC Policy",
+                    "Domain does not publish a DMARC policy, increasing phishing and domain spoofing risk.",
+                    "DMARC_MISSING",
+                    "MEDIUM",
+                    "Publish a DMARC TXT record with alignment and reporting, then enforce with quarantine or reject.",
+                    [
+                        "https://www.rfc-editor.org/rfc/rfc7489",
+                        "https://dmarc.org/",
+                    ],
+                    cwe_ids=["CWE-350"],
+                )
+            elif "p=none" in dmarc_record.lower():
+                _append_finding(
+                    "dmarc-weak",
+                    "DMARC Policy Set to None",
+                    "DMARC policy is set to p=none, which is monitoring-only and does not block spoofed messages.",
+                    "DMARC_WEAK",
+                    "LOW",
+                    "Move DMARC from p=none to p=quarantine or p=reject after validating legitimate mail sources.",
+                    [
+                        "https://www.rfc-editor.org/rfc/rfc7489",
+                        "https://dmarcian.com/policy-modes-for-dmarc/",
+                    ],
+                )
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            _append_finding(
+                "dmarc-missing",
+                "Missing DMARC Policy",
+                "Domain does not publish a DMARC policy, increasing phishing and domain spoofing risk.",
                 "DMARC_MISSING",
                 "MEDIUM",
-                target_url,
-                host,
-                port,
-            ),
-        ]
+                "Publish a DMARC TXT record with alignment and reporting, then enforce with quarantine or reject.",
+                [
+                    "https://www.rfc-editor.org/rfc/rfc7489",
+                    "https://dmarc.org/",
+                ],
+                cwe_ids=["CWE-350"],
+            )
+        except (dns.exception.Timeout, Exception):
+            pass
+
+        try:
+            dkim_answers = await _resolve(f"default._domainkey.{host}", "TXT")
+            has_dkim = any(
+                _txt_record_value(r).strip().lower().startswith("v=dkim1") for r in dkim_answers
+            )
+            if not has_dkim:
+                _append_finding(
+                    "dkim-missing-default-selector",
+                    "DKIM Not Detected (default selector)",
+                    "No DKIM record was detected for default._domainkey; DKIM may still be configured under another selector.",
+                    "DKIM_MISSING",
+                    "LOW",
+                    "Publish a DKIM TXT record for your active selector and ensure outbound mail is cryptographically signed.",
+                    [
+                        "https://www.rfc-editor.org/rfc/rfc6376",
+                        "https://dmarc.org/overview/",
+                    ],
+                )
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            _append_finding(
+                "dkim-missing-default-selector",
+                "DKIM Not Detected (default selector)",
+                "No DKIM record was detected for default._domainkey; DKIM may still be configured under another selector.",
+                "DKIM_MISSING",
+                "LOW",
+                "Publish a DKIM TXT record for your active selector and ensure outbound mail is cryptographically signed.",
+                [
+                    "https://www.rfc-editor.org/rfc/rfc6376",
+                    "https://dmarc.org/overview/",
+                ],
+            )
+        except (dns.exception.Timeout, Exception):
+            pass
+
+        try:
+            ds_answers = await _resolve(host, dns.rdatatype.DS)
+            if not list(ds_answers):
+                _append_finding(
+                    "dnssec-not-configured",
+                    "DNSSEC Not Configured",
+                    "No DNSSEC DS records were detected, increasing exposure to DNS cache-poisoning and spoofing attacks.",
+                    "DNSSEC_NOT_CONFIGURED",
+                    "LOW",
+                    "Enable DNSSEC with your DNS provider and publish DS records at the parent zone.",
+                    [
+                        "https://www.rfc-editor.org/rfc/rfc4033",
+                        "https://www.rfc-editor.org/rfc/rfc4034",
+                    ],
+                )
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            _append_finding(
+                "dnssec-not-configured",
+                "DNSSEC Not Configured",
+                "No DNSSEC DS records were detected, increasing exposure to DNS cache-poisoning and spoofing attacks.",
+                "DNSSEC_NOT_CONFIGURED",
+                "LOW",
+                "Enable DNSSEC with your DNS provider and publish DS records at the parent zone.",
+                [
+                    "https://www.rfc-editor.org/rfc/rfc4033",
+                    "https://www.rfc-editor.org/rfc/rfc4034",
+                ],
+            )
+        except (dns.exception.Timeout, Exception):
+            pass
+
+        try:
+            caa_answers = await _resolve(host, dns.rdatatype.CAA)
+            if not list(caa_answers):
+                _append_finding(
+                    "caa-missing",
+                    "Missing CAA Record",
+                    "No CAA record was detected; CAA helps restrict which certificate authorities can issue TLS certificates for this domain.",
+                    "CAA_MISSING",
+                    "INFO",
+                    "Add CAA records to authorize approved certificate authorities and reduce certificate mis-issuance risk.",
+                    ["https://www.rfc-editor.org/rfc/rfc8659"],
+                )
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            _append_finding(
+                "caa-missing",
+                "Missing CAA Record",
+                "No CAA record was detected; CAA helps restrict which certificate authorities can issue TLS certificates for this domain.",
+                "CAA_MISSING",
+                "INFO",
+                "Add CAA records to authorize approved certificate authorities and reduce certificate mis-issuance risk.",
+                ["https://www.rfc-editor.org/rfc/rfc8659"],
+            )
+        except (dns.exception.Timeout, Exception):
+            pass
+
+        return findings
 
 
 class TestSSLScanner:

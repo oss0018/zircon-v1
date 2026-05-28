@@ -1,5 +1,10 @@
 import json
+import asyncio
 from pathlib import Path
+
+import dns.exception
+import dns.rdatatype
+import dns.resolver
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -125,3 +130,79 @@ def test_vulnscan_component_targets_expected_frontend_flows():
     assert "severityBadgeClass" in js
     assert "statusBadgeClass" in js
     assert "formatDuration" in js
+
+
+def test_dnssec_scanner_emits_expected_weak_and_missing_findings(monkeypatch):
+    from app.services.vulnscan.scanners import DNSSecScanner
+
+    class _Txt:
+        def __init__(self, value: str):
+            self.strings = [value.encode("utf-8")]
+
+    def _resolve(self, name, rdtype):  # noqa: ARG001
+        if rdtype == "TXT" and name == "example.com":
+            return [_Txt("v=spf1 include:_spf.example.com ~all")]
+        if rdtype == "TXT" and name == "_dmarc.example.com":
+            return [_Txt("v=DMARC1; p=none; rua=mailto:dmarc@example.com")]
+        if rdtype == "TXT" and name == "default._domainkey.example.com":
+            raise dns.resolver.NoAnswer()
+        if rdtype == dns.rdatatype.DS:
+            raise dns.resolver.NoAnswer()
+        if rdtype == dns.rdatatype.CAA:
+            raise dns.resolver.NoAnswer()
+        return []
+
+    monkeypatch.setattr(dns.resolver.Resolver, "resolve", _resolve)
+
+    findings = asyncio.run(DNSSecScanner.scan("example.com"))
+    finding_types = {f["finding_type"] for f in findings}
+
+    assert "SPF_WEAK" in finding_types
+    assert "DMARC_WEAK" in finding_types
+    assert "DKIM_MISSING" in finding_types
+    assert "DNSSEC_NOT_CONFIGURED" in finding_types
+    assert "CAA_MISSING" in finding_types
+
+    for finding in findings:
+        assert finding.get("remediation_summary")
+        references = json.loads(finding.get("references_json", "[]"))
+        assert isinstance(references, list)
+        assert references
+
+
+def test_dnssec_scanner_handles_missing_records(monkeypatch):
+    from app.services.vulnscan.scanners import DNSSecScanner
+
+    def _resolve(self, name, rdtype):  # noqa: ARG001
+        if rdtype == "TXT" and name in {"example.com", "_dmarc.example.com"}:
+            raise dns.resolver.NoAnswer()
+        if rdtype == "TXT" and name == "default._domainkey.example.com":
+            return []
+        if rdtype == dns.rdatatype.DS:
+            return []
+        if rdtype == dns.rdatatype.CAA:
+            raise dns.resolver.NXDOMAIN()
+        return []
+
+    monkeypatch.setattr(dns.resolver.Resolver, "resolve", _resolve)
+
+    findings = asyncio.run(DNSSecScanner.scan("example.com"))
+    finding_types = {f["finding_type"] for f in findings}
+
+    assert "SPF_MISSING" in finding_types
+    assert "DMARC_MISSING" in finding_types
+    assert "DKIM_MISSING" in finding_types
+    assert "DNSSEC_NOT_CONFIGURED" in finding_types
+    assert "CAA_MISSING" in finding_types
+
+
+def test_dnssec_scanner_swallows_timeouts(monkeypatch):
+    from app.services.vulnscan.scanners import DNSSecScanner
+
+    def _resolve(self, name, rdtype):  # noqa: ARG001
+        raise dns.exception.Timeout()
+
+    monkeypatch.setattr(dns.resolver.Resolver, "resolve", _resolve)
+
+    findings = asyncio.run(DNSSecScanner.scan("example.com"))
+    assert findings == []
