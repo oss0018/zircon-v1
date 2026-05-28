@@ -1806,6 +1806,7 @@
                           <th>Status</th>
                           <th>Threat Score</th>
                           <th>Severity</th>
+                          <th>VirusTotal</th>
                           <th>IP</th>
                           <th>HTTP Status</th>
                           <th>SSL</th>
@@ -1815,10 +1816,10 @@
                       </thead>
                       <tbody>
                         <template x-if="domainsLoading">
-                          <tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
+                          <tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
                         </template>
                         <template x-if="!domainsLoading && domainsResult.items.length === 0">
-                          <tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">No domains match the current filters.</td></tr>
+                          <tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-muted);">No domains match the current filters.</td></tr>
                         </template>
                         <template x-for="domain in domainsResult.items" :key="domain.id">
                           <tr>
@@ -1840,6 +1841,26 @@
                               </div>
                             </td>
                             <td><span :class="severityBadge(domain.severity)" x-text="severityLabel(domain.severity)"></span></td>
+                            <td>
+                              <span
+                                x-show="domain.vt_malicious === null || domain.vt_malicious === undefined"
+                                class="badge badge-gray"
+                              >—</span>
+                              <span
+                                x-show="domain.vt_malicious !== null && domain.vt_malicious !== undefined && Number(domain.vt_malicious) > 0"
+                                class="badge badge-red"
+                                x-text="'Mal ' + Number(domain.vt_malicious)"
+                              ></span>
+                              <span
+                                x-show="domain.vt_malicious !== null && domain.vt_malicious !== undefined && Number(domain.vt_malicious) === 0 && Number(domain.vt_suspicious || 0) > 0"
+                                class="badge badge-yellow"
+                                x-text="'Susp ' + Number(domain.vt_suspicious || 0)"
+                              ></span>
+                              <span
+                                x-show="domain.vt_malicious !== null && domain.vt_malicious !== undefined && Number(domain.vt_malicious) === 0 && Number(domain.vt_suspicious || 0) === 0"
+                                class="badge badge-green"
+                              >Clean</span>
+                            </td>
                             <td class="font-mono text-xs" x-text="domain.ip || '—'"></td>
                             <td x-text="domain.http_status || '—'"></td>
                             <td x-text="domain.ssl_valid === true ? '🔒' : domain.ssl_valid === false ? '⚠️' : '—'"></td>

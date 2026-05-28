@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import get_db
-from app.models import Brand, LookalikeDomain, LookalikeRule, RuleTrustedDomain, User
+from app.models import Brand, Integration, LookalikeDomain, LookalikeRule, RuleTrustedDomain, User
+from app.services.crypto import decrypt
 from app.utils.sanitize import sanitize_string
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,23 @@ def _rule_to_dict(rule: LookalikeRule) -> dict:
     }
 
 
+async def _get_integration_api_key(db: AsyncSession, service_type: str) -> str:
+    try:
+        res = await db.execute(
+            select(Integration).where(
+                Integration.service_type == service_type,
+                Integration.is_active.is_(True),
+            )
+        )
+        integration = res.scalar_one_or_none()
+        if not integration or not integration.api_key_encrypted:
+            return ""
+        return decrypt(integration.api_key_encrypted) or ""
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not load integration key for %s: %s", service_type, exc)
+        return ""
+
+
 def _domain_to_dict(d: LookalikeDomain) -> dict:
     return {
         "id": d.id,
@@ -199,6 +217,15 @@ def _domain_to_dict(d: LookalikeDomain) -> dict:
         "registrant_org": d.registrant_org,
         "creation_date": d.creation_date.isoformat() if d.creation_date else None,
         "expiry_date": d.expiry_date.isoformat() if d.expiry_date else None,
+        "vt_malicious": d.vt_malicious,
+        "vt_suspicious": d.vt_suspicious,
+        "vt_harmless": d.vt_harmless,
+        "vt_undetected": d.vt_undetected,
+        "vt_engines": d.vt_engines,
+        "vt_community_score": d.vt_community_score,
+        "vt_last_analysis_date": (
+            d.vt_last_analysis_date.isoformat() if d.vt_last_analysis_date else None
+        ),
         "screenshot_url": d.screenshot_url,
         "urlscan_uuid": d.urlscan_uuid,
         "urlscan_score": d.urlscan_score,
@@ -429,6 +456,7 @@ async def scan_rule(
     gen_result = engine.generate_and_filter(rule.protected_domain)
     variants = gen_result.variants
     total = len(variants)
+    vt_api_key = await _get_integration_api_key(db, "virustotal")
 
     matcher = TrustedDomainMatcher(trusted_entries)
     scorer = ThreatScorer()
@@ -500,22 +528,27 @@ async def scan_rule(
                     redirects_to_legit = http_result.get("redirects_to_legitimate")
                     ssl_valid = http_result.get("ssl_valid")
 
-                # Phase 2: GeoIP + WHOIS enrichment for live domains
+                # Phase 2: GeoIP + WHOIS + VirusTotal enrichment for live domains
                 geoip_data: dict = {}
                 whois_data: dict = {}
+                vt_data: dict = {}
                 if has_a:
                     try:
                         from app.services.lookalike.geoip_enricher import enrich_geoip
+                        from app.services.lookalike.vt_enricher import enrich_vt
                         from app.services.lookalike.whois_enricher import enrich_whois
-                        geoip_data, whois_data = await asyncio.gather(
+                        geoip_data, whois_data, vt_data = await asyncio.gather(
                             enrich_geoip(ip),
                             enrich_whois(fqdn),
+                            enrich_vt(fqdn, vt_api_key),
                             return_exceptions=True,
                         )
                         if isinstance(geoip_data, Exception):
                             geoip_data = {}
                         if isinstance(whois_data, Exception):
                             whois_data = {}
+                        if isinstance(vt_data, Exception):
+                            vt_data = {}
                     except Exception:
                         pass
 
@@ -552,6 +585,14 @@ async def scan_rule(
                     "registrant_org": whois_data.get("registrant_org"),
                     "creation_date": whois_data.get("creation_date"),
                     "expiry_date": whois_data.get("expiry_date"),
+                    # VirusTotal
+                    "vt_malicious": vt_data.get("vt_malicious"),
+                    "vt_suspicious": vt_data.get("vt_suspicious"),
+                    "vt_harmless": vt_data.get("vt_harmless"),
+                    "vt_undetected": vt_data.get("vt_undetected"),
+                    "vt_engines": vt_data.get("vt_engines"),
+                    "vt_community_score": vt_data.get("vt_community_score"),
+                    "vt_last_analysis_date": vt_data.get("vt_last_analysis_date"),
                 }
 
                 # Compute threat score for checked domains
@@ -602,6 +643,13 @@ async def scan_rule(
                             redirect_detected=domain_data.get("redirect_detected"),
                             redirects_to_legitimate=domain_data.get("redirects_to_legitimate"),
                             ssl_valid=domain_data.get("ssl_valid"),
+                            vt_malicious=domain_data.get("vt_malicious"),
+                            vt_suspicious=domain_data.get("vt_suspicious"),
+                            vt_harmless=domain_data.get("vt_harmless"),
+                            vt_undetected=domain_data.get("vt_undetected"),
+                            vt_engines=domain_data.get("vt_engines"),
+                            vt_community_score=domain_data.get("vt_community_score"),
+                            vt_last_analysis_date=domain_data.get("vt_last_analysis_date"),
                             threat_score=domain_data.get("threat_score"),
                             severity=domain_data.get("severity"),
                             signals_fired=domain_data.get("signals_fired", "[]"),
@@ -927,12 +975,13 @@ async def enrich_domain(
     _: User = Depends(get_current_user),
 ):
     """
-    Run WHOIS + GeoIP + URLScan enrichment on a single domain and re-score it.
+    Run WHOIS + GeoIP + VirusTotal + URLScan enrichment on a single domain and re-score it.
 
     The domain row is updated in the DB and the full updated dict is returned.
     """
     from app.config import settings as _settings
     from app.services.lookalike.geoip_enricher import enrich_geoip
+    from app.services.lookalike.vt_enricher import enrich_vt
     from app.services.lookalike.whois_enricher import enrich_whois
     from app.services.lookalike.screenshot_analyzer import fetch_screenshot_urlscan
     from app.services.lookalike.threat_scorer import ThreatScorer
@@ -947,18 +996,23 @@ async def enrich_domain(
     if not domain:
         raise HTTPException(status_code=404, detail="Domain not found")
 
+    vt_api_key = await _get_integration_api_key(db, "virustotal")
+
     # Run enrichment tasks concurrently
     geoip_task = enrich_geoip(domain.ip)
     whois_task = enrich_whois(domain.fqdn)
+    vt_task = enrich_vt(domain.fqdn, vt_api_key)
     screenshot_task = fetch_screenshot_urlscan(domain.fqdn, _settings.urlscan_api_key)
 
-    geoip_data, whois_data, screenshot_data = await asyncio.gather(
-        geoip_task, whois_task, screenshot_task, return_exceptions=True
+    geoip_data, whois_data, vt_data, screenshot_data = await asyncio.gather(
+        geoip_task, whois_task, vt_task, screenshot_task, return_exceptions=True
     )
     if isinstance(geoip_data, Exception):
         geoip_data = {}
     if isinstance(whois_data, Exception):
         whois_data = {}
+    if isinstance(vt_data, Exception):
+        vt_data = {}
     if isinstance(screenshot_data, Exception):
         screenshot_data = {}
 
@@ -970,6 +1024,17 @@ async def enrich_domain(
                   "creation_date", "expiry_date"):
         if field in whois_data and hasattr(domain, field):
             setattr(domain, field, whois_data[field])
+    for field in (
+        "vt_malicious",
+        "vt_suspicious",
+        "vt_harmless",
+        "vt_undetected",
+        "vt_engines",
+        "vt_community_score",
+        "vt_last_analysis_date",
+    ):
+        if field in vt_data and hasattr(domain, field):
+            setattr(domain, field, vt_data[field])
     if screenshot_data.get("screenshot_url"):
         domain.screenshot_url = screenshot_data.get("screenshot_url")
     if screenshot_data.get("urlscan_uuid"):

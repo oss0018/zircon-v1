@@ -1,7 +1,7 @@
 """
 Threat Scorer — TS-LAD-001 v1.1 §8.4.
 
-20 signals → integer threat_score (0–100) and severity (1–5).
+21 signals → integer threat_score (0–100) and severity (1–5).
 """
 from __future__ import annotations
 
@@ -144,6 +144,20 @@ def score(domain_data: dict) -> Tuple[int, int, List[str]]:
     if _get("is_high_risk_country"):
         signals_fired.append("S15_high_risk_country")
         raw_score += WEIGHTS["S15_high_risk_country"]
+
+    # S21: VirusTotal detections
+    vt_points = 0
+    vt_malicious = _get("vt_malicious")
+    vt_suspicious = _get("vt_suspicious")
+    if vt_malicious is not None and vt_malicious >= 3:
+        vt_points += 35
+    elif vt_malicious is not None and vt_malicious >= 1:
+        vt_points += 15
+    if vt_suspicious is not None and vt_suspicious >= 5:
+        vt_points += 10
+    if vt_points > 0:
+        signals_fired.append("S21_vt_detected")
+        raw_score += vt_points
 
     # S16: high similarity (≥ 0.85)
     sim = _get("similarity_score")
