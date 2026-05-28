@@ -245,6 +245,61 @@ def _migrate_lookalike_rules(conn) -> None:
         logger.warning("Could not migrate lookalike_rules: %s", exc)
 
 
+def _migrate_lookalike_domains(conn) -> None:
+    """Ensure lookalike_domains has all enrichment/threat columns on upgrades."""
+    from sqlalchemy import inspect, text
+    from typing import Dict
+
+    ALLOWED_NEW_COLS: Dict[str, str] = {
+        "server_header": "VARCHAR(256)",
+        "redirect_detected": "BOOLEAN",
+        "redirects_to_legitimate": "BOOLEAN",
+        "brand_in_title": "BOOLEAN",
+        "phishing_keywords_in_title": "BOOLEAN",
+        "ssl_valid": "BOOLEAN",
+        "ssl_issuer": "VARCHAR(256)",
+        "ssl_uses_lets_encrypt": "BOOLEAN",
+        "ssl_cert_age_days": "INTEGER",
+        "ssl_is_self_signed": "BOOLEAN",
+        "country_code": "VARCHAR(5)",
+        "asn": "VARCHAR(50)",
+        "org": "VARCHAR(256)",
+        "is_high_risk_country": "BOOLEAN",
+        "registrar": "VARCHAR(256)",
+        "domain_age_days": "INTEGER",
+        "whois_privacy": "BOOLEAN",
+        "registrant_org": "VARCHAR(256)",
+        "creation_date": "DATETIME",
+        "expiry_date": "DATETIME",
+        "screenshot_url": "TEXT",
+        "urlscan_uuid": "VARCHAR(64)",
+        "urlscan_score": "REAL",
+        "phash_distance": "INTEGER",
+        "visual_similarity_pct": "REAL",
+        "threat_score": "INTEGER",
+        "severity": "INTEGER",
+        "signals_fired": "TEXT DEFAULT '[]'",
+        "last_checked_at": "DATETIME",
+        "is_false_positive": "BOOLEAN DEFAULT 0",
+        "fp_reason": "VARCHAR(256)",
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+        if "lookalike_domains" not in tables:
+            return
+        existing_cols = {c["name"] for c in inspector.get_columns("lookalike_domains")}
+        for col_name, col_type in ALLOWED_NEW_COLS.items():
+            if col_name not in existing_cols:
+                # Both col_name and col_type are from a hardcoded whitelist above
+                conn.execute(
+                    text(f"ALTER TABLE lookalike_domains ADD COLUMN {col_name} {col_type}")
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate lookalike_domains: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -264,3 +319,5 @@ async def init_db():
         await conn.run_sync(_migrate_monitoring)
         # Add alert threshold to lookalike rules if upgrading from older version
         await conn.run_sync(_migrate_lookalike_rules)
+        # Add lookalike domain enrichment columns if upgrading from older version
+        await conn.run_sync(_migrate_lookalike_domains)
