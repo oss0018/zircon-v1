@@ -260,7 +260,11 @@ class DNSSecScanner:
                 )
             else:
                 spf_lower = spf_record.lower()
-                if "+all" in spf_lower or (spf_lower.endswith("~all") and "-all" not in spf_lower):
+                mechanisms = [part.strip() for part in spf_lower.split() if part.strip()]
+                has_permissive_all = "+all" in mechanisms
+                ends_softfail = bool(mechanisms) and mechanisms[-1] == "~all"
+                has_hardfail = "-all" in mechanisms
+                if has_permissive_all or (ends_softfail and not has_hardfail):
                     _append_finding(
                         "spf-weak",
                         "Weak SPF Policy",
