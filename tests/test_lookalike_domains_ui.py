@@ -37,7 +37,8 @@ def test_lookalike_domains_component_targets_expected_frontend_flows():
     assert "Rule name and protected domain are required." in js
     assert "api.post('/brands/'" in js
     assert "setTimeout(() => this.loadRulePreview(), 1200)" in js
-    assert "bufferedEvents >= 50" in js
+    assert "BUFFER_FLUSH_THRESHOLD = 50" in js
+    assert "BUFFER_FLUSH_DELAY_MS = 500" in js
     assert "this.brands = Array.isArray(response) ? response : []" in js
 
 

@@ -274,7 +274,9 @@ async def create_rule(
     _: User = Depends(get_current_user),
 ):
     """Create a new lookalike monitoring rule."""
-    brand_id = body.brand_id if (body.brand_id is not None and body.brand_id > 0) else None
+    if body.brand_id is not None and body.brand_id <= 0:
+        raise HTTPException(status_code=422, detail="brand_id must be a positive integer or null")
+    brand_id = body.brand_id
     if brand_id is not None:
         brand_res = await db.execute(select(Brand).where(Brand.id == brand_id))
         if not brand_res.scalar_one_or_none():

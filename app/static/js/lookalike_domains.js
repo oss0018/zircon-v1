@@ -457,10 +457,22 @@
               let createdBrand;
               try {
                 createdBrand = await api.post('/brands/', { name: newBrandName, url: '', keywords: '' });
-              } catch (_) {
-                createdBrand = await api.post('/brand-protection/', { name: newBrandName, url: '', keywords: '' });
+              } catch (primaryError) {
+                // Fallback keeps compatibility with deployments that expose brand creation
+                // only via the brand-protection router.
+                console.warn('Create brand via /brands/ failed, retrying /brand-protection/', primaryError);
+                try {
+                  createdBrand = await api.post('/brand-protection/', { name: newBrandName, url: '', keywords: '' });
+                } catch (fallbackError) {
+                  console.error('Create brand failed on both endpoints', fallbackError);
+                  throw new Error('Failed to create new brand');
+                }
               }
-              payload.brand_id = Number(createdBrand?.id) || null;
+              const createdBrandId = Number(createdBrand?.id);
+              if (!Number.isInteger(createdBrandId) || createdBrandId <= 0) {
+                throw new Error('Failed to create new brand');
+              }
+              payload.brand_id = createdBrandId;
               await this.loadBrands();
             }
             saved = await api.post('/lookalike/rules', payload);
@@ -535,6 +547,8 @@
         let bufferedResults = [];
         let bufferedEvents = 0;
         let flushTimer = null;
+        const BUFFER_FLUSH_THRESHOLD = 50;
+        const BUFFER_FLUSH_DELAY_MS = 500;
 
         const flushBufferedResults = () => {
           if (!bufferedResults.length) return;
@@ -549,7 +563,7 @@
           flushTimer = setTimeout(() => {
             flushTimer = null;
             flushBufferedResults();
-          }, 500);
+          }, BUFFER_FLUSH_DELAY_MS);
         };
 
         const finalizeBufferedResults = () => {
@@ -589,7 +603,7 @@
               this.scanProgress.latestFqdn = payload.fqdn || '';
               bufferedResults.push(payload);
               bufferedEvents += 1;
-              if (bufferedEvents >= 50) flushBufferedResults();
+              if (bufferedEvents >= BUFFER_FLUSH_THRESHOLD) flushBufferedResults();
               else scheduleBufferedFlush();
             }
           }
