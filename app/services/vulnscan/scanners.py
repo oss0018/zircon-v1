@@ -1,5 +1,8 @@
 import json
 import asyncio
+import shutil
+import uuid
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -47,6 +50,28 @@ def _base_finding(
         "target_host": target_host,
         "target_port": target_port,
     }
+
+
+def _tool_not_available_finding(
+    tool_name: str,
+    scanner_source: str,
+    target_url: str,
+    target_host: str,
+    target_port: int | None,
+) -> list[dict]:
+    return [
+        _base_finding(
+            scanner_source,
+            f"{scanner_source}-tool-not-available",
+            f"{tool_name} not installed",
+            f"{tool_name} binary was not found. Install it to enable this scanner.",
+            "TOOL_NOT_AVAILABLE",
+            "INFO",
+            target_url,
+            target_host,
+            target_port,
+        )
+    ]
 
 
 class HeaderScanner:
@@ -438,86 +463,416 @@ class DNSSecScanner:
 class TestSSLScanner:
     @staticmethod
     async def scan(hostname: str, port: int = 443) -> list[dict]:
-        # TODO: replace with real subprocess call
         base_url = _as_url(hostname)
         parsed = urlparse(base_url)
         safe_host = parsed.hostname or hostname
         scheme = parsed.scheme or "https"
         target_url, host, resolved_port = _target_parts(f"{scheme}://{safe_host}:{port}")
-        return [
-            _base_finding(
+        temp_path = Path(f"/tmp/testssl_{uuid.uuid4().hex}.json")
+        findings: list[dict] = []
+        parseable_output = False
+        process = None
+
+        binaries = ["/usr/local/bin/testssl.sh", "testssl.sh"]
+        for binary in binaries:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    binary,
+                    "--jsonfile",
+                    str(temp_path),
+                    "--quiet",
+                    "--color",
+                    "0",
+                    "--warnings",
+                    "off",
+                    f"{safe_host}:{port}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                break
+            except FileNotFoundError:
+                continue
+            except Exception:
+                return []
+
+        if process is None:
+            return _tool_not_available_finding(
+                "TestSSL",
                 "testssl",
-                "testssl-001",
-                "Weak TLS protocol support",
-                "Server appears to support deprecated TLS protocol/cipher combinations.",
-                "SSL_POODLE",
-                "HIGH",
                 target_url,
                 host,
                 resolved_port,
             )
-        ]
+
+        try:
+            try:
+                await asyncio.wait_for(process.wait(), timeout=120)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return []
+
+            entries: list[dict] = []
+            if temp_path.exists():
+                try:
+                    raw = json.loads(temp_path.read_text(encoding="utf-8"))
+                    if isinstance(raw, list):
+                        entries = [e for e in raw if isinstance(e, dict)]
+                        parseable_output = True
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            severity_map = {
+                "CRITICAL": "CRITICAL",
+                "HIGH": "HIGH",
+                "MEDIUM": "MEDIUM",
+                "WARN": "MEDIUM",
+                "LOW": "LOW",
+            }
+            finding_type_map = {
+                "SSLv2": "SSL_DEPRECATED_PROTOCOL",
+                "SSLv3": "SSL_DEPRECATED_PROTOCOL",
+                "TLS1": "TLS_DEPRECATED_PROTOCOL",
+                "TLS1_1": "TLS_DEPRECATED_PROTOCOL",
+                "POODLE_SSL": "SSL_POODLE",
+                "POODLE_TLS": "SSL_POODLE",
+                "HEARTBLEED": "HEARTBLEED",
+                "BEAST": "SSL_BEAST",
+                "DROWN": "SSL_DROWN",
+                "LOGJAM": "SSL_LOGJAM",
+                "CCS": "SSL_CCS_INJECTION",
+                "cert_expiration_status": "CERT_EXPIRED",
+                "cert_trust": "CERT_UNTRUSTED",
+            }
+            title_map = {
+                "SSLv2": "SSLv2 Supported (deprecated)",
+                "SSLv3": "SSLv3 Supported (deprecated)",
+                "TLS1": "TLS 1.0 Supported (deprecated)",
+                "TLS1_1": "TLS 1.1 Supported (deprecated)",
+                "POODLE_SSL": "POODLE vulnerability detected",
+                "POODLE_TLS": "POODLE vulnerability detected",
+                "HEARTBLEED": "Heartbleed vulnerability detected",
+                "BEAST": "BEAST vulnerability detected",
+                "DROWN": "DROWN vulnerability detected",
+                "LOGJAM": "Logjam vulnerability detected",
+                "CCS": "OpenSSL CCS Injection vulnerability detected",
+                "cert_expiration_status": "Certificate expiration issue detected",
+                "cert_trust": "Certificate trust issue detected",
+            }
+            remediation_map = {
+                "SSL_POODLE": "Disable SSLv3/TLS fallback and remove vulnerable ciphers to mitigate POODLE.",
+                "HEARTBLEED": "Upgrade OpenSSL to a patched version and reissue TLS certificates and keys.",
+                "SSL_DEPRECATED_PROTOCOL": "Disable deprecated SSL/TLS protocol versions and enforce TLS 1.2+.",
+                "TLS_DEPRECATED_PROTOCOL": "Disable deprecated TLS protocol versions and enforce TLS 1.2+.",
+                "CERT_EXPIRED": "Renew and deploy a valid TLS certificate before expiry.",
+            }
+
+            for entry in entries:
+                raw_severity = str(entry.get("severity", "")).upper()
+                if raw_severity in {"OK", "INFO"}:
+                    continue
+                severity = severity_map.get(raw_severity)
+                if not severity:
+                    continue
+
+                entry_id = str(entry.get("id", "")).strip()
+                if not entry_id:
+                    continue
+                finding_type = finding_type_map.get(entry_id, "TLS_MISCONFIGURATION")
+                findings.append(
+                    {
+                        **_base_finding(
+                            "testssl",
+                            f"testssl-{entry_id}",
+                            title_map.get(entry_id, f"TLS issue detected: {entry_id.replace('_', ' ')}"),
+                            str(entry.get("finding", "")).strip(),
+                            finding_type,
+                            severity,
+                            target_url,
+                            host,
+                            resolved_port,
+                        ),
+                        "remediation_summary": remediation_map.get(
+                            finding_type,
+                            "Refer to testssl.sh documentation for remediation guidance.",
+                        ),
+                        "references_json": json.dumps(["https://testssl.sh/"]),
+                    }
+                )
+
+            if process.returncode and process.returncode != 0 and not parseable_output:
+                return _tool_not_available_finding(
+                    "TestSSL",
+                    "testssl",
+                    target_url,
+                    host,
+                    resolved_port,
+                )
+            return findings
+        except Exception:
+            return []
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 class NiktoScanner:
     @staticmethod
     async def scan(target: str) -> list[dict]:
-        # TODO: replace with real subprocess call
         target_url, host, port = _target_parts(target)
-        return [
-            _base_finding(
-                "nikto",
-                "nikto-001",
-                "Interesting file exposed",
-                "Nikto identified potentially sensitive file exposure.",
-                "EXPOSURE",
-                "MEDIUM",
-                target_url,
-                host,
-                port,
-            )
-        ]
+        temp_path = Path(f"/tmp/nikto_{uuid.uuid4().hex}.json")
+        findings: list[dict] = []
+        parseable_output = False
+        nikto_bin = shutil.which("nikto") or shutil.which("nikto.pl")
+        if not nikto_bin:
+            return _tool_not_available_finding("Nikto", "nikto", target_url, host, port)
+
+        try:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    nikto_bin,
+                    "-h",
+                    target_url,
+                    "-Format",
+                    "json",
+                    "-output",
+                    str(temp_path),
+                    "-nointeractive",
+                    "-maxtime",
+                    "120s",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                return _tool_not_available_finding("Nikto", "nikto", target_url, host, port)
+            except Exception:
+                return []
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=150)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return []
+
+            items: list[dict] = []
+            if temp_path.exists():
+                try:
+                    payload = json.loads(temp_path.read_text(encoding="utf-8"))
+                    parseable_output = True
+                    vulnerabilities = payload.get("vulnerabilities", []) if isinstance(payload, dict) else []
+                    fallback_items = payload.get("items", []) if isinstance(payload, dict) else []
+                    items = vulnerabilities if isinstance(vulnerabilities, list) else []
+                    if not items and isinstance(fallback_items, list):
+                        items = fallback_items
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            for idx, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                msg = str(item.get("msg", "")).strip()
+                msg_lower = msg.lower()
+                finding_type = "EXPOSURE"
+                if "sql" in msg_lower:
+                    finding_type = "SQLI"
+                elif "xss" in msg_lower or "cross-site" in msg_lower:
+                    finding_type = "XSS"
+                elif "default" in msg_lower or "sample" in msg_lower:
+                    finding_type = "DEFAULT_FILE"
+                elif "outdated" in msg_lower or "version" in msg_lower:
+                    finding_type = "OUTDATED_SOFTWARE"
+                elif "directory" in msg_lower or "listing" in msg_lower:
+                    finding_type = "DIRECTORY_LISTING"
+                elif "header" in msg_lower:
+                    finding_type = "MISCONFIGURATION"
+
+                references = ["https://cirt.net/nikto2"]
+                item_references = item.get("references")
+                if isinstance(item_references, str) and item_references.strip():
+                    references.append(item_references.strip())
+
+                findings.append(
+                    {
+                        **_base_finding(
+                            "nikto",
+                            f"nikto-{item.get('id', idx)}",
+                            (msg[:120] if msg else "Nikto finding").rstrip(),
+                            msg,
+                            finding_type,
+                            "MEDIUM",
+                            target_url,
+                            host,
+                            port,
+                        ),
+                        "remediation_summary": "Review the identified issue and apply vendor patches or configuration hardening.",
+                        "references_json": json.dumps(references),
+                    }
+                )
+
+            if process.returncode and process.returncode != 0 and not parseable_output:
+                return _tool_not_available_finding("Nikto", "nikto", target_url, host, port)
+            return findings
+        except Exception:
+            return []
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 class NucleiScanner:
     @staticmethod
     async def scan(target: str, profile: str) -> list[dict]:
-        # TODO: replace with real subprocess call
         target_url, host, port = _target_parts(target)
-        return [
-            {
-                **_base_finding(
-                    "nuclei",
-                    "CVE-2021-41773",
-                    "Apache Path Traversal",
-                    "Potential exploitation path for CVE-2021-41773 detected.",
-                    "CVE",
-                    "HIGH",
-                    target_url,
-                    host,
-                    port,
-                ),
-                "cve_ids_json": json.dumps(["CVE-2021-41773"]),
-                "cwe_ids_json": json.dumps(["CWE-22"]),
-                "cvss_score": 7.5,
-            },
-            {
-                **_base_finding(
-                    "nuclei",
-                    "CVE-2021-44228",
-                    "Log4Shell indicator",
-                    "Log4j JNDI lookup behavior indicates Log4Shell exposure.",
-                    "CVE",
-                    "CRITICAL",
-                    target_url,
-                    host,
-                    port,
-                ),
-                "cve_ids_json": json.dumps(["CVE-2021-44228"]),
-                "cwe_ids_json": json.dumps(["CWE-502"]),
-                "cvss_score": 10.0,
-            },
-        ]
+        profile_tags = {
+            "quick": ["cve", "exposure", "misconfiguration", "default-login", "ssl"],
+            "standard": [
+                "cve",
+                "exposure",
+                "misconfiguration",
+                "default-login",
+                "ssl",
+                "tech",
+                "takeover",
+                "network",
+                "panel",
+            ],
+            "deep": [],
+        }
+        tags = profile_tags.get(profile, profile_tags["standard"])
+        nuclei_bin = (
+            "/usr/local/bin/nuclei"
+            if Path("/usr/local/bin/nuclei").exists()
+            else shutil.which("nuclei")
+        )
+        if not nuclei_bin:
+            return _tool_not_available_finding("Nuclei", "nuclei", target_url, host, port)
+
+        cmd = [nuclei_bin, "-target", target]
+        if profile != "deep":
+            for tag in tags:
+                cmd.extend(["-tags", tag])
+        if not Path("/opt/nuclei-templates").exists():
+            cmd.extend(["-ud", "/tmp/nuclei-templates"])
+        cmd.extend(
+            [
+                "-json",
+                "-no-color",
+                "-silent",
+                "-timeout",
+                "10",
+                "-retries",
+                "2",
+                "-follow-redirects",
+                "-rate-limit",
+                "150",
+                "-concurrency",
+                "25",
+            ]
+        )
+        timeout = 600 if profile == "deep" else 300
+        findings: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        parseable_output = False
+
+        try:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                return _tool_not_available_finding("Nuclei", "nuclei", target_url, host, port)
+            except Exception:
+                return []
+
+            started_at = asyncio.get_event_loop().time()
+            while True:
+                elapsed = asyncio.get_event_loop().time() - started_at
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    process.kill()
+                    await process.wait()
+                    return findings
+
+                try:
+                    line = await asyncio.wait_for(process.stdout.readline(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+                    return findings
+
+                if not line:
+                    break
+
+                try:
+                    raw = json.loads(line.decode("utf-8", errors="ignore").strip())
+                    if not isinstance(raw, dict):
+                        continue
+                    parseable_output = True
+                except json.JSONDecodeError:
+                    continue
+
+                template_id = str(raw.get("template-id", "")).strip()
+                matched_at = str(raw.get("matched-at", target_url)).strip() or target_url
+                if not template_id:
+                    continue
+                dedupe_key = (template_id, matched_at)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+
+                info = raw.get("info", {}) if isinstance(raw.get("info"), dict) else {}
+                severity = str(info.get("severity", "info")).upper()
+                if severity not in {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+                    severity = "INFO"
+
+                classification = (
+                    info.get("classification", {})
+                    if isinstance(info.get("classification"), dict)
+                    else {}
+                )
+                cve_ids = classification.get("cve-id", []) or []
+                cwe_ids = classification.get("cwe-id", []) or []
+
+                findings.append(
+                    {
+                        **_base_finding(
+                            "nuclei",
+                            template_id,
+                            str(info.get("name", template_id)),
+                            str(info.get("description", ""))[:2000],
+                            "CVE" if cve_ids else "EXPOSURE",
+                            severity,
+                            matched_at,
+                            host,
+                            port,
+                        ),
+                        "cve_ids_json": json.dumps(cve_ids if isinstance(cve_ids, list) else []),
+                        "cwe_ids_json": json.dumps(cwe_ids if isinstance(cwe_ids, list) else []),
+                        "cvss_score": classification.get("cvss-score"),
+                        "references_json": json.dumps(info.get("reference", []) or []),
+                    }
+                )
+
+            remaining = timeout - (asyncio.get_event_loop().time() - started_at)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=max(1, remaining))
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return findings
+
+            if process.returncode and process.returncode != 0 and not parseable_output:
+                return _tool_not_available_finding("Nuclei", "nuclei", target_url, host, port)
+            return findings
+        except Exception:
+            return []
 
 
 class ZAPPassiveScanner:
