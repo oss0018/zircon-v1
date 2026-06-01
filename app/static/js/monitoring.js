@@ -65,7 +65,7 @@ document.addEventListener('alpine:init', () => {
         exclusionsText: '',
         checks: {
           folder_scan: {
-            enabled: true,
+            enabled: false,
             storage_source_ids: [],
             path_prefixesText: '',
           },

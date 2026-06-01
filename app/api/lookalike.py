@@ -49,6 +49,10 @@ class RuleCreate(BaseModel):
     similarity_threshold_pct: Optional[int] = 70
     alert_threshold: Optional[int] = 50
     active: Optional[bool] = True
+    watch_mode_enabled: Optional[bool] = False
+    watch_feed_source: Optional[str] = "whoisds"
+    watch_alert_email: Optional[str] = ""
+    watch_alert_telegram: Optional[str] = ""
 
     @field_validator("similarity_threshold_pct")
     @classmethod
@@ -289,6 +293,10 @@ async def create_rule(
         similarity_threshold_pct=body.similarity_threshold_pct or 70,
         alert_threshold=body.alert_threshold or 50,
         active=body.active if body.active is not None else True,
+        watch_mode_enabled=body.watch_mode_enabled,
+        watch_feed_source=sanitize_string(body.watch_feed_source or "whoisds", max_length=50).lower(),
+        watch_alert_email=sanitize_string(body.watch_alert_email or "", max_length=2000),
+        watch_alert_telegram=sanitize_string(body.watch_alert_telegram or "", max_length=2000),
     )
     db.add(rule)
     await db.commit()
