@@ -36,7 +36,7 @@ def _utcnow() -> datetime:
 # ── Pydantic schemas ───────────────────────────────────────────────────────────
 
 class RuleCreate(BaseModel):
-    brand_id: int
+    brand_id: Optional[int] = None
     name: str
     protected_domain: str
     brand_terms: Optional[List[str]] = []
@@ -274,13 +274,14 @@ async def create_rule(
     _: User = Depends(get_current_user),
 ):
     """Create a new lookalike monitoring rule."""
-    # Validate brand exists
-    brand_res = await db.execute(select(Brand).where(Brand.id == body.brand_id))
-    if not brand_res.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Brand not found")
+    brand_id = body.brand_id if (body.brand_id is not None and body.brand_id > 0) else None
+    if brand_id is not None:
+        brand_res = await db.execute(select(Brand).where(Brand.id == brand_id))
+        if not brand_res.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Brand not found")
 
     rule = LookalikeRule(
-        brand_id=body.brand_id,
+        brand_id=brand_id,
         name=sanitize_string(body.name, max_length=200),
         protected_domain=sanitize_string(body.protected_domain, max_length=253),
         brand_terms=json.dumps(body.brand_terms or []),

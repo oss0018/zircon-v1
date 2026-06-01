@@ -34,8 +34,18 @@ def test_lookalike_domains_component_targets_expected_frontend_flows():
     assert "markFalsePositive" in js
     assert "markTrusted" in js
     assert "parseInt(this.ruleForm.brand_id, 10)" in js
-    assert "Number.isInteger(payload.brand_id)" in js
+    assert "Rule name and protected domain are required." in js
+    assert "api.post('/brands/'" in js
+    assert "setTimeout(() => this.loadRulePreview(), 1200)" in js
+    assert "bufferedEvents >= 50" in js
     assert "this.brands = Array.isArray(response) ? response : []" in js
+
+
+def test_lookalike_rule_modal_supports_inline_new_brand():
+    html = INDEX_HTML.read_text(encoding='utf-8')
+    assert "— Create new brand —" in html
+    assert "x-model=\"ruleForm.newBrandName\"" in html
+    assert "ruleForm.brand_id === '__new__'" in html
 
 
 def test_lookalike_api_supports_ui_preview_and_fqdn_filtering():
@@ -48,6 +58,7 @@ def test_lookalike_api_supports_ui_preview_and_fqdn_filtering():
     assert 'alert_threshold' in api_source
     assert 'class AlertDispatchBody' in api_source
     assert 'watch_mode_enabled=body.watch_mode_enabled if body.watch_mode_enabled is not None else False' in api_source
+    assert 'brand_id: Optional[int] = None' in api_source
 
 
 def test_index_contains_phase2_drawer_tabs_and_actions():

@@ -466,7 +466,7 @@ class LookalikeRule(Base):
     """Per-brand monitoring rule for look-alike domain detection."""
     __tablename__ = "lookalike_rules"
     id = Column(Integer, primary_key=True)
-    brand_id = Column(Integer, ForeignKey("brands.id"), nullable=False)
+    brand_id = Column(Integer, ForeignKey("brands.id"), nullable=True)
     name = Column(String(200), nullable=False)
     protected_domain = Column(String(253), nullable=False)   # e.g. "kyivstar.ua"
     brand_terms = Column(Text, default="[]")                 # JSON list of terms

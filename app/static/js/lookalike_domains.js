@@ -95,6 +95,7 @@
       defaultRuleForm() {
         return {
           brand_id: null,
+          newBrandName: '',
           name: '',
           protected_domain: '',
           brand_terms_text: '',
@@ -327,7 +328,6 @@
         if (!this.brands.length) {
           await this.loadBrands();
         }
-        if (this.brands[0]) this.ruleForm.brand_id = this.brands[0].id;
         this.showRuleModal = true;
       },
 
@@ -365,9 +365,11 @@
       },
 
       buildRulePayload() {
-        const brandId = parseInt(this.ruleForm.brand_id, 10);
+        const brandId = this.ruleForm.brand_id === '__new__'
+          ? null
+          : parseInt(this.ruleForm.brand_id, 10);
         return {
-          brand_id: Number.isInteger(brandId) ? brandId : null,
+          brand_id: Number.isInteger(brandId) && brandId > 0 ? brandId : null,
           name: String(this.ruleForm.name || '').trim(),
           protected_domain: String(this.ruleForm.protected_domain || '').trim(),
           brand_terms: this.parsedBrandTerms(),
@@ -411,7 +413,7 @@
           this.previewData = null;
           return;
         }
-        this.previewTimer = setTimeout(() => this.loadRulePreview(), 600);
+        this.previewTimer = setTimeout(() => this.loadRulePreview(), 1200);
       },
 
       async loadRulePreview() {
@@ -433,8 +435,8 @@
 
       async saveRule() {
         const payload = this.buildRulePayload();
-        if (!Number.isInteger(payload.brand_id) || payload.brand_id <= 0 || !payload.name || !payload.protected_domain) {
-          showToast('Brand, rule name, and protected domain are required.', 'error');
+        if (!payload.name || !payload.protected_domain) {
+          showToast('Rule name and protected domain are required.', 'error');
           return;
         }
         this.ruleSaving = true;
@@ -446,6 +448,21 @@
             saved = await api.patch(`/lookalike/rules/${this.editingRuleId}`, patchPayload);
             showToast('Rule updated', 'success');
           } else {
+            if (this.ruleForm.brand_id === '__new__') {
+              const newBrandName = String(this.ruleForm.newBrandName || '').trim();
+              if (!newBrandName) {
+                showToast('New brand name is required.', 'error');
+                return;
+              }
+              let createdBrand;
+              try {
+                createdBrand = await api.post('/brands/', { name: newBrandName, url: '', keywords: '' });
+              } catch (_) {
+                createdBrand = await api.post('/brand-protection/', { name: newBrandName, url: '', keywords: '' });
+              }
+              payload.brand_id = Number(createdBrand?.id) || null;
+              await this.loadBrands();
+            }
             saved = await api.post('/lookalike/rules', payload);
             showToast('Rule created', 'success');
           }
@@ -515,6 +532,33 @@
           summary: null,
           results: [],
         };
+        let bufferedResults = [];
+        let bufferedEvents = 0;
+        let flushTimer = null;
+
+        const flushBufferedResults = () => {
+          if (!bufferedResults.length) return;
+          const next = bufferedResults.slice().reverse().concat(this.scanProgress.results);
+          this.scanProgress.results = next.slice(0, 12);
+          bufferedResults = [];
+          bufferedEvents = 0;
+        };
+
+        const scheduleBufferedFlush = () => {
+          if (flushTimer) return;
+          flushTimer = setTimeout(() => {
+            flushTimer = null;
+            flushBufferedResults();
+          }, 500);
+        };
+
+        const finalizeBufferedResults = () => {
+          if (flushTimer) {
+            clearTimeout(flushTimer);
+            flushTimer = null;
+          }
+          flushBufferedResults();
+        };
         try {
           const resp = await lookalikeFetch(`/lookalike/rules/${rule.id}/scan`, { method: 'POST' }, false);
           const reader = resp.body.getReader();
@@ -543,10 +587,13 @@
               this.scanProgress.checked = payload.checked || 0;
               this.scanProgress.total = payload.total || 0;
               this.scanProgress.latestFqdn = payload.fqdn || '';
-              this.scanProgress.results.unshift(payload);
-              this.scanProgress.results = this.scanProgress.results.slice(0, 12);
+              bufferedResults.push(payload);
+              bufferedEvents += 1;
+              if (bufferedEvents >= 50) flushBufferedResults();
+              else scheduleBufferedFlush();
             }
           }
+          finalizeBufferedResults();
           this.scanProgress.running = false;
           await this.loadRules();
           if (String(this.domainsFilters.ruleId) === String(rule.id)) {
@@ -554,6 +601,7 @@
           }
           showToast('Look-alike scan completed', 'success');
         } catch (e) {
+          finalizeBufferedResults();
           this.scanProgress.running = false;
           showToast(e.message, 'error');
         }
