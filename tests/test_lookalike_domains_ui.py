@@ -33,6 +33,9 @@ def test_lookalike_domains_component_targets_expected_frontend_flows():
     assert "alert_threshold" in js
     assert "markFalsePositive" in js
     assert "markTrusted" in js
+    assert "parseInt(this.ruleForm.brand_id, 10)" in js
+    assert "Number.isInteger(payload.brand_id)" in js
+    assert "this.brands = Array.isArray(response) ? response : []" in js
 
 
 def test_lookalike_api_supports_ui_preview_and_fqdn_filtering():
@@ -44,6 +47,7 @@ def test_lookalike_api_supports_ui_preview_and_fqdn_filtering():
     assert 'LookalikeDomain.fqdn.ilike' in api_source
     assert 'alert_threshold' in api_source
     assert 'class AlertDispatchBody' in api_source
+    assert 'watch_mode_enabled=body.watch_mode_enabled if body.watch_mode_enabled is not None else False' in api_source
 
 
 def test_index_contains_phase2_drawer_tabs_and_actions():

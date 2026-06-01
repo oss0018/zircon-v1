@@ -94,7 +94,7 @@
 
       defaultRuleForm() {
         return {
-          brand_id: '',
+          brand_id: null,
           name: '',
           protected_domain: '',
           brand_terms_text: '',
@@ -265,8 +265,13 @@
 
       async loadBrands() {
         try {
-          this.brands = await api.get('/brands/');
+          const response = await api.get('/brands/');
+          this.brands = Array.isArray(response) ? response : [];
+          if (this.ruleModalMode === 'create' && !this.ruleForm.brand_id && this.brands[0]) {
+            this.ruleForm.brand_id = this.brands[0].id;
+          }
         } catch (e) {
+          this.brands = [];
           showToast(e.message, 'error');
         }
       },
@@ -315,10 +320,13 @@
         }
       },
 
-      openCreateRuleModal() {
+      async openCreateRuleModal() {
         this.ruleModalMode = 'create';
         this.editingRuleId = null;
         this.resetRuleForm();
+        if (!this.brands.length) {
+          await this.loadBrands();
+        }
         if (this.brands[0]) this.ruleForm.brand_id = this.brands[0].id;
         this.showRuleModal = true;
       },
@@ -357,8 +365,9 @@
       },
 
       buildRulePayload() {
+        const brandId = parseInt(this.ruleForm.brand_id, 10);
         return {
-          brand_id: Number(this.ruleForm.brand_id),
+          brand_id: Number.isInteger(brandId) ? brandId : null,
           name: String(this.ruleForm.name || '').trim(),
           protected_domain: String(this.ruleForm.protected_domain || '').trim(),
           brand_terms: this.parsedBrandTerms(),
@@ -424,7 +433,7 @@
 
       async saveRule() {
         const payload = this.buildRulePayload();
-        if (!payload.brand_id || !payload.name || !payload.protected_domain) {
+        if (!Number.isInteger(payload.brand_id) || payload.brand_id <= 0 || !payload.name || !payload.protected_domain) {
           showToast('Brand, rule name, and protected domain are required.', 'error');
           return;
         }
