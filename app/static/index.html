@@ -1724,6 +1724,7 @@
                             <td>
                               <div class="flex gap-2" style="flex-wrap:wrap;">
                                 <button class="btn btn-sm btn-primary" @click="runRuleScan(rule)" :disabled="scanProgress.running">Scan</button>
+                                <button class="btn btn-sm btn-secondary" @click="triggerWatchMode(rule)">Trigger Watch</button>
                                 <button class="btn btn-sm btn-secondary" @click="previewRule(rule)">Preview</button>
                                 <button class="btn btn-sm btn-secondary" @click="viewRuleDomains(rule)">View Domains</button>
                                 <button class="btn btn-sm btn-secondary" @click="openEditRuleModal(rule)">Edit</button>
@@ -2012,6 +2013,39 @@
                     <label class="form-label">Alert Threshold (%)</label>
                     <input class="form-input" type="number" min="30" max="100" x-model.number="ruleForm.alert_threshold" />
                     <div class="text-muted text-sm" style="margin-top:6px;">Domains above this threat score will trigger alerts.</div>
+                  </div>
+                  <div class="card" style="padding:12px;">
+                    <div class="card-title" style="margin-bottom:10px;">Watch Mode</div>
+                    <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
+                      <label class="card" style="padding:12px;display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" x-model="ruleForm.watch_mode_enabled" />
+                        <span>Enable Watch Mode</span>
+                      </label>
+                      <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label">Feed Source</label>
+                        <select class="form-select" x-model="ruleForm.watch_feed_source">
+                          <option value="whoisds">whoisds</option>
+                          <option value="local">local</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
+                      <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label">Watch Alert Email</label>
+                        <input class="form-input" x-model="ruleForm.watch_alert_email" placeholder="alerts@example.com" />
+                      </div>
+                      <div class="form-group" style="margin-bottom:0;">
+                        <label class="form-label">Watch Alert Telegram</label>
+                        <input class="form-input" x-model="ruleForm.watch_alert_telegram" placeholder="@channel_or_chat_id" />
+                      </div>
+                    </div>
+                    <div class="text-muted text-sm" style="margin-top:8px;">
+                      Last run:
+                      <span x-text="formatDateTime(ruleForm.watch_last_run_at)"></span>
+                    </div>
+                    <div style="margin-top:10px;">
+                      <button class="btn btn-sm btn-secondary" x-show="ruleModalMode === 'edit' && editingRuleId" @click="triggerWatchMode({ id: editingRuleId })">Trigger Now</button>
+                    </div>
                   </div>
                   <div class="card" style="padding:12px;">
                     <div class="flex justify-between items-center mb-2">

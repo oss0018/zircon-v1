@@ -419,6 +419,20 @@ class BrandAlertOut(BaseModel):
 
 
 # ── Look-alike Domains ─────────────────────────────────────────────────────────
+class LookalikeRuleOut(BaseModel):
+    id: int
+    brand_id: int
+    name: str
+    protected_domain: str
+    watch_mode_enabled: bool = False
+    watch_feed_source: str = "whoisds"
+    watch_last_run_at: Optional[datetime] = None
+    watch_alert_email: str = ""
+    watch_alert_telegram: str = ""
+
+    model_config = {"from_attributes": True}
+
+
 class LookalikeDomainOut(BaseModel):
     id: int
     rule_id: int

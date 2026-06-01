@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, ForeignKey, BigInteger
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, ForeignKey, BigInteger, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -479,6 +479,11 @@ class LookalikeRule(Base):
     max_variants = Column(Integer, default=10000)
     similarity_threshold_pct = Column(Integer, default=70)   # 30–100
     alert_threshold = Column(Integer, default=50)            # 30–100
+    watch_mode_enabled = Column(Boolean, default=False)
+    watch_feed_source = Column(String(50), default="whoisds")
+    watch_last_run_at = Column(DateTime, nullable=True)
+    watch_alert_email = Column(Text, default="")
+    watch_alert_telegram = Column(Text, default="")
     # State
     active = Column(Boolean, default=True)
     last_scan_at = Column(DateTime, nullable=True)
@@ -562,6 +567,17 @@ class LookalikeDomain(Base):
     is_false_positive = Column(Boolean, default=False)
     fp_reason = Column(String(256), nullable=True)
     rule = relationship("LookalikeRule", back_populates="domains")
+
+
+class NrdFeedEntry(Base):
+    __tablename__ = "nrd_feed_entries"
+    __table_args__ = (UniqueConstraint("rule_id", "fqdn"),)
+
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(Integer, ForeignKey("lookalike_rules.id"), nullable=False)
+    fqdn = Column(String(253), nullable=False)
+    feed_date = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 class RuleTrustedDomain(Base):

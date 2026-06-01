@@ -78,6 +78,10 @@ class RulePatch(BaseModel):
     similarity_threshold_pct: Optional[int] = None
     alert_threshold: Optional[int] = None
     active: Optional[bool] = None
+    watch_mode_enabled: Optional[bool] = None
+    watch_feed_source: Optional[str] = None
+    watch_alert_email: Optional[str] = None
+    watch_alert_telegram: Optional[str] = None
 
     @field_validator("similarity_threshold_pct")
     @classmethod
@@ -153,6 +157,11 @@ def _rule_to_dict(rule: LookalikeRule) -> dict:
         "similarity_threshold_pct": rule.similarity_threshold_pct,
         "alert_threshold": rule.alert_threshold,
         "active": rule.active,
+        "watch_mode_enabled": rule.watch_mode_enabled,
+        "watch_feed_source": rule.watch_feed_source or "whoisds",
+        "watch_last_run_at": rule.watch_last_run_at.isoformat() if rule.watch_last_run_at else None,
+        "watch_alert_email": rule.watch_alert_email or "",
+        "watch_alert_telegram": rule.watch_alert_telegram or "",
         "last_scan_at": rule.last_scan_at.isoformat() if rule.last_scan_at else None,
         "created_at": rule.created_at.isoformat() if rule.created_at else None,
         "updated_at": rule.updated_at.isoformat() if rule.updated_at else None,
@@ -356,11 +365,55 @@ async def update_rule(
         rule.alert_threshold = body.alert_threshold
     if body.active is not None:
         rule.active = body.active
+    if body.watch_mode_enabled is not None:
+        rule.watch_mode_enabled = body.watch_mode_enabled
+    if body.watch_feed_source is not None:
+        rule.watch_feed_source = sanitize_string(body.watch_feed_source, max_length=50).lower()
+    if body.watch_alert_email is not None:
+        rule.watch_alert_email = sanitize_string(body.watch_alert_email, max_length=2000)
+    if body.watch_alert_telegram is not None:
+        rule.watch_alert_telegram = sanitize_string(body.watch_alert_telegram, max_length=2000)
 
     rule.updated_at = _utcnow()
     await db.commit()
     await db.refresh(rule)
     return _rule_to_dict(rule)
+
+
+@router.post("/rules/{rule_id}/watch/trigger")
+async def trigger_watch_mode(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    result = await db.execute(select(LookalikeRule).where(LookalikeRule.id == rule_id))
+    rule = result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    from app.services.lookalike.watch_engine import run_watch_mode
+
+    return await run_watch_mode(rule, db)
+
+
+@router.get("/rules/{rule_id}/watch/status")
+async def get_watch_mode_status(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    result = await db.execute(select(LookalikeRule).where(LookalikeRule.id == rule_id))
+    rule = result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {
+        "rule_id": rule.id,
+        "watch_mode_enabled": bool(rule.watch_mode_enabled),
+        "watch_feed_source": rule.watch_feed_source or "whoisds",
+        "watch_last_run_at": rule.watch_last_run_at.isoformat() if rule.watch_last_run_at else None,
+        "watch_alert_email": rule.watch_alert_email or "",
+        "watch_alert_telegram": rule.watch_alert_telegram or "",
+    }
 
 
 @router.post("/preview")
