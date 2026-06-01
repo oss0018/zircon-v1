@@ -198,6 +198,13 @@
         return parseCsvTags(this.ruleForm.brand_terms_text);
       },
 
+      setDefaultCreateBrand() {
+        const needsBrand = this.ruleForm.brand_id === null || this.ruleForm.brand_id === '';
+        if (this.ruleModalMode === 'create' && needsBrand && this.brands[0]) {
+          this.ruleForm.brand_id = this.brands[0].id;
+        }
+      },
+
       algorithmsPreview(list) {
         const items = Array.isArray(list) ? list : [];
         if (!items.length) return '—';
@@ -267,9 +274,7 @@
         try {
           const response = await api.get('/brands/');
           this.brands = Array.isArray(response) ? response : [];
-          if (this.ruleModalMode === 'create' && !this.ruleForm.brand_id && this.brands[0]) {
-            this.ruleForm.brand_id = this.brands[0].id;
-          }
+          this.setDefaultCreateBrand();
         } catch (e) {
           this.brands = [];
           showToast(e.message, 'error');
@@ -327,7 +332,7 @@
         if (!this.brands.length) {
           await this.loadBrands();
         }
-        if (this.brands[0]) this.ruleForm.brand_id = this.brands[0].id;
+        this.setDefaultCreateBrand();
         this.showRuleModal = true;
       },
 
