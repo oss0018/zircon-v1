@@ -228,7 +228,7 @@ def _migrate_monitoring(conn) -> None:
 
 
 def _migrate_lookalike_rules(conn) -> None:
-    """Add alert_threshold column to lookalike_rules if it is missing."""
+    """Add newer watch/alert columns to lookalike_rules if missing."""
     from sqlalchemy import inspect, text
 
     try:
@@ -240,6 +240,26 @@ def _migrate_lookalike_rules(conn) -> None:
         if "alert_threshold" not in existing_cols:
             conn.execute(
                 text("ALTER TABLE lookalike_rules ADD COLUMN alert_threshold INTEGER DEFAULT 50")
+            )
+        if "watch_mode_enabled" not in existing_cols:
+            conn.execute(
+                text("ALTER TABLE lookalike_rules ADD COLUMN watch_mode_enabled BOOLEAN DEFAULT 0")
+            )
+        if "watch_feed_source" not in existing_cols:
+            conn.execute(
+                text("ALTER TABLE lookalike_rules ADD COLUMN watch_feed_source VARCHAR(50) DEFAULT 'whoisds'")
+            )
+        if "watch_last_run_at" not in existing_cols:
+            conn.execute(
+                text("ALTER TABLE lookalike_rules ADD COLUMN watch_last_run_at DATETIME")
+            )
+        if "watch_alert_email" not in existing_cols:
+            conn.execute(
+                text("ALTER TABLE lookalike_rules ADD COLUMN watch_alert_email TEXT DEFAULT ''")
+            )
+        if "watch_alert_telegram" not in existing_cols:
+            conn.execute(
+                text("ALTER TABLE lookalike_rules ADD COLUMN watch_alert_telegram TEXT DEFAULT ''")
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not migrate lookalike_rules: %s", exc)

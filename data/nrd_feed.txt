@@ -1,0 +1,4 @@
+# Local NRD feed fixture
+watch-login.test
+*.secure-watch.test
+WATCH-LOGIN.TEST

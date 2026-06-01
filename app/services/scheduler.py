@@ -171,6 +171,31 @@ def start_scheduler():
         except Exception as exc:
             print(f"[scheduler] Lookalike alerts scheduler error: {exc}")
 
+    async def _run_watch_mode_rules():
+        """Run Watch Mode for all active rules with watch_mode_enabled=True (daily)."""
+        try:
+            from app.database import AsyncSessionLocal
+            from app.models import LookalikeRule
+            from app.services.lookalike.watch_engine import run_watch_mode
+            from sqlalchemy import select
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(LookalikeRule).where(
+                        LookalikeRule.active.is_(True),
+                        LookalikeRule.watch_mode_enabled.is_(True),
+                    )
+                )
+                rules = result.scalars().all()
+                for rule in rules:
+                    try:
+                        summary = await run_watch_mode(rule, db)
+                        print(f"[scheduler] Watch mode rule {rule.id}: {summary}")
+                    except Exception as exc:
+                        print(f"[scheduler] Watch mode rule {rule.id} error: {exc}")
+        except Exception as exc:
+            print(f"[scheduler] Watch mode scheduler error: {exc}")
+
     _scheduler.add_job(_scan_monitored, IntervalTrigger(minutes=15), id="scan_monitored", replace_existing=True, max_instances=1, misfire_grace_time=60)
     _scheduler.add_job(_scan_all_watched_folders, IntervalTrigger(minutes=8), id="scan_watched_folders", replace_existing=True, max_instances=1, misfire_grace_time=60)
     _scheduler.add_job(
@@ -204,6 +229,14 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1,
         misfire_grace_time=60,
+    )
+    _scheduler.add_job(
+        _run_watch_mode_rules,
+        IntervalTrigger(hours=24),
+        id="watch_mode_nrd",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=3600,
     )
     _scheduler.start()
     print("[scheduler] Started. Monitored dir scan every 15 minutes. Watched folder scan every 8 minutes. Storage sources are evaluated every 11 minutes. Monitoring jobs are evaluated every 6 minutes. Social listening rules are evaluated every 15 minutes.")

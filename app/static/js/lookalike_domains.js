@@ -105,6 +105,11 @@
           max_variants: 10000,
           similarity_threshold_pct: 70,
           alert_threshold: 50,
+          watch_mode_enabled: false,
+          watch_feed_source: 'whoisds',
+          watch_alert_email: '',
+          watch_alert_telegram: '',
+          watch_last_run_at: null,
           active: true,
         };
       },
@@ -209,6 +214,15 @@
         const text = String(value);
         if (text.includes('T')) return text.slice(0, 10);
         return text.slice(0, 10);
+      },
+
+      formatDateTime(value) {
+        if (!value) return '—';
+        try {
+          return new Date(value).toLocaleString();
+        } catch (_) {
+          return value;
+        }
       },
 
       countryFlag(value) {
@@ -324,6 +338,11 @@
           max_variants: rule.max_variants || 10000,
           similarity_threshold_pct: rule.similarity_threshold_pct || 70,
           alert_threshold: rule.alert_threshold || 50,
+          watch_mode_enabled: !!rule.watch_mode_enabled,
+          watch_feed_source: rule.watch_feed_source || 'whoisds',
+          watch_alert_email: rule.watch_alert_email || '',
+          watch_alert_telegram: rule.watch_alert_telegram || '',
+          watch_last_run_at: rule.watch_last_run_at || null,
           active: rule.active !== false,
         };
         this.previewData = null;
@@ -350,8 +369,30 @@
           max_variants: Number(this.ruleForm.max_variants || 0),
           similarity_threshold_pct: Number(this.ruleForm.similarity_threshold_pct || 0),
           alert_threshold: Number(this.ruleForm.alert_threshold || 50),
+          watch_mode_enabled: !!this.ruleForm.watch_mode_enabled,
+          watch_feed_source: String(this.ruleForm.watch_feed_source || 'whoisds'),
+          watch_alert_email: String(this.ruleForm.watch_alert_email || '').trim(),
+          watch_alert_telegram: String(this.ruleForm.watch_alert_telegram || '').trim(),
           active: !!this.ruleForm.active,
         };
+      },
+
+      async triggerWatchMode(rule) {
+        try {
+          const summary = await api.post(`/lookalike/rules/${rule.id}/watch/trigger`, {});
+          const status = await api.get(`/lookalike/rules/${rule.id}/watch/status`);
+          rule.watch_last_run_at = status.watch_last_run_at;
+          rule.watch_mode_enabled = status.watch_mode_enabled;
+          rule.watch_feed_source = status.watch_feed_source;
+          if (this.editingRuleId && Number(this.editingRuleId) === Number(rule.id)) {
+            this.ruleForm.watch_last_run_at = status.watch_last_run_at;
+            this.ruleForm.watch_mode_enabled = status.watch_mode_enabled;
+            this.ruleForm.watch_feed_source = status.watch_feed_source;
+          }
+          showToast(`Watch mode: checked ${summary.checked}, matched ${summary.matched}, alerted ${summary.alerted}`, 'success');
+        } catch (e) {
+          showToast(e.message, 'error');
+        }
       },
 
       scheduleRulePreview() {
