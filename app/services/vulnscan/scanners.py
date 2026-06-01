@@ -64,8 +64,30 @@ def _tool_not_available_finding(
             scanner_source,
             f"{scanner_source}-tool-not-available",
             f"{tool_name} not installed",
-            f"{tool_name} binary was not found. Install it to enable this scanner.",
+            f"{tool_name} binary not found. Install it to enable this scanner.",
             "TOOL_NOT_AVAILABLE",
+            "INFO",
+            target_url,
+            target_host,
+            target_port,
+        )
+    ]
+
+
+def _scan_timeout_finding(
+    tool_name: str,
+    scanner_source: str,
+    target_url: str,
+    target_host: str,
+    target_port: int | None,
+) -> list[dict]:
+    return [
+        _base_finding(
+            scanner_source,
+            f"{scanner_source}-scan-timeout",
+            f"{tool_name} scan timed out",
+            f"{tool_name} scan exceeded the allowed time limit.",
+            "SCAN_TIMEOUT",
             "INFO",
             target_url,
             target_host,
@@ -470,14 +492,20 @@ class TestSSLScanner:
         target_url, host, resolved_port = _target_parts(f"{scheme}://{safe_host}:{port}")
         temp_path = Path(f"/tmp/testssl_{uuid.uuid4().hex}.json")
         findings: list[dict] = []
-        parseable_output = False
-        process = None
+        testssl_bin = shutil.which("testssl.sh") or shutil.which("testssl")
+        if not testssl_bin:
+            return _tool_not_available_finding(
+                "TestSSL",
+                "testssl",
+                target_url,
+                host,
+                resolved_port,
+            )
 
-        binaries = ["/usr/local/bin/testssl.sh", "testssl.sh"]
-        for binary in binaries:
+        try:
             try:
                 process = await asyncio.create_subprocess_exec(
-                    binary,
+                    testssl_bin,
                     "--jsonfile",
                     str(temp_path),
                     "--quiet",
@@ -489,28 +517,23 @@ class TestSSLScanner:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                break
             except FileNotFoundError:
-                continue
+                return _tool_not_available_finding(
+                    "TestSSL",
+                    "testssl",
+                    target_url,
+                    host,
+                    resolved_port,
+                )
             except Exception:
                 return []
 
-        if process is None:
-            return _tool_not_available_finding(
-                "TestSSL",
-                "testssl",
-                target_url,
-                host,
-                resolved_port,
-            )
-
-        try:
             try:
                 await asyncio.wait_for(process.wait(), timeout=120)
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                return []
+                return _scan_timeout_finding("TestSSL", "testssl", target_url, host, resolved_port)
 
             entries: list[dict] = []
             if temp_path.exists():
@@ -518,7 +541,6 @@ class TestSSLScanner:
                     raw = json.loads(temp_path.read_text(encoding="utf-8"))
                     if isinstance(raw, list):
                         entries = [e for e in raw if isinstance(e, dict)]
-                        parseable_output = True
                 except (json.JSONDecodeError, OSError):
                     pass
 
@@ -549,15 +571,13 @@ class TestSSLScanner:
                 "SSLv3": "SSLv3 Supported (deprecated)",
                 "TLS1": "TLS 1.0 Supported (deprecated)",
                 "TLS1_1": "TLS 1.1 Supported (deprecated)",
-                "POODLE_SSL": "POODLE vulnerability detected",
-                "POODLE_TLS": "POODLE vulnerability detected",
-                "HEARTBLEED": "Heartbleed vulnerability detected",
-                "BEAST": "BEAST vulnerability detected",
-                "DROWN": "DROWN vulnerability detected",
-                "LOGJAM": "Logjam vulnerability detected",
-                "CCS": "OpenSSL CCS Injection vulnerability detected",
-                "cert_expiration_status": "Certificate expiration issue detected",
-                "cert_trust": "Certificate trust issue detected",
+                "POODLE_SSL": "POODLE Vulnerability Detected",
+                "POODLE_TLS": "POODLE Vulnerability Detected",
+                "HEARTBLEED": "Heartbleed Vulnerability Detected",
+                "BEAST": "BEAST Vulnerability Detected",
+                "DROWN": "DROWN Vulnerability Detected",
+                "cert_expiration_status": "Certificate Expired or Expiring Soon",
+                "cert_trust": "Certificate Not Trusted",
             }
             remediation_map = {
                 "SSL_POODLE": "Disable SSLv3/TLS fallback and remove vulnerable ciphers to mitigate POODLE.",
@@ -584,7 +604,7 @@ class TestSSLScanner:
                         **_base_finding(
                             "testssl",
                             f"testssl-{entry_id}",
-                            title_map.get(entry_id, f"TLS issue detected: {entry_id.replace('_', ' ')}"),
+                            title_map.get(entry_id, f"TLS Issue: {entry_id}"),
                             str(entry.get("finding", "")).strip(),
                             finding_type,
                             severity,
@@ -598,15 +618,6 @@ class TestSSLScanner:
                         ),
                         "references_json": json.dumps(["https://testssl.sh/"]),
                     }
-                )
-
-            if process.returncode and process.returncode != 0 and not parseable_output:
-                return _tool_not_available_finding(
-                    "TestSSL",
-                    "testssl",
-                    target_url,
-                    host,
-                    resolved_port,
                 )
             return findings
         except Exception:
@@ -624,7 +635,6 @@ class NiktoScanner:
         target_url, host, port = _target_parts(target)
         temp_path = Path(f"/tmp/nikto_{uuid.uuid4().hex}.json")
         findings: list[dict] = []
-        parseable_output = False
         nikto_bin = shutil.which("nikto") or shutil.which("nikto.pl")
         if not nikto_bin:
             return _tool_not_available_finding("Nikto", "nikto", target_url, host, port)
@@ -655,13 +665,12 @@ class NiktoScanner:
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                return []
+                return _scan_timeout_finding("Nikto", "nikto", target_url, host, port)
 
             items: list[dict] = []
             if temp_path.exists():
                 try:
                     payload = json.loads(temp_path.read_text(encoding="utf-8"))
-                    parseable_output = True
                     vulnerabilities = payload.get("vulnerabilities", []) if isinstance(payload, dict) else []
                     fallback_items = payload.get("items", []) if isinstance(payload, dict) else []
                     items = vulnerabilities if isinstance(vulnerabilities, list) else []
@@ -699,7 +708,7 @@ class NiktoScanner:
                         **_base_finding(
                             "nikto",
                             f"nikto-{item.get('id', idx)}",
-                            (msg[:120] if msg else "Nikto finding").rstrip(),
+                            msg[:120],
                             msg,
                             finding_type,
                             "MEDIUM",
@@ -712,8 +721,6 @@ class NiktoScanner:
                     }
                 )
 
-            if process.returncode and process.returncode != 0 and not parseable_output:
-                return _tool_not_available_finding("Nikto", "nikto", target_url, host, port)
             return findings
         except Exception:
             return []
@@ -744,20 +751,13 @@ class NucleiScanner:
             "deep": [],
         }
         tags = profile_tags.get(profile, profile_tags["standard"])
-        nuclei_bin = (
-            "/usr/local/bin/nuclei"
-            if Path("/usr/local/bin/nuclei").exists()
-            else shutil.which("nuclei")
-        )
+        nuclei_bin = shutil.which("nuclei")
         if not nuclei_bin:
             return _tool_not_available_finding("Nuclei", "nuclei", target_url, host, port)
 
         cmd = [nuclei_bin, "-target", target]
-        if profile != "deep":
-            for tag in tags:
-                cmd.extend(["-tags", tag])
-        if not Path("/opt/nuclei-templates").exists():
-            cmd.extend(["-ud", "/tmp/nuclei-templates"])
+        if profile != "deep" and tags:
+            cmd.extend(["-tags", ",".join(tags)])
         cmd.extend(
             [
                 "-json",
@@ -777,7 +777,6 @@ class NucleiScanner:
         timeout = 600 if profile == "deep" else 300
         findings: list[dict] = []
         seen: set[tuple[str, str]] = set()
-        parseable_output = False
 
         try:
             try:
@@ -798,14 +797,14 @@ class NucleiScanner:
                 if remaining <= 0:
                     process.kill()
                     await process.wait()
-                    return findings
+                    return _scan_timeout_finding("Nuclei", "nuclei", target_url, host, port)
 
                 try:
                     line = await asyncio.wait_for(process.stdout.readline(), timeout=remaining)
                 except asyncio.TimeoutError:
                     process.kill()
                     await process.wait()
-                    return findings
+                    return _scan_timeout_finding("Nuclei", "nuclei", target_url, host, port)
 
                 if not line:
                     break
@@ -814,7 +813,6 @@ class NucleiScanner:
                     raw = json.loads(line.decode("utf-8", errors="ignore").strip())
                     if not isinstance(raw, dict):
                         continue
-                    parseable_output = True
                 except json.JSONDecodeError:
                     continue
 
@@ -866,10 +864,7 @@ class NucleiScanner:
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                return findings
-
-            if process.returncode and process.returncode != 0 and not parseable_output:
-                return _tool_not_available_finding("Nuclei", "nuclei", target_url, host, port)
+                return _scan_timeout_finding("Nuclei", "nuclei", target_url, host, port)
             return findings
         except Exception:
             return []
