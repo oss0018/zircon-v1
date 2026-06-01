@@ -424,11 +424,24 @@ class LookalikeRuleOut(BaseModel):
     brand_id: int
     name: str
     protected_domain: str
+    brand_terms: List[str] = []
+    algorithms: List[str] = []
+    tld_list: str = "top100"
+    attack_words: str = "core"
+    include_idn: bool = True
+    include_bitsquatting: bool = True
+    max_variants: int = 10000
+    similarity_threshold_pct: int = 70
+    alert_threshold: int = 50
+    active: bool = True
     watch_mode_enabled: bool = False
     watch_feed_source: str = "whoisds"
     watch_last_run_at: Optional[datetime] = None
     watch_alert_email: str = ""
     watch_alert_telegram: str = ""
+    last_scan_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
