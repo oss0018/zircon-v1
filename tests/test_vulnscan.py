@@ -206,3 +206,194 @@ def test_dnssec_scanner_swallows_timeouts(monkeypatch):
 
     findings = asyncio.run(DNSSecScanner.scan("example.com"))
     assert findings == []
+
+
+def test_testssl_scanner_returns_tool_not_available_when_binary_missing(monkeypatch):
+    from app.services.vulnscan.scanners import TestSSLScanner
+
+    async def _missing(*args, **kwargs):  # noqa: ARG001
+        raise FileNotFoundError
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _missing)
+
+    findings = asyncio.run(TestSSLScanner.scan("example.com", 443))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
+    assert findings[0]["title"] == "TestSSL not installed"
+
+
+def test_testssl_scanner_parses_json_output(monkeypatch):
+    from app.services.vulnscan.scanners import TestSSLScanner
+
+    captured = {"json_path": None}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        json_path = Path(args[2])
+        captured["json_path"] = json_path
+        json_path.write_text(
+            json.dumps(
+                [
+                    {"id": "TLS1", "severity": "WARN", "finding": "TLS1 enabled", "ip": "127.0.0.1"},
+                    {"id": "HEARTBLEED", "severity": "HIGH", "finding": "Heartbleed detected", "ip": "127.0.0.1"},
+                    {"id": "cipher_order", "severity": "OK", "finding": "ok", "ip": "127.0.0.1"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    findings = asyncio.run(TestSSLScanner.scan("example.com", 443))
+    assert {f["finding_type"] for f in findings} == {"TLS_DEPRECATED_PROTOCOL", "HEARTBLEED"}
+    assert all("references_json" in f for f in findings)
+    assert not captured["json_path"].exists()
+
+
+def test_nikto_scanner_parses_json_and_maps_keywords(monkeypatch):
+    from app.services.vulnscan.scanners import NiktoScanner
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/nikto" if name == "nikto" else None)
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        output_idx = args.index("-output") + 1
+        Path(args[output_idx]).write_text(
+            json.dumps(
+                {
+                    "vulnerabilities": [
+                        {
+                            "id": "999986",
+                            "msg": "Possible SQL injection in /search",
+                            "uri": "/search",
+                            "method": "GET",
+                            "references": "https://example.org/advisory",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+    findings = asyncio.run(NiktoScanner.scan("https://example.com"))
+
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "SQLI"
+    refs = json.loads(findings[0]["references_json"])
+    assert "https://cirt.net/nikto2" in refs
+    assert "https://example.org/advisory" in refs
+
+
+def test_nuclei_scanner_streams_and_deduplicates(monkeypatch):
+    from app.services.vulnscan.scanners import NucleiScanner
+
+    captured_cmd = {}
+
+    class _Stdout:
+        def __init__(self):
+            self._lines = [
+                b'{"template-id":"cve-test","info":{"name":"CVE Test","severity":"high","description":"desc","classification":{"cve-id":["CVE-2024-0001"],"cwe-id":["CWE-79"],"cvss-score":8.1},"reference":["https://ref"]},"matched-at":"https://example.com/a"}\n',
+                b'{"template-id":"cve-test","info":{"name":"CVE Test","severity":"high","description":"desc","classification":{"cve-id":["CVE-2024-0001"]}},"matched-at":"https://example.com/a"}\n',
+                b"not-json\n",
+            ]
+
+        async def readline(self):
+            return self._lines.pop(0) if self._lines else b""
+
+    class _Stderr:
+        async def read(self):
+            return b""
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = _Stdout()
+            self.stderr = _Stderr()
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    def _path_exists(path: str) -> bool:
+        return False
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.Path.exists", _path_exists)
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/nuclei" if name == "nuclei" else None)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    findings = asyncio.run(NucleiScanner.scan("https://example.com", "quick"))
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["finding_type"] == "CVE"
+    assert finding["severity"] == "HIGH"
+    assert json.loads(finding["cve_ids_json"]) == ["CVE-2024-0001"]
+    assert "-ud" in captured_cmd["args"]
+    assert "/tmp/nuclei-templates" in captured_cmd["args"]
+    assert "-tags" in captured_cmd["args"]
+
+
+def test_nuclei_scanner_omits_tags_for_deep(monkeypatch):
+    from app.services.vulnscan.scanners import NucleiScanner
+
+    captured_cmd = {}
+
+    class _Stdout:
+        async def readline(self):
+            return b""
+
+    class _Stderr:
+        async def read(self):
+            return b""
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = _Stdout()
+            self.stderr = _Stderr()
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    def _path_exists(path) -> bool:
+        return str(path) == "/usr/local/bin/nuclei"
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.Path.exists", _path_exists)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    findings = asyncio.run(NucleiScanner.scan("https://example.com", "deep"))
+    assert findings == []
+    assert "-tags" not in captured_cmd["args"]
