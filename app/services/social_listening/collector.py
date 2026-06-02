@@ -12,6 +12,8 @@ from app.models import SLRawMention, SLMention, SocialListeningRule
 from app.services.social_listening.adapters.paste_adapter import PasteAdapter
 from app.services.social_listening.adapters.reddit_adapter import RedditAdapter
 from app.services.social_listening.adapters.rss_adapter import RSSAdapter
+from app.services.social_listening.adapters.telegram_adapter import TelegramAdapter
+from app.services.social_listening.adapters.twitter_adapter import TwitterAdapter
 from app.services.social_listening.alert_engine import AlertEngine
 from app.services.social_listening.nlp_pipeline import NLPPipeline
 
@@ -30,13 +32,23 @@ class SocialListeningCollector:
             "news": RSSAdapter(),
             "paste": PasteAdapter(),
             "pastebin": PasteAdapter(),
+            "telegram": TelegramAdapter(),
+            "twitter": TwitterAdapter(),
+            "habrahabr": RSSAdapter(feed_url_template="https://habr.com/ru/search/feed?q={term}", source_platform="habrahabr"),
         }
         self._nlp = NLPPipeline()
         self._alert_engine = AlertEngine()
 
     async def run_rule(self, rule: SocialListeningRule, db: AsyncSession) -> dict:
         try:
-            platforms = json.loads(rule.platforms or "[]")
+            parsed_platforms = json.loads(rule.platforms or "[]")
+            if isinstance(parsed_platforms, dict):
+                candidate = parsed_platforms.get("platforms", [])
+                platforms = candidate if isinstance(candidate, list) else []
+            elif isinstance(parsed_platforms, list):
+                platforms = parsed_platforms
+            else:
+                platforms = []
         except Exception:
             platforms = []
 
