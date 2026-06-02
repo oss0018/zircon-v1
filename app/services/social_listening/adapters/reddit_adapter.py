@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from os import getenv
@@ -16,7 +17,7 @@ class RedditAdapter:
     async def collect(self, rule: SocialListeningRule) -> list[dict]:
         try:
             import praw  # type: ignore
-        except Exception:
+        except ImportError:
             logger.warning("social listening: praw is not installed; reddit adapter skipped")
             return []
 
@@ -42,24 +43,28 @@ class RedditAdapter:
             check_for_async=False,
         )
 
-        collected: list[dict] = []
         subreddits = "all+netsec+cybersecurity+hacking+ukraine"
-        for term in terms[:20]:
-            query = quote_plus(str(term).strip())
-            if not query:
-                continue
-            try:
-                for post in reddit.subreddit(subreddits).search(query, limit=10, sort="new"):
-                    collected.append(
-                        {
-                            "source_platform": "reddit",
-                            "source_url": f"https://www.reddit.com{post.permalink}",
-                            "author_id": str(getattr(post.author, "id", "") or ""),
-                            "author_username": str(getattr(post.author, "name", "") or ""),
-                            "content_raw": f"{post.title}\n{getattr(post, 'selftext', '')}".strip(),
-                            "published_at": datetime.fromtimestamp(post.created_utc, tz=timezone.utc),
-                        }
-                    )
-            except Exception as exc:
-                logger.warning("social listening: reddit search failed for term '%s': %s", term, exc)
-        return collected
+
+        def _sync_collect() -> list[dict]:
+            collected: list[dict] = []
+            for term in terms[:20]:
+                query = quote_plus(str(term).strip())
+                if not query:
+                    continue
+                try:
+                    for post in reddit.subreddit(subreddits).search(query, limit=10, sort="new"):
+                        collected.append(
+                            {
+                                "source_platform": "reddit",
+                                "source_url": f"https://www.reddit.com{post.permalink}",
+                                "author_id": str(getattr(post.author, "id", "") or ""),
+                                "author_username": str(getattr(post.author, "name", "") or ""),
+                                "content_raw": f"{post.title}\n{getattr(post, 'selftext', '')}".strip(),
+                                "published_at": datetime.fromtimestamp(post.created_utc, tz=timezone.utc),
+                            }
+                        )
+                except Exception as exc:
+                    logger.warning("social listening: reddit search failed for term '%s': %s", term, exc)
+            return collected
+
+        return await asyncio.to_thread(_sync_collect)
