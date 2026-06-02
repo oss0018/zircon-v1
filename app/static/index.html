@@ -1939,11 +1939,15 @@
                   <div class="form-group">
                     <label class="form-label">Brand</label>
                     <select class="form-select" x-model="ruleForm.brand_id" :disabled="ruleModalMode === 'edit'">
-                      <option value="">Select a brand</option>
+                      <option value="">Select Brand (optional)</option>
+                      <option value="__new__">— Create new brand —</option>
                       <template x-for="brand in brands" :key="'brand-option-' + brand.id">
                         <option :value="brand.id" x-text="brand.name"></option>
                       </template>
                     </select>
+                    <div x-show="ruleForm.brand_id === '__new__'" class="form-group" style="margin-top:8px;margin-bottom:0;">
+                      <input class="form-input" type="text" x-model="ruleForm.newBrandName" placeholder="New brand name" />
+                    </div>
                     <div x-show="ruleModalMode === 'edit'" class="text-muted text-xs" style="margin-top:6px;">Brand assignment is fixed after rule creation.</div>
                   </div>
                   <div class="grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
@@ -2060,7 +2064,7 @@
                           <span class="badge badge-green">Filtered <span x-text="previewData.filtered_count"></span></span>
                           <span class="badge badge-gray">Filtered out <span x-text="previewData.filtered_out"></span></span>
                         </div>
-                        <div class="text-muted text-sm">Preview updates after 600ms when threshold or generation options change.</div>
+                        <div class="text-muted text-sm">Preview updates after 1200ms when threshold or generation options change.</div>
                       </div>
                     </template>
                     <template x-if="!previewData && !previewError && !previewLoading">
