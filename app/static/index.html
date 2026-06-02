@@ -29,6 +29,7 @@
   <script src="/static/js/infra_intel.js"></script>
   <script src="/static/js/vulnscan.js"></script>
   <script src="/static/js/logo_misuse.js"></script>
+  <script src="/static/js/social_listening.js"></script>
   <script src="/static/js/lookalike_domains.js"></script>
 
   <!-- Toast Container -->
@@ -155,6 +156,11 @@
                   <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                   <span x-text="t('logo_content_misuse')"></span>
                 </div>
+
+                <div class="nav-sub-item" :class="page === 'social-listening' ? 'active' : ''" @click="navigate('social-listening')" @contextmenu.prevent="openPageInNewWindow('social-listening')">
+                  <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12a4 4 0 108 0 4 4 0 00-8 0zm-5 0a9 9 0 0118 0m-18 0a9 9 0 0018 0"/></svg>
+                  <span>Social Listening</span>
+                </div>
               </div>
             </template>
 
@@ -244,7 +250,7 @@
           <div class="topbar">
             <div class="topbar-title">
               <span class="pulse" style="margin-right:8px;"></span>
-              <span x-text="page === 'lookalike-domains' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'storage-sources' ? 'System › ' + t('storage_sources') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
+              <span x-text="page === 'lookalike-domains' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'social-listening' ? 'Brand Protection › Social Listening' : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'storage-sources' ? 'System › ' + t('storage_sources') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
             </div>
             <div class="topbar-actions">
               <span class="text-muted text-sm" x-text="new Date().toLocaleDateString()"></span>
@@ -6499,6 +6505,362 @@
                 </div>
               </div>
             </div><!-- /vulnscan -->
+
+            <template x-if="page === 'social-listening'">
+              <div x-data="socialListeningPage" x-init="init()">
+                <div class="page-header">
+                  <div>
+                    <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0;">Social Listening</h2>
+                  </div>
+                  <button class="btn btn-primary btn-sm" @click="openCreateRule()">+ New Rule</button>
+                </div>
+
+                <div class="card mb-4">
+                  <div class="flex justify-between items-center" style="flex-wrap:wrap;gap:8px;">
+                    <div class="flex gap-2" style="flex-wrap:wrap;">
+                      <button class="btn btn-sm" :class="statsWindow === '24h' ? 'btn-primary' : 'btn-secondary'" @click="changeStatsWindow('24h')">24h</button>
+                      <button class="btn btn-sm" :class="statsWindow === '7d' ? 'btn-primary' : 'btn-secondary'" @click="changeStatsWindow('7d')">7d</button>
+                      <button class="btn btn-sm" :class="statsWindow === '30d' ? 'btn-primary' : 'btn-secondary'" @click="changeStatsWindow('30d')">30d</button>
+                    </div>
+                    <div class="flex gap-2" style="flex-wrap:wrap;">
+                      <span class="badge badge-blue">Mentions <span x-text="stats.total_mentions || 0"></span></span>
+                      <span class="badge badge-red">NEG <span x-text="(stats.sentiment_breakdown && stats.sentiment_breakdown.NEG) || 0"></span></span>
+                      <span class="badge badge-yellow">Open Alerts <span x-text="alerts.filter(a => a.status !== 'acknowledged').length"></span></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card mb-4" style="padding:12px;">
+                  <div class="flex gap-2" style="flex-wrap:wrap;">
+                    <button class="btn btn-sm" :class="activeTab === 'mentions' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'mentions'">Mentions</button>
+                    <button class="btn btn-sm" :class="activeTab === 'alerts' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'alerts'">Alerts</button>
+                    <button class="btn btn-sm" :class="activeTab === 'rules' ? 'btn-primary' : 'btn-secondary'" @click="activeTab = 'rules'">Rules</button>
+                  </div>
+                </div>
+
+                <div x-show="activeTab === 'mentions'">
+                  <div class="card mb-4 filter-bar">
+                    <div class="flex gap-2" style="flex-wrap:wrap;align-items:end;">
+                      <div class="form-group" style="min-width:160px;flex:1;">
+                        <label class="form-label">Rule</label>
+                        <select class="form-input" x-model="filterRuleId" @change="resetMentionFilters(); loadAlerts()">
+                          <option value="">All</option>
+                          <template x-for="rule in rules" :key="'mrule-' + rule.id">
+                            <option :value="rule.id" x-text="rule.name"></option>
+                          </template>
+                        </select>
+                      </div>
+                      <div class="form-group" style="min-width:140px;">
+                        <label class="form-label">Platform</label>
+                        <select class="form-input" x-model="filterPlatform" @change="resetMentionFilters()">
+                          <option value="">All</option>
+                          <option value="reddit">Reddit</option>
+                          <option value="rss">RSS</option>
+                          <option value="paste">Paste</option>
+                          <option value="twitter">X (Twitter)</option>
+                          <option value="telegram">Telegram</option>
+                          <option value="habrahabr">Habrahabr</option>
+                        </select>
+                      </div>
+                      <div class="form-group" style="min-width:120px;">
+                        <label class="form-label">Severity</label>
+                        <select class="form-input" x-model="filterSeverity" @change="resetMentionFilters(); loadAlerts()">
+                          <option value="">Any</option>
+                          <option value="1">1+</option>
+                          <option value="2">2+</option>
+                          <option value="3">3+</option>
+                          <option value="4">4+</option>
+                          <option value="5">5</option>
+                        </select>
+                      </div>
+                      <div class="form-group" style="min-width:130px;">
+                        <label class="form-label">Sentiment</label>
+                        <select class="form-input" x-model="filterSentiment" @change="resetMentionFilters()">
+                          <option value="">All</option>
+                          <option value="NEG">NEG</option>
+                          <option value="NEU">NEU</option>
+                          <option value="POS">POS</option>
+                        </select>
+                      </div>
+                      <div class="form-group" style="min-width:150px;">
+                        <label class="form-label">Status</label>
+                        <select class="form-input" x-model="filterStatus" @change="resetMentionFilters(); loadAlerts()">
+                          <option value="">All</option>
+                          <option value="new">new</option>
+                          <option value="investigating">investigating</option>
+                          <option value="resolved">resolved</option>
+                          <option value="false_positive">false_positive</option>
+                        </select>
+                      </div>
+                      <div class="form-group" style="min-width:220px;flex:1;">
+                        <label class="form-label">Search</label>
+                        <input class="form-input" x-model="filterQ" @input.debounce.400ms="resetMentionFilters()" placeholder="keyword, author..." />
+                      </div>
+                      <div class="form-group" style="min-width:140px;">
+                        <label class="form-label">Export</label>
+                        <div class="flex gap-2">
+                          <button class="btn btn-secondary btn-sm" @click="exportMentions('csv')">CSV</button>
+                          <button class="btn btn-secondary btn-sm" @click="exportMentions('json')">JSON</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="card" style="padding:0;">
+                    <div class="table-wrapper">
+                      <table class="table">
+                        <thead>
+                          <tr>
+                            <th>Platform</th>
+                            <th>Content</th>
+                            <th>Author</th>
+                            <th>Sentiment</th>
+                            <th>Severity</th>
+                            <th>Status</th>
+                            <th>Published</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-if="mentionsLoading && mentions.length === 0">
+                            <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
+                          </template>
+                          <template x-if="!mentionsLoading && mentions.length === 0">
+                            <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted);">No data</td></tr>
+                          </template>
+                          <template x-for="m in mentions" :key="m.id">
+                            <tr>
+                              <td><span :class="platformColor(m.source_platform)" x-text="platformLabel(m.source_platform)"></span></td>
+                              <td style="max-width:360px;">
+                                <div x-text="(m.content_raw || '').length > 120 ? (m.content_raw || '').slice(0,120) + '…' : (m.content_raw || '—')"></div>
+                                <template x-if="m.source_url">
+                                  <a :href="m.source_url" target="_blank" rel="noopener" class="text-sm" style="color:var(--link);">Open</a>
+                                </template>
+                              </td>
+                              <td x-text="m.author_username || '—'"></td>
+                              <td><span :class="sentimentColor(m.sentiment_label)" x-text="m.sentiment_label || 'NEU'"></span></td>
+                              <td><span :class="severityColor(m.severity)" x-text="m.severity"></span></td>
+                              <td><span :class="mentionStatusColor(m.status)" x-text="m.status"></span></td>
+                              <td class="text-sm text-muted" x-text="m.published_at ? formatDate(m.published_at) : '—'"></td>
+                              <td>
+                                <select class="form-input" style="min-width:150px;" @change="updateMentionStatus(m.id, $event.target.value)">
+                                  <option value="new" :selected="m.status === 'new'">new</option>
+                                  <option value="investigating" :selected="m.status === 'investigating'">investigating</option>
+                                  <option value="resolved" :selected="m.status === 'resolved'">resolved</option>
+                                  <option value="false_positive" :selected="m.status === 'false_positive'">false_positive</option>
+                                </select>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div class="flex justify-between items-center" style="padding:12px 16px;">
+                      <div class="text-muted text-sm">Page <span x-text="mentionsPage"></span></div>
+                      <button class="btn btn-secondary btn-sm" @click="loadMoreMentions()" :disabled="!hasMoreMentions || mentionsLoading">
+                        <span x-show="mentionsLoading && mentions.length > 0" class="spinner" style="width:12px;height:12px;"></span>
+                        <span x-text="hasMoreMentions ? 'Load more' : 'No more data'"></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div x-show="activeTab === 'alerts'">
+                  <div class="card" style="padding:0;">
+                    <div class="table-wrapper">
+                      <table class="table">
+                        <thead>
+                          <tr>
+                            <th>Type</th>
+                            <th>Title</th>
+                            <th>Severity</th>
+                            <th>Rule</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-if="alertsLoading">
+                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
+                          </template>
+                          <template x-if="!alertsLoading && alerts.length === 0">
+                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">No data</td></tr>
+                          </template>
+                          <template x-for="a in alerts" :key="a.id">
+                            <tr>
+                              <td><span class="badge badge-purple" x-text="alertTypeLabel(a.alert_type)"></span></td>
+                              <td x-text="a.title"></td>
+                              <td><span :class="severityColor(a.severity)" x-text="a.severity"></span></td>
+                              <td x-text="rules.find(r => r.id === a.rule_id)?.name || ('#' + a.rule_id)"></td>
+                              <td><span :class="a.status === 'acknowledged' ? 'badge badge-green' : 'badge badge-yellow'" x-text="a.status"></span></td>
+                              <td class="text-sm text-muted" x-text="formatDate(a.created_at)"></td>
+                              <td>
+                                <button class="btn btn-sm btn-secondary" @click="acknowledgeAlert(a.id)" :disabled="a.status === 'acknowledged'">Acknowledge</button>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div x-show="activeTab === 'rules'">
+                  <div class="card" style="padding:0;">
+                    <div class="table-wrapper">
+                      <table class="table">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Brand</th>
+                            <th>Platforms</th>
+                            <th>Schedule</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <template x-if="rulesLoading">
+                            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
+                          </template>
+                          <template x-if="!rulesLoading && rules.length === 0">
+                            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">No data</td></tr>
+                          </template>
+                          <template x-for="rule in rules" :key="rule.id">
+                            <tr>
+                              <td>
+                                <div style="font-weight:600;" x-text="rule.name"></div>
+                                <div class="text-sm text-muted" x-text="'ID ' + rule.id"></div>
+                              </td>
+                              <td x-text="brandName(rule.brand_id)"></td>
+                              <td>
+                                <div class="flex gap-1" style="flex-wrap:wrap;">
+                                  <template x-for="p in (rule.platforms || [])" :key="rule.id + '-' + p">
+                                    <span :class="platformColor(p)" x-text="platformLabel(p)"></span>
+                                  </template>
+                                </div>
+                              </td>
+                              <td class="text-sm" x-text="rule.schedule_cron"></td>
+                              <td>
+                                <button class="btn btn-sm" :class="rule.active ? 'btn-secondary' : 'btn-primary'" @click="rule.active ? deactivateRule(rule.id) : activateRule(rule.id)" x-text="rule.active ? 'Active' : 'Inactive'"></button>
+                              </td>
+                              <td>
+                                <div class="flex gap-2" style="flex-wrap:wrap;">
+                                  <button class="btn btn-sm btn-secondary" @click="openEditRule(rule)">Edit</button>
+                                  <button class="btn btn-sm btn-primary" @click="runRuleNow(rule.id)" :disabled="runningRules[rule.id]">
+                                    <span x-show="runningRules[rule.id]" class="spinner" style="width:12px;height:12px;"></span>
+                                    <span x-text="runningRules[rule.id] ? 'Running...' : 'Run now'"></span>
+                                  </button>
+                                  <button class="btn btn-sm btn-danger" @click="deleteRule(rule.id)">Delete</button>
+                                </div>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <template x-if="showRuleModal">
+                  <div class="modal-overlay" @click.self="showRuleModal = false">
+                    <div class="modal" style="max-width:760px;">
+                      <div class="modal-header">
+                        <div class="modal-title" x-text="editingRule ? 'Edit Rule' : 'New Rule'"></div>
+                        <button class="modal-close" @click="showRuleModal = false">&times;</button>
+                      </div>
+                      <div class="modal-body">
+                        <div class="form-group">
+                          <label class="form-label">Name</label>
+                          <input class="form-input" x-model="ruleForm.name" />
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Brand</label>
+                          <select class="form-input" x-model="ruleForm.brand_id">
+                            <option value="">— select brand —</option>
+                            <template x-for="b in brands" :key="'rb-' + b.id">
+                              <option :value="b.id" x-text="b.name"></option>
+                            </template>
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Brand Terms (comma separated)</label>
+                          <input class="form-input" x-model="ruleForm.brand_terms" placeholder="Kyivstar, Київстар" />
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Hashtags (comma separated)</label>
+                          <input class="form-input" x-model="ruleForm.hashtags" placeholder="#kyivstar" />
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Exclusions (comma separated)</label>
+                          <input class="form-input" x-model="ruleForm.exclusions" />
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Languages</label>
+                          <div class="flex gap-2" style="flex-wrap:wrap;">
+                            <label class="badge badge-gray"><input type="checkbox" value="uk" x-model="ruleForm.languages" style="margin-right:6px;"><span>uk</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="ru" x-model="ruleForm.languages" style="margin-right:6px;"><span>ru</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="en" x-model="ruleForm.languages" style="margin-right:6px;"><span>en</span></label>
+                          </div>
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Platforms</label>
+                          <div class="flex gap-2" style="flex-wrap:wrap;">
+                            <label class="badge badge-gray"><input type="checkbox" value="reddit" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Reddit</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="rss" x-model="ruleForm.platforms" style="margin-right:6px;"><span>RSS</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="paste" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Paste</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="twitter" x-model="ruleForm.platforms" style="margin-right:6px;"><span>X (Twitter)</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="telegram" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Telegram</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="habrahabr" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Habrahabr</span></label>
+                          </div>
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Severity Threshold</label>
+                          <select class="form-input" x-model.number="ruleForm.severity_threshold">
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Alert On</label>
+                          <select class="form-input" x-model="ruleForm.alert_on">
+                            <option value="EVERY_MENTION">EVERY_MENTION</option>
+                            <option value="CLUSTER">CLUSTER</option>
+                            <option value="SENTIMENT_SPIKE">SENTIMENT_SPIKE</option>
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Schedule (cron)</label>
+                          <input class="form-input" x-model="ruleForm.schedule_cron" placeholder="*/15 * * * *" />
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Store all mentions</label>
+                          <select class="form-input" x-model="ruleForm.store_all">
+                            <option :value="false">false</option>
+                            <option :value="true">true</option>
+                          </select>
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Active</label>
+                          <select class="form-input" x-model="ruleForm.active">
+                            <option :value="true">true</option>
+                            <option :value="false">false</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="modal-footer">
+                        <button class="btn btn-secondary" @click="showRuleModal = false">Cancel</button>
+                        <button class="btn btn-primary" @click="saveRule()">Save</button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
 
             <div x-show="page === 'logo-content-misuse'" x-data="logoMisusePage">
 
