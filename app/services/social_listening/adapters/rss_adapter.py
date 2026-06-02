@@ -14,7 +14,14 @@ class RSSAdapter:
     Polls Google News RSS feeds for each brand term.
     """
 
-    def __init__(self, feed_url_template: str = "https://news.google.com/rss/search?q={term}&hl=uk&gl=UA", source_platform: str = "rss"):
+    DEFAULT_FEED_URL_TEMPLATE = "https://news.google.com/rss/search?q={term}&hl=uk&gl=UA"
+    DEFAULT_SOURCE_PLATFORM = "rss"
+
+    def __init__(
+        self,
+        feed_url_template: str = DEFAULT_FEED_URL_TEMPLATE,
+        source_platform: str = DEFAULT_SOURCE_PLATFORM,
+    ):
         self._feed_url_template = feed_url_template
         self._source_platform = source_platform
 

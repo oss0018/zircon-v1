@@ -13,6 +13,8 @@ class TelegramAdapter:
     """
 
     _DEFAULT_CHANNELS = ["@cybersecua", "@hackersnews", "@darkwebinformer"]
+    _MAX_TERMS = 20
+    _MAX_MESSAGES = 20
 
     async def collect(self, rule: SocialListeningRule) -> list[dict]:
         try:
@@ -60,15 +62,20 @@ class TelegramAdapter:
         collected: list[dict] = []
         try:
             await client.start()
-            for term in terms[:20]:
+            for term in terms[: self._MAX_TERMS]:
                 term_text = str(term).strip()
                 if not term_text:
                     continue
                 for channel in channels:
                     try:
-                        messages = await client.get_messages(channel, search=term_text, limit=20)
+                        messages = await client.get_messages(channel, search=term_text, limit=self._MAX_MESSAGES)
                     except Exception as exc:
-                        logger.warning("social listening: telegram search failed for term '%s' in %s: %s", term, channel, exc)
+                        logger.warning(
+                            "social listening: telegram search failed for term '%s' in %s: %s",
+                            term_text,
+                            channel,
+                            exc,
+                        )
                         continue
 
                     for message in messages:
