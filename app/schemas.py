@@ -1075,3 +1075,249 @@ class TakedownRequestOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+
+# ── Phase 2 Schemas (TS-IMP-001 v2) ──────────────────────────────────────────
+
+class AlertRuleCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = ""
+    match_module: Optional[str] = None
+    match_finding_type: Optional[str] = None
+    min_threat_score: int = Field(80, ge=0, le=100)
+    channels_json: str = "[]"
+    active: bool = True
+
+
+class AlertRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    match_module: Optional[str] = None
+    match_finding_type: Optional[str] = None
+    min_threat_score: Optional[int] = Field(None, ge=0, le=100)
+    channels_json: Optional[str] = None
+    active: Optional[bool] = None
+
+
+class AlertRuleOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    match_module: Optional[str]
+    match_finding_type: Optional[str]
+    min_threat_score: int
+    channels_json: str
+    active: bool
+    created_by: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class LegalTaskCreate(BaseModel):
+    finding_id: Optional[int] = None
+    takedown_id: Optional[int] = None
+    task_type: str = Field(..., min_length=1, max_length=50)
+    title: str = Field(..., min_length=1, max_length=300)
+    description: str = ""
+    status: str = "open"
+    due_date: Optional[datetime] = None
+    assigned_to: Optional[int] = None
+    external_ref: str = ""
+    notes: str = ""
+
+
+class LegalTaskUpdate(BaseModel):
+    task_type: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    due_date: Optional[datetime] = None
+    assigned_to: Optional[int] = None
+    external_ref: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class LegalTaskOut(BaseModel):
+    id: int
+    finding_id: Optional[int]
+    takedown_id: Optional[int]
+    task_type: str
+    title: str
+    description: str
+    status: str
+    due_date: Optional[datetime]
+    assigned_to: Optional[int]
+    external_ref: str
+    notes: str
+    created_by: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class ThreatActorCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = ""
+    country_of_origin: str = ""
+    known_aliases: List[str] = []
+    attack_patterns: List[str] = []
+    registrar_names: List[str] = []
+    hosting_asns: List[str] = []
+    registrant_emails: List[str] = []
+    payment_gateways: List[str] = []
+    linked_finding_ids: List[int] = []
+
+
+class ThreatActorUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    country_of_origin: Optional[str] = None
+    known_aliases: Optional[List[str]] = None
+    attack_patterns: Optional[List[str]] = None
+    registrar_names: Optional[List[str]] = None
+    hosting_asns: Optional[List[str]] = None
+    registrant_emails: Optional[List[str]] = None
+    payment_gateways: Optional[List[str]] = None
+    linked_finding_ids: Optional[List[int]] = None
+
+
+class ThreatActorOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    country_of_origin: str
+    known_aliases: List[str]
+    attack_patterns: List[str]
+    registrar_names: List[str]
+    hosting_asns: List[str]
+    registrant_emails: List[str]
+    payment_gateways: List[str]
+    linked_finding_ids: List[int]
+    first_seen: datetime
+    last_seen: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator(
+        "known_aliases", "attack_patterns", "registrar_names",
+        "hosting_asns", "registrant_emails", "payment_gateways",
+        mode="before",
+    )
+    @classmethod
+    def parse_str_list(cls, value):
+        return _parse_json_list(value)
+
+    @field_validator("linked_finding_ids", mode="before")
+    @classmethod
+    def parse_int_list(cls, value):
+        if isinstance(value, list):
+            return [int(x) for x in value if x is not None]
+        try:
+            parsed = json.loads(value or "[]")
+            return [int(x) for x in parsed if x is not None]
+        except Exception:
+            return []
+
+    model_config = {"from_attributes": True}
+
+
+class ThreatActorProfileCreate(BaseModel):
+    actor_id: int
+    notes: str = ""
+    motivation: str = ""
+    sophistication: str = ""
+    target_sectors: List[str] = []
+    ioc: List[str] = []
+    tlp_level: str = "amber"
+
+
+class ThreatActorProfileUpdate(BaseModel):
+    notes: Optional[str] = None
+    motivation: Optional[str] = None
+    sophistication: Optional[str] = None
+    target_sectors: Optional[List[str]] = None
+    ioc: Optional[List[str]] = None
+    tlp_level: Optional[str] = None
+
+
+class ThreatActorProfileOut(BaseModel):
+    id: int
+    actor_id: int
+    notes: str
+    motivation: str
+    sophistication: str
+    target_sectors: List[str]
+    ioc: List[str]
+    tlp_level: str
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator("target_sectors", "ioc", mode="before")
+    @classmethod
+    def parse_list(cls, value):
+        return _parse_json_list(value)
+
+    model_config = {"from_attributes": True}
+
+
+class ServiceLevelAgreementCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = ""
+    match_module: Optional[str] = None
+    match_severity: Optional[str] = None
+    time_to_detect_min: int = Field(0, ge=0)
+    time_to_triage_min: int = Field(240, ge=0)
+    time_to_takedown_min: int = Field(1440, ge=0)
+    time_to_resolve_min: int = Field(4320, ge=0)
+    active: bool = True
+
+
+class ServiceLevelAgreementUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    match_module: Optional[str] = None
+    match_severity: Optional[str] = None
+    time_to_detect_min: Optional[int] = Field(None, ge=0)
+    time_to_triage_min: Optional[int] = Field(None, ge=0)
+    time_to_takedown_min: Optional[int] = Field(None, ge=0)
+    time_to_resolve_min: Optional[int] = Field(None, ge=0)
+    active: Optional[bool] = None
+
+
+class ServiceLevelAgreementOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    match_module: Optional[str]
+    match_severity: Optional[str]
+    time_to_detect_min: int
+    time_to_triage_min: int
+    time_to_takedown_min: int
+    time_to_resolve_min: int
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class AuditLogEntryOut(BaseModel):
+    id: int
+    actor_user_id: Optional[int]
+    action: str
+    entity_type: str
+    entity_id: Optional[int]
+    old_value_json: Optional[str]
+    new_value_json: Optional[str]
+    ip_address: Optional[str]
+    notes: str
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class EvidencePackageRequest(BaseModel):
+    include_screenshot: bool = True
+    include_whois: bool = True
+    include_dns: bool = True
+    include_archive: bool = True
+    narrative: str = ""

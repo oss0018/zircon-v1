@@ -823,6 +823,119 @@ class TakedownRequest(Base):
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+# ── Phase 2 Models (TS-IMP-001 v2) ────────────────────────────────────────────
+
+class AlertRule(Base):
+    """Escalation rule: auto-dispatch Slack/PagerDuty/Teams when a finding matches criteria."""
+    __tablename__ = "impersonation_alert_rules"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    # Matching criteria (all conditions are ANDed; None = match any)
+    match_module = Column(String(10), nullable=True)       # e.g. "m1"
+    match_finding_type = Column(String(50), nullable=True)  # e.g. "fake_account"
+    min_threat_score = Column(Integer, default=80)
+    # Notification channels (JSON array of channel configs)
+    # e.g. [{"type": "slack", "webhook": "..."}, {"type": "pagerduty", "key": "..."}]
+    channels_json = Column(Text, default="[]")
+    active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class LegalTask(Base):
+    """Legal workflow item: UDRP submission, C&D letter, trademark filing, etc."""
+    __tablename__ = "impersonation_legal_tasks"
+    id = Column(Integer, primary_key=True)
+    finding_id = Column(Integer, ForeignKey("impersonation_findings.id"), nullable=True)
+    takedown_id = Column(Integer, ForeignKey("takedown_requests.id"), nullable=True)
+    task_type = Column(String(50), nullable=False)  # udrp | cease_and_desist | trademark_filing | other
+    title = Column(String(300), nullable=False)
+    description = Column(Text, default="")
+    status = Column(String(30), default="open")    # open | in_progress | submitted | resolved | closed
+    due_date = Column(DateTime, nullable=True)
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    external_ref = Column(String(300), default="")  # Jira/Asana ticket ID or external case number
+    notes = Column(Text, default="")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class ThreatActor(Base):
+    """Repeat threat actor identified through correlated infrastructure."""
+    __tablename__ = "impersonation_threat_actors"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)       # internal identifier / alias
+    description = Column(Text, default="")
+    country_of_origin = Column(String(100), default="")
+    known_aliases_json = Column(Text, default="[]")  # JSON list of known aliases
+    attack_patterns_json = Column(Text, default="[]")  # JSON list of MITRE ATT&CK patterns
+    # Infrastructure fingerprints for correlation
+    registrar_names_json = Column(Text, default="[]")
+    hosting_asns_json = Column(Text, default="[]")
+    registrant_emails_json = Column(Text, default="[]")
+    payment_gateways_json = Column(Text, default="[]")
+    # Linked finding IDs (denormalised JSON list for fast UI rendering)
+    linked_finding_ids_json = Column(Text, default="[]")
+    first_seen = Column(DateTime, default=_utcnow)
+    last_seen = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    profile = relationship("ThreatActorProfile", back_populates="actor", uselist=False, cascade="all, delete-orphan")
+
+
+class ThreatActorProfile(Base):
+    """Extended profile attached to a ThreatActor (one-to-one)."""
+    __tablename__ = "impersonation_threat_actor_profiles"
+    id = Column(Integer, primary_key=True)
+    actor_id = Column(Integer, ForeignKey("impersonation_threat_actors.id"), nullable=False, unique=True)
+    notes = Column(Text, default="")
+    motivation = Column(String(200), default="")   # financial | hacktivism | espionage | unknown
+    sophistication = Column(String(50), default="")  # low | medium | high | advanced
+    target_sectors_json = Column(Text, default="[]")
+    ioc_json = Column(Text, default="[]")          # IP addresses, email addresses, domains as IoCs
+    tlp_level = Column(String(10), default="amber")  # white | green | amber | red
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    actor = relationship("ThreatActor", back_populates="profile")
+
+
+class ServiceLevelAgreement(Base):
+    """SLA definition: expected time-to-respond / time-to-resolve per severity or module."""
+    __tablename__ = "impersonation_slas"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    # Match criteria (None = match any)
+    match_module = Column(String(10), nullable=True)
+    match_severity = Column(String(20), nullable=True)   # critical | high | medium | low
+    # SLA times in minutes
+    time_to_detect_min = Column(Integer, default=0)
+    time_to_triage_min = Column(Integer, default=240)    # 4 h
+    time_to_takedown_min = Column(Integer, default=1440)  # 24 h
+    time_to_resolve_min = Column(Integer, default=4320)   # 72 h
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class AuditLogEntry(Base):
+    """Immutable audit log for all state changes and user actions."""
+    __tablename__ = "impersonation_audit_log"
+    id = Column(Integer, primary_key=True)
+    actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String(100), nullable=False)    # e.g. "finding.status_change"
+    entity_type = Column(String(50), nullable=False)  # finding | takedown | rule | alert_rule | legal_task | threat_actor
+    entity_id = Column(Integer, nullable=True)
+    old_value_json = Column(Text, nullable=True)
+    new_value_json = Column(Text, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=_utcnow)
+
+
 # ── Threat Intelligence (TS-CTI-001 v1.0 MVP) ────────────────────────────────
 
 class CTIIndicator(Base):

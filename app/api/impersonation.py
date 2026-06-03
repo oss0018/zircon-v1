@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import ImpersonationFinding, ImpersonationRule, TakedownRequest, User
+from app.models import AlertRule, LegalTask, ThreatActor, ThreatActorProfile, ServiceLevelAgreement, AuditLogEntry
 from app.schemas import (
     ImpersonationFindingOut,
     ImpersonationFindingStatusUpdate,
@@ -28,6 +29,23 @@ from app.schemas import (
     TakedownRequestCreate,
     TakedownRequestOut,
     TakedownRequestUpdate,
+    AlertRuleCreate,
+    AlertRuleOut,
+    AlertRuleUpdate,
+    LegalTaskCreate,
+    LegalTaskOut,
+    LegalTaskUpdate,
+    ThreatActorCreate,
+    ThreatActorOut,
+    ThreatActorUpdate,
+    ThreatActorProfileCreate,
+    ThreatActorProfileOut,
+    ThreatActorProfileUpdate,
+    ServiceLevelAgreementCreate,
+    ServiceLevelAgreementOut,
+    ServiceLevelAgreementUpdate,
+    AuditLogEntryOut,
+    EvidencePackageRequest,
 )
 from app.services.impersonation.scanner import run_scan_for_rule
 from app.utils.sanitize import sanitize_string
@@ -688,3 +706,502 @@ async def impersonation_status(
         "findings_count": int(findings_count),
         "pending_takedowns": int(pending_takedowns),
     }
+
+
+# ── Phase 2 Endpoints ─────────────────────────────────────────────────────────
+
+# ── Alert Rules ───────────────────────────────────────────────────────────────
+
+@router.get("/alert-rules", response_model=list[AlertRuleOut])
+async def list_alert_rules(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    rows = (await db.execute(select(AlertRule).order_by(desc(AlertRule.created_at)))).scalars().all()
+    return rows
+
+
+@router.post("/alert-rules", response_model=AlertRuleOut, status_code=201)
+async def create_alert_rule(
+    body: AlertRuleCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rule = AlertRule(
+        name=_sanitize_text(body.name, 200),
+        description=_sanitize_text(body.description, 2000),
+        match_module=_sanitize_text(body.match_module or "", 10) or None,
+        match_finding_type=_sanitize_text(body.match_finding_type or "", 50) or None,
+        min_threat_score=body.min_threat_score,
+        channels_json=body.channels_json or "[]",
+        active=body.active,
+        created_by=current_user.id,
+    )
+    db.add(rule)
+    await db.commit()
+    await db.refresh(rule)
+    return rule
+
+
+@router.get("/alert-rules/{rule_id}", response_model=AlertRuleOut)
+async def get_alert_rule(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(AlertRule).where(AlertRule.id == rule_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Alert rule not found")
+    return row
+
+
+@router.put("/alert-rules/{rule_id}", response_model=AlertRuleOut)
+async def update_alert_rule(
+    rule_id: int,
+    body: AlertRuleUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(AlertRule).where(AlertRule.id == rule_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Alert rule not found")
+    if body.name is not None:
+        row.name = _sanitize_text(body.name, 200)
+    if body.description is not None:
+        row.description = _sanitize_text(body.description, 2000)
+    if body.match_module is not None:
+        row.match_module = _sanitize_text(body.match_module, 10) or None
+    if body.match_finding_type is not None:
+        row.match_finding_type = _sanitize_text(body.match_finding_type, 50) or None
+    if body.min_threat_score is not None:
+        row.min_threat_score = body.min_threat_score
+    if body.channels_json is not None:
+        row.channels_json = body.channels_json
+    if body.active is not None:
+        row.active = body.active
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/alert-rules/{rule_id}", status_code=204)
+async def delete_alert_rule(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(AlertRule).where(AlertRule.id == rule_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Alert rule not found")
+    await db.delete(row)
+    await db.commit()
+
+
+# ── UDRP Evidence Package ─────────────────────────────────────────────────────
+
+@router.post("/takedowns/{takedown_id}/generate-evidence-package")
+async def generate_evidence_package(
+    takedown_id: int,
+    body: EvidencePackageRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Generate a UDRP evidence package for the given takedown request."""
+    takedown = await _get_takedown_or_404(db, takedown_id)
+    from app.services.impersonation.evidence_generator import build_evidence_package
+    package = await build_evidence_package(
+        takedown_id=takedown.id,
+        include_screenshot=body.include_screenshot,
+        include_whois=body.include_whois,
+        include_dns=body.include_dns,
+        include_archive=body.include_archive,
+        narrative=_sanitize_text(body.narrative, 5000),
+    )
+    return package
+
+
+# ── Threat Actors ─────────────────────────────────────────────────────────────
+
+@router.get("/threat-actors", response_model=list[ThreatActorOut])
+async def list_threat_actors(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    rows = (await db.execute(select(ThreatActor).order_by(desc(ThreatActor.last_seen)))).scalars().all()
+    return rows
+
+
+@router.post("/threat-actors", response_model=ThreatActorOut, status_code=201)
+async def create_threat_actor(
+    body: ThreatActorCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    actor = ThreatActor(
+        name=_sanitize_text(body.name, 200),
+        description=_sanitize_text(body.description, 2000),
+        country_of_origin=_sanitize_text(body.country_of_origin, 100),
+        known_aliases_json=_json_dump(body.known_aliases),
+        attack_patterns_json=_json_dump(body.attack_patterns),
+        registrar_names_json=_json_dump(body.registrar_names),
+        hosting_asns_json=_json_dump(body.hosting_asns),
+        registrant_emails_json=_json_dump(body.registrant_emails),
+        payment_gateways_json=_json_dump(body.payment_gateways),
+        linked_finding_ids_json=_json_dump(body.linked_finding_ids),
+    )
+    db.add(actor)
+    await db.commit()
+    await db.refresh(actor)
+    return actor
+
+
+@router.get("/threat-actors/{actor_id}", response_model=ThreatActorOut)
+async def get_threat_actor(
+    actor_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ThreatActor).where(ThreatActor.id == actor_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Threat actor not found")
+    return row
+
+
+@router.put("/threat-actors/{actor_id}", response_model=ThreatActorOut)
+async def update_threat_actor(
+    actor_id: int,
+    body: ThreatActorUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ThreatActor).where(ThreatActor.id == actor_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Threat actor not found")
+    if body.name is not None:
+        row.name = _sanitize_text(body.name, 200)
+    if body.description is not None:
+        row.description = _sanitize_text(body.description, 2000)
+    if body.country_of_origin is not None:
+        row.country_of_origin = _sanitize_text(body.country_of_origin, 100)
+    if body.known_aliases is not None:
+        row.known_aliases_json = _json_dump(body.known_aliases)
+    if body.attack_patterns is not None:
+        row.attack_patterns_json = _json_dump(body.attack_patterns)
+    if body.registrar_names is not None:
+        row.registrar_names_json = _json_dump(body.registrar_names)
+    if body.hosting_asns is not None:
+        row.hosting_asns_json = _json_dump(body.hosting_asns)
+    if body.registrant_emails is not None:
+        row.registrant_emails_json = _json_dump(body.registrant_emails)
+    if body.payment_gateways is not None:
+        row.payment_gateways_json = _json_dump(body.payment_gateways)
+    if body.linked_finding_ids is not None:
+        row.linked_finding_ids_json = _json_dump(body.linked_finding_ids)
+    row.last_seen = _utcnow()
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/threat-actors/{actor_id}", status_code=204)
+async def delete_threat_actor(
+    actor_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ThreatActor).where(ThreatActor.id == actor_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Threat actor not found")
+    await db.delete(row)
+    await db.commit()
+
+
+@router.post("/threat-actors/{actor_id}/correlate")
+async def correlate_threat_actor(
+    actor_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Run infrastructure correlation: match all findings against this actor."""
+    row = (await db.execute(select(ThreatActor).where(ThreatActor.id == actor_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Threat actor not found")
+    from app.services.impersonation.threat_actor_correlator import correlate_finding, link_finding_to_actor
+    findings = (await db.execute(select(ImpersonationFinding))).scalars().all()
+    linked = []
+    for f in findings:
+        matches = await correlate_finding(f.id, db=db)
+        if any(actor_id == aid for aid, _ in matches):
+            await link_finding_to_actor(f.id, actor_id, db=db)
+            linked.append(f.id)
+    return {"actor_id": actor_id, "linked_finding_ids": linked}
+
+
+# ── Threat Actor Profiles ─────────────────────────────────────────────────────
+
+@router.post("/threat-actors/{actor_id}/profile", response_model=ThreatActorProfileOut, status_code=201)
+async def create_threat_actor_profile(
+    actor_id: int,
+    body: ThreatActorProfileCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ThreatActor).where(ThreatActor.id == actor_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Threat actor not found")
+    existing = (await db.execute(select(ThreatActorProfile).where(ThreatActorProfile.actor_id == actor_id))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="Profile already exists for this actor; use PUT to update")
+    profile = ThreatActorProfile(
+        actor_id=actor_id,
+        notes=_sanitize_text(body.notes, 5000),
+        motivation=_sanitize_text(body.motivation, 200),
+        sophistication=_sanitize_text(body.sophistication, 50),
+        target_sectors_json=_json_dump(body.target_sectors),
+        ioc_json=_json_dump(body.ioc),
+        tlp_level=_sanitize_text(body.tlp_level, 10),
+    )
+    db.add(profile)
+    await db.commit()
+    await db.refresh(profile)
+    return profile
+
+
+@router.get("/threat-actors/{actor_id}/profile", response_model=ThreatActorProfileOut)
+async def get_threat_actor_profile(
+    actor_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ThreatActorProfile).where(ThreatActorProfile.actor_id == actor_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return row
+
+
+@router.put("/threat-actors/{actor_id}/profile", response_model=ThreatActorProfileOut)
+async def update_threat_actor_profile(
+    actor_id: int,
+    body: ThreatActorProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ThreatActorProfile).where(ThreatActorProfile.actor_id == actor_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if body.notes is not None:
+        row.notes = _sanitize_text(body.notes, 5000)
+    if body.motivation is not None:
+        row.motivation = _sanitize_text(body.motivation, 200)
+    if body.sophistication is not None:
+        row.sophistication = _sanitize_text(body.sophistication, 50)
+    if body.target_sectors is not None:
+        row.target_sectors_json = _json_dump(body.target_sectors)
+    if body.ioc is not None:
+        row.ioc_json = _json_dump(body.ioc)
+    if body.tlp_level is not None:
+        row.tlp_level = _sanitize_text(body.tlp_level, 10)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+# ── Legal Tasks ───────────────────────────────────────────────────────────────
+
+@router.get("/legal-tasks", response_model=list[LegalTaskOut])
+async def list_legal_tasks(
+    status: Optional[str] = Query(None),
+    task_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    stmt = select(LegalTask)
+    if status:
+        stmt = stmt.where(LegalTask.status == _sanitize_text(status, 30))
+    if task_type:
+        stmt = stmt.where(LegalTask.task_type == _sanitize_text(task_type, 50))
+    rows = (await db.execute(stmt.order_by(desc(LegalTask.created_at)))).scalars().all()
+    return rows
+
+
+@router.post("/legal-tasks", response_model=LegalTaskOut, status_code=201)
+async def create_legal_task(
+    body: LegalTaskCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = LegalTask(
+        finding_id=body.finding_id,
+        takedown_id=body.takedown_id,
+        task_type=_sanitize_text(body.task_type, 50),
+        title=_sanitize_text(body.title, 300),
+        description=_sanitize_text(body.description, 5000),
+        status=_sanitize_text(body.status, 30),
+        due_date=body.due_date,
+        assigned_to=body.assigned_to,
+        external_ref=_sanitize_text(body.external_ref, 300),
+        notes=_sanitize_text(body.notes, 5000),
+        created_by=current_user.id,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    return task
+
+
+@router.get("/legal-tasks/{task_id}", response_model=LegalTaskOut)
+async def get_legal_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(LegalTask).where(LegalTask.id == task_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Legal task not found")
+    return row
+
+
+@router.put("/legal-tasks/{task_id}", response_model=LegalTaskOut)
+async def update_legal_task(
+    task_id: int,
+    body: LegalTaskUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(LegalTask).where(LegalTask.id == task_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Legal task not found")
+    for field, max_len in [
+        ("task_type", 50), ("title", 300), ("description", 5000),
+        ("status", 30), ("external_ref", 300), ("notes", 5000),
+    ]:
+        val = getattr(body, field, None)
+        if val is not None:
+            setattr(row, field, _sanitize_text(val, max_len))
+    if body.due_date is not None:
+        row.due_date = body.due_date
+    if body.assigned_to is not None:
+        row.assigned_to = body.assigned_to
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/legal-tasks/{task_id}", status_code=204)
+async def delete_legal_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(LegalTask).where(LegalTask.id == task_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Legal task not found")
+    await db.delete(row)
+    await db.commit()
+
+
+# ── SLA ───────────────────────────────────────────────────────────────────────
+
+@router.get("/slas", response_model=list[ServiceLevelAgreementOut])
+async def list_slas(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    rows = (await db.execute(select(ServiceLevelAgreement).order_by(ServiceLevelAgreement.name))).scalars().all()
+    return rows
+
+
+@router.post("/slas", response_model=ServiceLevelAgreementOut, status_code=201)
+async def create_sla(
+    body: ServiceLevelAgreementCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    sla = ServiceLevelAgreement(
+        name=_sanitize_text(body.name, 200),
+        description=_sanitize_text(body.description, 2000),
+        match_module=_sanitize_text(body.match_module or "", 10) or None,
+        match_severity=_sanitize_text(body.match_severity or "", 20) or None,
+        time_to_detect_min=body.time_to_detect_min,
+        time_to_triage_min=body.time_to_triage_min,
+        time_to_takedown_min=body.time_to_takedown_min,
+        time_to_resolve_min=body.time_to_resolve_min,
+        active=body.active,
+    )
+    db.add(sla)
+    await db.commit()
+    await db.refresh(sla)
+    return sla
+
+
+@router.get("/slas/{sla_id}", response_model=ServiceLevelAgreementOut)
+async def get_sla(
+    sla_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ServiceLevelAgreement).where(ServiceLevelAgreement.id == sla_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="SLA not found")
+    return row
+
+
+@router.put("/slas/{sla_id}", response_model=ServiceLevelAgreementOut)
+async def update_sla(
+    sla_id: int,
+    body: ServiceLevelAgreementUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ServiceLevelAgreement).where(ServiceLevelAgreement.id == sla_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="SLA not found")
+    if body.name is not None:
+        row.name = _sanitize_text(body.name, 200)
+    if body.description is not None:
+        row.description = _sanitize_text(body.description, 2000)
+    if body.match_module is not None:
+        row.match_module = _sanitize_text(body.match_module, 10) or None
+    if body.match_severity is not None:
+        row.match_severity = _sanitize_text(body.match_severity, 20) or None
+    for field in ("time_to_detect_min", "time_to_triage_min", "time_to_takedown_min", "time_to_resolve_min"):
+        val = getattr(body, field, None)
+        if val is not None:
+            setattr(row, field, val)
+    if body.active is not None:
+        row.active = body.active
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/slas/{sla_id}", status_code=204)
+async def delete_sla(
+    sla_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    row = (await db.execute(select(ServiceLevelAgreement).where(ServiceLevelAgreement.id == sla_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="SLA not found")
+    await db.delete(row)
+    await db.commit()
+
+
+# ── Audit Log ─────────────────────────────────────────────────────────────────
+
+@router.get("/audit-log", response_model=list[AuditLogEntryOut])
+async def list_audit_log(
+    entity_type: Optional[str] = Query(None),
+    entity_id: Optional[int] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    stmt = select(AuditLogEntry)
+    if entity_type:
+        stmt = stmt.where(AuditLogEntry.entity_type == _sanitize_text(entity_type, 50))
+    if entity_id is not None:
+        stmt = stmt.where(AuditLogEntry.entity_id == entity_id)
+    rows = (await db.execute(stmt.order_by(desc(AuditLogEntry.created_at)).limit(limit))).scalars().all()
+    return rows
