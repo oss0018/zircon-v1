@@ -1,8 +1,9 @@
 """
 Impersonation Monitoring Scanner — orchestrates M1–M8 sub-scanners.
-Each sub-scanner is a stub: it logs a warning about missing integration
-and returns an empty list. Real implementations can be dropped in.
+Each sub-scanner is a stub or a Phase-1 implementation; modules without an
+integration log an info message and return an empty list.
 """
+import asyncio
 import json
 import hashlib
 import logging
@@ -184,12 +185,116 @@ async def _scan_m2_apps(rule: dict) -> list:
 
 
 async def _scan_m3_email(rule: dict) -> list:
-    """M3: Corporate Email & CEO Fraud Protection — stub."""
-    logger.info(
-        "[IMP M3] Email/DMARC scan stub for '%s'. Install checkdmarc to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    """M3: Corporate Email & CEO Fraud Protection — DMARC/SPF posture check.
+
+    For every official domain on the rule, run an SPF + DMARC DNS lookup.
+    Emit a finding when DMARC is missing, set to ``p=none``, or SPF is missing.
+    Requires the ``checkdmarc`` package; if unavailable the scan is skipped.
+    """
+    domains = [d for d in (rule.get("official_domains") or []) if d]
+    if not domains:
+        return []
+
+    try:
+        import checkdmarc  # type: ignore
+    except ImportError:
+        logger.info(
+            "[IMP M3] checkdmarc is not installed; M3 email scan skipped for '%s'.",
+            rule["brand_name"],
+        )
+        return []
+
+    findings: list[dict] = []
+    for domain in domains:
+        try:
+            result = await asyncio.to_thread(
+                checkdmarc.check_domains, [domain], skip_tls=True
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[IMP M3] checkdmarc failed for %s: %s", domain, exc)
+            continue
+
+        if isinstance(result, list):
+            entry = result[0] if result else {}
+        elif isinstance(result, dict):
+            entry = result
+        else:
+            entry = {}
+
+        dmarc_info = entry.get("dmarc") or {}
+        spf_info = entry.get("spf") or {}
+        dmarc_record = dmarc_info.get("record") if isinstance(dmarc_info, dict) else None
+        spf_record = spf_info.get("record") if isinstance(spf_info, dict) else None
+        dmarc_tags = (
+            (dmarc_info.get("tags") or {}) if isinstance(dmarc_info, dict) else {}
+        )
+        policy = ""
+        if isinstance(dmarc_tags, dict):
+            policy_tag = dmarc_tags.get("p")
+            if isinstance(policy_tag, dict):
+                policy = str(policy_tag.get("value") or "").lower()
+            elif isinstance(policy_tag, str):
+                policy = policy_tag.lower()
+
+        if not dmarc_record:
+            findings.append(
+                {
+                    "module": "m3",
+                    "platform": "email",
+                    "finding_type": "missing_dmarc",
+                    "target_url": f"https://{domain}",
+                    "target_identifier": domain,
+                    "display_name": domain,
+                    "description": (
+                        f"Domain '{domain}' has no DMARC record. Spoofing protection is absent; "
+                        "attackers can send email impersonating this domain."
+                    ),
+                    "threat_score": 70,
+                    "signals": ["dmarc_missing"],
+                    "evidence": {"dmarc": dmarc_info, "spf": spf_info},
+                }
+            )
+            continue
+
+        if policy in ("none", ""):
+            findings.append(
+                {
+                    "module": "m3",
+                    "platform": "email",
+                    "finding_type": "weak_dmarc",
+                    "target_url": f"https://{domain}",
+                    "target_identifier": domain,
+                    "display_name": domain,
+                    "description": (
+                        f"Domain '{domain}' publishes DMARC with p={policy or 'unset'}; "
+                        "messages failing DMARC are not quarantined or rejected."
+                    ),
+                    "threat_score": 40,
+                    "signals": ["dmarc_policy_none"],
+                    "evidence": {"dmarc": dmarc_info, "spf": spf_info},
+                }
+            )
+
+        if not spf_record:
+            findings.append(
+                {
+                    "module": "m3",
+                    "platform": "email",
+                    "finding_type": "missing_spf",
+                    "target_url": f"https://{domain}",
+                    "target_identifier": f"spf:{domain}",
+                    "display_name": domain,
+                    "description": (
+                        f"Domain '{domain}' has no SPF record. Receivers cannot verify which "
+                        "hosts are authorised to send email on its behalf."
+                    ),
+                    "threat_score": 50,
+                    "signals": ["spf_missing"],
+                    "evidence": {"spf": spf_info},
+                }
+            )
+
+    return findings
 
 
 async def _scan_m5_executive(rule: dict) -> list:
@@ -217,9 +322,74 @@ async def _scan_m7_vip(rule: dict) -> list:
 
 
 async def _scan_m8_domains(rule: dict) -> list:
-    """M8: Preventive Domain Takedown (NRD feed) — stub."""
-    logger.info(
-        "[IMP M8] Domain takedown scan stub for '%s'. NRD feed integration required for real detection.",
-        rule["brand_name"],
-    )
-    return []
+    """M8: Preventive Domain Takedown — fuzzy-match newly registered domains.
+
+    Pulls the daily NRD feed via the existing ``app.services.lookalike.nrd_feed``
+    and emits a finding for every domain whose token similarity to the brand
+    name is above ``rule['min_impersonation_score']`` (capped at 95 to avoid
+    duplicating exact official domains, which are filtered out explicitly).
+    """
+    brand = (rule.get("brand_name") or "").strip().lower()
+    if not brand:
+        return []
+
+    official = {
+        str(d).strip().lower()
+        for d in (rule.get("official_domains") or [])
+        if str(d).strip()
+    }
+
+    try:
+        from app.services.lookalike.nrd_feed import fetch_nrd_domains
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M8] Could not import NRD feed module: %s", exc)
+        return []
+
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        logger.info("[IMP M8] rapidfuzz not installed; M8 domain scan skipped.")
+        return []
+
+    try:
+        domains = await fetch_nrd_domains()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M8] fetch_nrd_domains failed: %s", exc)
+        return []
+
+    threshold = max(int(rule.get("min_impersonation_score") or 40), 1)
+    findings: list[dict] = []
+
+    for fqdn in domains:
+        if not fqdn or fqdn in official:
+            continue
+        # Compare against the SLD only (drop the TLD); use ratio + token_set_ratio
+        # against a hyphen-split form so brand-as-token is detected without
+        # over-matching short brand names.
+        sld = fqdn.split(".")[0] if "." in fqdn else fqdn
+        sld_tokens = sld.replace("-", " ")
+        score = max(
+            fuzz.ratio(brand, sld),
+            fuzz.token_set_ratio(brand, sld_tokens),
+        )
+        if score < threshold:
+            continue
+        findings.append(
+            {
+                "module": "m8",
+                "platform": "nrd",
+                "finding_type": "suspicious_domain",
+                "target_url": f"http://{fqdn}",
+                "target_identifier": fqdn,
+                "display_name": fqdn,
+                "description": (
+                    f"Newly-registered domain '{fqdn}' resembles brand '{rule['brand_name']}' "
+                    f"(similarity {int(score)})."
+                ),
+                "threat_score": min(int(score), 95),
+                "signals": ["nrd_similarity", f"score:{int(score)}"],
+                "evidence": {"feed": "whoisds", "similarity": int(score)},
+            }
+        )
+
+    return findings

@@ -35,3 +35,4 @@ praw>=7.7.1
 langdetect>=1.0.9
 telethon>=1.36.0
 tweepy>=4.14.0
+checkdmarc>=4.4.0

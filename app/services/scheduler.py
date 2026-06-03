@@ -196,6 +196,34 @@ def start_scheduler():
         except Exception as exc:
             print(f"[scheduler] Watch mode scheduler error: {exc}")
 
+    async def _run_impersonation_scans():
+        """Run Impersonation Monitoring (TS-IMP-001) rules whose schedule is due."""
+        try:
+            from app.database import AsyncSessionLocal
+            from app.models import ImpersonationRule
+            from app.services.impersonation.scanner import run_scan_for_rule
+            from sqlalchemy import select
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(ImpersonationRule).where(ImpersonationRule.active.is_(True))
+                )
+                rules = result.scalars().all()
+
+            for rule in rules:
+                if not _is_imp_rule_due(rule):
+                    continue
+                try:
+                    summary = await run_scan_for_rule(rule.id)
+                    new_total = sum(int(v.get("new_findings", 0)) for v in summary.values())
+                    print(
+                        f"[scheduler] Impersonation rule {rule.id}: new_findings={new_total}"
+                    )
+                except Exception as exc:
+                    print(f"[scheduler] Impersonation rule {rule.id} error: {exc}")
+        except Exception as exc:
+            print(f"[scheduler] Impersonation scheduler error: {exc}")
+
     _scheduler.add_job(_scan_monitored, IntervalTrigger(minutes=15), id="scan_monitored", replace_existing=True, max_instances=1, misfire_grace_time=60)
     _scheduler.add_job(_scan_all_watched_folders, IntervalTrigger(minutes=8), id="scan_watched_folders", replace_existing=True, max_instances=1, misfire_grace_time=60)
     _scheduler.add_job(
@@ -237,6 +265,14 @@ def start_scheduler():
         replace_existing=True,
         max_instances=1,
         misfire_grace_time=3600,
+    )
+    _scheduler.add_job(
+        _run_impersonation_scans,
+        IntervalTrigger(minutes=15),
+        id="run_impersonation_scans",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=300,
     )
     _scheduler.start()
     print("[scheduler] Started. Monitored dir scan every 15 minutes. Watched folder scan every 8 minutes. Storage sources are evaluated every 11 minutes. Monitoring jobs are evaluated every 6 minutes. Social listening rules are evaluated every 15 minutes.")
@@ -286,3 +322,41 @@ def stop_scheduler():
         _scheduler.shutdown(wait=False)
     except Exception:
         pass
+
+
+def _is_imp_rule_due(rule) -> bool:
+    """Return True if an ImpersonationRule has not run within its cron interval.
+
+    Supports the cron forms produced by the Impersonation Monitoring UI:
+    ``"0 */N * * *"``, ``"*/N * * * *"``, ``"0 H * * *"`` and the named
+    aliases ``@hourly`` / ``@daily`` / ``@weekly``. Anything unparseable
+    falls back to a 6-hour interval.
+    """
+    from datetime import datetime, timezone
+    import re
+
+    if rule is None:
+        return False
+    if rule.last_scan_at is None:
+        return True
+
+    schedule = (getattr(rule, "schedule_cron", "") or "").strip().lower()
+    _NAMED = {"@hourly": 60, "@daily": 1440, "@weekly": 10080}
+
+    if schedule in _NAMED:
+        interval_minutes = _NAMED[schedule]
+    else:
+        interval_minutes = 360  # default: 6 hours
+        parts = schedule.split()
+        if len(parts) >= 2:
+            minute_field, hour_field = parts[0], parts[1]
+            mm = re.match(r"\*/(\d+)$", minute_field)
+            hh = re.match(r"\*/(\d+)$", hour_field)
+            if mm and minute_field != "0":
+                interval_minutes = int(mm.group(1))
+            elif hh:
+                interval_minutes = int(hh.group(1)) * 60
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    elapsed = (now - rule.last_scan_at).total_seconds() / 60
+    return elapsed >= interval_minutes
