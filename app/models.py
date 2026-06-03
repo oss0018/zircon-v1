@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, ForeignKey, BigInteger, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, ForeignKey, BigInteger, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -934,3 +934,139 @@ class AuditLogEntry(Base):
     ip_address = Column(String(45), nullable=True)
     notes = Column(Text, default="")
     created_at = Column(DateTime, default=_utcnow)
+
+
+# ── Threat Intelligence (TS-CTI-001 v1.0 MVP) ────────────────────────────────
+
+class CTIIndicator(Base):
+    __tablename__ = "cti_indicators"
+    __table_args__ = (
+        Index("ix_cti_indicators_value", "value"),
+        Index("ix_cti_indicators_ioc_type", "ioc_type"),
+        Index("ix_cti_indicators_severity", "severity"),
+        Index("ix_cti_indicators_score", "score"),
+        Index("ix_cti_indicators_false_positive", "is_false_positive"),
+    )
+    id = Column(Integer, primary_key=True)
+    value = Column(String(512), nullable=False)
+    ioc_type = Column(String(30), nullable=False, default="general")
+    source = Column(String(100), default="")
+    score = Column(Integer, default=0)
+    severity = Column(String(12), default="LOW")
+    country_code = Column(String(8), default="")
+    actor_names = Column(Text, default="[]")
+    tags_json = Column(Text, default="[]")
+    metadata_json = Column(Text, default="{}")
+    stix_json = Column(Text, default="{}")
+    tlp = Column(String(20), default="TLP:CLEAR")
+    is_false_positive = Column(Boolean, default=False)
+    false_positive_reason = Column(Text, nullable=True)
+    first_seen_at = Column(DateTime, default=_utcnow)
+    last_seen_at = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class CTIActor(Base):
+    __tablename__ = "cti_actors"
+    __table_args__ = (
+        Index("ix_cti_actors_name", "name"),
+        Index("ix_cti_actors_mitre_group_id", "mitre_group_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    aliases = Column(Text, default="[]")
+    mitre_group_id = Column(String(30), default="")
+    techniques = Column(Text, default="[]")
+    software = Column(Text, default="[]")
+    stix_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class CTITechnique(Base):
+    __tablename__ = "cti_techniques"
+    __table_args__ = (
+        UniqueConstraint("technique_id", name="uq_cti_techniques_technique_id"),
+        Index("ix_cti_techniques_technique_id", "technique_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    technique_id = Column(String(32), nullable=False)
+    name = Column(String(255), nullable=False)
+    tactics = Column(Text, default="[]")
+    stix_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class CTISIEMMatch(Base):
+    __tablename__ = "cti_siem_matches"
+    __table_args__ = (
+        Index("ix_cti_siem_matches_indicator_id", "indicator_id"),
+        Index("ix_cti_siem_matches_severity", "severity"),
+        Index("ix_cti_siem_matches_created_at", "created_at"),
+    )
+    id = Column(Integer, primary_key=True)
+    indicator_id = Column(Integer, ForeignKey("cti_indicators.id"), nullable=False)
+    indicator_value = Column(String(512), nullable=False)
+    severity = Column(String(12), nullable=False, default="LOW")
+    sentinel_alert_id = Column(String(128), default="")
+    matched_rule = Column(String(255), default="")
+    raw_payload = Column(Text, default="{}")
+    dispatched_channels = Column(Text, default="[]")
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class CTIVulnIntel(Base):
+    __tablename__ = "cti_vuln_intel"
+    __table_args__ = (
+        Index("ix_cti_vuln_intel_cve", "cve"),
+        Index("ix_cti_vuln_intel_epss", "epss"),
+        Index("ix_cti_vuln_intel_kev", "is_cisa_kev"),
+    )
+    id = Column(Integer, primary_key=True)
+    cve = Column(String(64), nullable=False)
+    epss = Column(Float, default=0.0)
+    is_cisa_kev = Column(Boolean, default=False)
+    cvss = Column(Float, nullable=True)
+    vendor = Column(String(255), default="")
+    product = Column(String(255), default="")
+    summary = Column(Text, default="")
+    stix_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class CTIReport(Base):
+    __tablename__ = "cti_reports"
+    __table_args__ = (
+        Index("ix_cti_reports_title", "title"),
+        Index("ix_cti_reports_tlp", "tlp"),
+        Index("ix_cti_reports_created_at", "created_at"),
+    )
+    id = Column(Integer, primary_key=True)
+    title = Column(String(255), nullable=False)
+    summary = Column(Text, default="")
+    tlp = Column(String(20), default="TLP:CLEAR")
+    report_json = Column(Text, default="{}")
+    stix_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class CTISentinelCoverage(Base):
+    __tablename__ = "cti_sentinel_coverage"
+    __table_args__ = (
+        Index("ix_cti_sentinel_coverage_technique_id", "technique_id"),
+        Index("ix_cti_sentinel_coverage_state", "state"),
+        UniqueConstraint("technique_id", "actor_name", name="uq_cti_sentinel_coverage_technique_actor"),
+    )
+    id = Column(Integer, primary_key=True)
+    technique_id = Column(String(32), nullable=False)
+    actor_name = Column(String(255), default="")
+    has_sentinel_rule = Column(Boolean, default=False)
+    has_recent_activity = Column(Boolean, default=False)
+    state = Column(String(30), default="BLIND_SPOT")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)

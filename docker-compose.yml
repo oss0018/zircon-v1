@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    command: python start.py
+    env_file:
+      - .env
+    ports:
+      - "8181:8181"
+      - "8443:8443"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  celery_cti:
+    build: .
+    command: celery -A app.services.cti.tasks.celery_app worker --loglevel=info -Q cti
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  cti_beat_scheduler:
+    build: .
+    command: celery -A app.services.cti.tasks.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  cti_telegram_monitor:
+    build: .
+    command: celery -A app.services.cti.tasks.celery_app worker --loglevel=info -Q cti_telegram
+    env_file:
+      - .env
+    depends_on:
+      - redis

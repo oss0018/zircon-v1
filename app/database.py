@@ -327,6 +327,83 @@ def _migrate_lookalike_domains(conn) -> None:
         logger.warning("Could not migrate lookalike_domains: %s", exc)
 
 
+def _migrate_cti_schema(conn) -> None:
+    """Ensure CTI MVP tables include expected columns on upgrades."""
+    from sqlalchemy import inspect, text
+
+    TABLE_COLS: dict[str, dict[str, str]] = {
+        "cti_indicators": {
+            "country_code": "VARCHAR(8) DEFAULT ''",
+            "actor_names": "TEXT DEFAULT '[]'",
+            "tags_json": "TEXT DEFAULT '[]'",
+            "metadata_json": "TEXT DEFAULT '{}'",
+            "stix_json": "TEXT DEFAULT '{}'",
+            "tlp": "VARCHAR(20) DEFAULT 'TLP:CLEAR'",
+            "is_false_positive": "BOOLEAN DEFAULT 0",
+            "false_positive_reason": "TEXT",
+            "first_seen_at": "DATETIME",
+            "last_seen_at": "DATETIME",
+            "updated_at": "DATETIME",
+        },
+        "cti_actors": {
+            "aliases": "TEXT DEFAULT '[]'",
+            "mitre_group_id": "VARCHAR(30) DEFAULT ''",
+            "techniques": "TEXT DEFAULT '[]'",
+            "software": "TEXT DEFAULT '[]'",
+            "stix_json": "TEXT DEFAULT '{}'",
+            "updated_at": "DATETIME",
+        },
+        "cti_techniques": {
+            "tactics": "TEXT DEFAULT '[]'",
+            "stix_json": "TEXT DEFAULT '{}'",
+            "updated_at": "DATETIME",
+        },
+        "cti_siem_matches": {
+            "sentinel_alert_id": "VARCHAR(128) DEFAULT ''",
+            "matched_rule": "VARCHAR(255) DEFAULT ''",
+            "raw_payload": "TEXT DEFAULT '{}'",
+            "dispatched_channels": "TEXT DEFAULT '[]'",
+        },
+        "cti_vuln_intel": {
+            "epss": "FLOAT DEFAULT 0",
+            "is_cisa_kev": "BOOLEAN DEFAULT 0",
+            "cvss": "FLOAT",
+            "vendor": "VARCHAR(255) DEFAULT ''",
+            "product": "VARCHAR(255) DEFAULT ''",
+            "summary": "TEXT DEFAULT ''",
+            "stix_json": "TEXT DEFAULT '{}'",
+            "updated_at": "DATETIME",
+        },
+        "cti_reports": {
+            "summary": "TEXT DEFAULT ''",
+            "tlp": "VARCHAR(20) DEFAULT 'TLP:CLEAR'",
+            "report_json": "TEXT DEFAULT '{}'",
+            "stix_json": "TEXT DEFAULT '{}'",
+            "updated_at": "DATETIME",
+        },
+        "cti_sentinel_coverage": {
+            "has_sentinel_rule": "BOOLEAN DEFAULT 0",
+            "has_recent_activity": "BOOLEAN DEFAULT 0",
+            "state": "VARCHAR(30) DEFAULT 'BLIND_SPOT'",
+            "notes": "TEXT DEFAULT ''",
+            "updated_at": "DATETIME",
+        },
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = set(inspector.get_table_names())
+        for table_name, cols in TABLE_COLS.items():
+            if table_name not in tables:
+                continue
+            existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+            for col_name, col_type in cols.items():
+                if col_name not in existing_cols:
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate CTI schema: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -348,3 +425,5 @@ async def init_db():
         await conn.run_sync(_migrate_lookalike_rules)
         # Add lookalike domain enrichment columns if upgrading from older version
         await conn.run_sync(_migrate_lookalike_domains)
+        # Ensure CTI MVP schema columns exist on upgrades
+        await conn.run_sync(_migrate_cti_schema)

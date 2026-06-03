@@ -35,6 +35,14 @@ KNOWN_SERVICES = [
     {"type": "ripestat", "name": "RIPEstat", "url": "https://stat.ripe.net"},
     {"type": "bgpview", "name": "BGPView", "url": "https://bgpview.io"},
     {"type": "grayhatwarfare", "name": "GrayhatWarfare", "url": "https://buckets.grayhatwarfare.com"},
+    {"type": "feodo_tracker", "name": "Feodo Tracker", "url": "https://feodotracker.abuse.ch"},
+    {"type": "cisa_kev", "name": "CISA KEV", "url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"},
+    {"type": "first_epss", "name": "FIRST EPSS", "url": "https://www.first.org/epss/"},
+    {"type": "mitre_attack", "name": "MITRE ATT&CK", "url": "https://attack.mitre.org"},
+    {"type": "greynoise", "name": "GreyNoise Community", "url": "https://viz.greynoise.io"},
+    {"type": "maxmind_geolite2", "name": "MaxMind GeoLite2", "url": "https://dev.maxmind.com/geoip/geolite2-free-geolocation-data"},
+    {"type": "whois_rdap", "name": "WHOIS / RDAP", "url": "https://www.iana.org/rdap"},
+    {"type": "sentinel", "name": "Microsoft Sentinel", "url": "https://learn.microsoft.com/azure/sentinel/"},
 ]
 
 
