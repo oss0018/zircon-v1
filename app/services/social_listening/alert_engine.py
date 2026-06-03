@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from sqlalchemy import select
@@ -89,4 +90,25 @@ class AlertEngine:
 
         for alert in alerts:
             db.add(alert)
+
+        if alerts:
+            from app.services.notifications import notify
+
+            alert_email = getattr(rule, "alert_email", "") or ""
+            alert_telegram = getattr(rule, "alert_telegram", "") or ""
+            if alert_email or alert_telegram:
+                titles = [a.title for a in alerts]
+                combined_title = titles[0] if len(titles) == 1 else f"{len(alerts)} alerts — {titles[0]}"
+                snippet = (mention.content_raw or "")[:300]
+                body_text = (
+                    f"Rule: {rule.name}\n"
+                    f"Platform: {mention.source_platform}\n"
+                    f"Severity: {mention.severity}\n"
+                    f"URL: {mention.source_url}\n\n"
+                    f"{snippet}"
+                )
+                try:
+                    asyncio.create_task(notify(combined_title, body_text, alert_email, alert_telegram))
+                except Exception:
+                    pass
         return alerts

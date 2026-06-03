@@ -245,6 +245,8 @@ class SocialListeningRule(Base):
     severity_threshold = Column(Integer, default=2)
     alert_on = Column(String(40), default="EVERY_MENTION")
     schedule_cron = Column(String(100), default="*/15 * * * *")
+    alert_email = Column(String(254), default="")
+    alert_telegram = Column(String(100), default="")
     store_all = Column(Boolean, default=False)
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=_utcnow)
@@ -819,4 +821,3 @@ class TakedownRequest(Base):
     notes = Column(Text, default="")
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
-
