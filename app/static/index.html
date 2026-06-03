@@ -1102,6 +1102,7 @@
                           <input class="form-input" :type="field.type" x-model="newSource.config[field.key]"
                                  :placeholder="field.placeholder || ''" autocomplete="off" />
                         </template>
+
                       </div>
                     </template>
                   </div>
@@ -6770,7 +6771,10 @@
                   <div>
                     <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0;">Social Listening</h2>
                   </div>
-                  <button class="btn btn-primary btn-sm" @click="openCreateRule()">+ New Rule</button>
+                  <div class="flex gap-2">
+                    <a class="btn btn-secondary btn-sm" href="/?page=logo-content-misuse">Logo Search</a>
+                    <button class="btn btn-primary btn-sm" @click="openCreateRule()">+ New Rule</button>
+                  </div>
                 </div>
 
                 <div class="card mb-4">
@@ -7035,8 +7039,9 @@
                         </div>
                         <div class="form-group">
                           <label class="form-label">Brand</label>
-                          <select class="form-input" x-model="ruleForm.brand_id">
+                          <select class="form-input" x-model="ruleForm.brand_id" @change="onRuleBrandChange()">
                             <option value="">— select brand —</option>
+                            <option value="__new__">＋ Add new brand</option>
                             <template x-for="b in brands" :key="'rb-' + b.id">
                               <option :value="b.id" x-text="b.name"></option>
                             </template>
@@ -7096,6 +7101,14 @@
                           <input class="form-input" x-model="ruleForm.schedule_cron" placeholder="*/15 * * * *" />
                         </div>
                         <div class="form-group">
+                          <label class="form-label">Alert Email</label>
+                          <input class="form-input" x-model="ruleForm.alert_email" placeholder="alerts@example.com" />
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Alert Telegram</label>
+                          <input class="form-input" x-model="ruleForm.alert_telegram" placeholder="@channel_or_chat_id" />
+                        </div>
+                        <div class="form-group">
                           <label class="form-label">Store all mentions</label>
                           <select class="form-input" x-model="ruleForm.store_all">
                             <option :value="false">false</option>
@@ -7113,6 +7126,36 @@
                       <div class="modal-footer">
                         <button class="btn btn-secondary" @click="showRuleModal = false">Cancel</button>
                         <button class="btn btn-primary" @click="saveRule()">Save</button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <template x-if="showQuickBrandModal">
+                  <div class="modal-overlay" @click.self="showQuickBrandModal = false">
+                    <div class="modal" style="max-width:460px;">
+                      <div class="modal-header">
+                        <div class="modal-title">Add new brand</div>
+                        <button class="modal-close" @click="showQuickBrandModal = false">&times;</button>
+                      </div>
+                      <div class="modal-body">
+                        <div class="form-group">
+                          <label class="form-label">Brand name</label>
+                          <input class="form-input" x-model="quickBrand.name" placeholder="Brand name" />
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Brand URL</label>
+                          <input class="form-input" x-model="quickBrand.url" placeholder="https://example.com" />
+                        </div>
+                        <template x-if="quickBrandError">
+                          <div class="alert alert-error" x-text="quickBrandError"></div>
+                        </template>
+                      </div>
+                      <div class="modal-footer">
+                        <button class="btn btn-secondary" @click="showQuickBrandModal = false">Cancel</button>
+                        <button class="btn btn-primary" @click="saveQuickBrand()" :disabled="quickBrandLoading">
+                          <span x-text="quickBrandLoading ? 'Saving…' : 'Save'"></span>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -7207,8 +7250,6 @@
                     <select class="form-input" style="width:130px;" x-model="filterMatchType" @change="loadCases()">
                       <option value="all">All Types</option>
                       <option value="logo">Logo</option>
-                      <option value="text">Text</option>
-                      <option value="domain">Domain</option>
                       <option value="manual">Manual</option>
                     </select>
                     <input class="form-input" style="flex:1;min-width:160px;" type="text"
@@ -7341,8 +7382,9 @@
                     <div class="modal-body">
                       <div class="form-group">
                         <label class="form-label">Brand</label>
-                        <select class="form-input" x-model="newCase.brand_id">
+                        <select class="form-input" x-model="newCase.brand_id" @change="onNewCaseBrandChange()">
                           <option value="">— select brand —</option>
+                          <option value="__new__">＋ Add new brand</option>
                           <template x-for="b in brands" :key="b.id">
                             <option :value="b.id" x-text="b.name"></option>
                           </template>
@@ -7361,8 +7403,6 @@
                         <label class="form-label">Match Type</label>
                         <select class="form-input" x-model="newCase.match_type">
                           <option value="logo">Logo</option>
-                          <option value="text">Text</option>
-                          <option value="domain">Domain</option>
                           <option value="manual">Manual</option>
                         </select>
                       </div>
@@ -7379,6 +7419,36 @@
                     <div class="modal-footer">
                       <button class="btn btn-secondary" @click="showAddModal = false">Cancel</button>
                       <button class="btn btn-primary" @click="createCase()">Add Case</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <template x-if="showQuickBrandModal">
+                <div class="modal-overlay" @click.self="showQuickBrandModal = false">
+                  <div class="modal" style="max-width:460px;">
+                    <div class="modal-header">
+                      <div class="modal-title">Add new brand</div>
+                      <button class="modal-close" @click="showQuickBrandModal = false">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                      <div class="form-group">
+                        <label class="form-label">Brand name</label>
+                        <input class="form-input" x-model="quickBrand.name" placeholder="Brand name" />
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label">Brand URL</label>
+                        <input class="form-input" x-model="quickBrand.url" placeholder="https://example.com" />
+                      </div>
+                      <template x-if="quickBrandError">
+                        <div class="alert alert-error" x-text="quickBrandError"></div>
+                      </template>
+                    </div>
+                    <div class="modal-footer">
+                      <button class="btn btn-secondary" @click="showQuickBrandModal = false">Cancel</button>
+                      <button class="btn btn-primary" @click="saveQuickBrand()" :disabled="quickBrandLoading">
+                        <span x-text="quickBrandLoading ? 'Saving…' : 'Save'"></span>
+                      </button>
                     </div>
                   </div>
                 </div>
