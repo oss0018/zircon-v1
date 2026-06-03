@@ -897,8 +897,7 @@ async def update_threat_actor(
         row.payment_gateways_json = _json_dump(body.payment_gateways)
     if body.linked_finding_ids is not None:
         row.linked_finding_ids_json = _json_dump(body.linked_finding_ids)
-    from datetime import datetime, timezone
-    row.last_seen = datetime.now(timezone.utc)
+    row.last_seen = _utcnow()
     await db.commit()
     await db.refresh(row)
     return row
