@@ -3,6 +3,7 @@ from typing import Optional, List, Any, Dict, Literal
 from datetime import datetime
 from pydantic_core import PydanticCustomError
 import html as _html
+import json
 
 
 def _sanitize(v: str, max_length: int = 2048) -> str:
@@ -870,3 +871,176 @@ class DashboardStats(BaseModel):
     unread_notifications: int
     recent_searches: List[Any] = []
     file_types: dict = {}
+
+# ── Impersonation Monitoring ────────────────────────────────────────────────────
+
+def _parse_json_list(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            parsed = [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+    return []
+
+
+class ImpersonationRuleCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    brand_id: Optional[int] = None
+    brand_name: str = Field(..., min_length=1, max_length=100)
+    brand_name_uk: str = ""
+    brand_name_ru: str = ""
+    official_domains: List[str] = []
+    official_developer_ids: List[str] = []
+    executive_names: List[str] = []
+    partner_domains: List[str] = []
+    trademark_name: str = ""
+    trademark_reg_no: str = ""
+    org_name: str = ""
+    contact_name: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    m1_social_enabled: bool = True
+    m2_apps_enabled: bool = True
+    m3_email_enabled: bool = True
+    m5_exec_enabled: bool = True
+    m6_ads_enabled: bool = True
+    m7_vip_enabled: bool = True
+    m8_domain_enabled: bool = True
+    social_platforms: List[str] = ["telegram", "instagram", "vk", "facebook"]
+    min_impersonation_score: int = Field(40, ge=0, le=100)
+    schedule_cron: str = "0 */6 * * *"
+    active: bool = True
+
+
+class ImpersonationRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    brand_name: Optional[str] = None
+    brand_name_uk: Optional[str] = None
+    brand_name_ru: Optional[str] = None
+    official_domains: Optional[List[str]] = None
+    official_developer_ids: Optional[List[str]] = None
+    executive_names: Optional[List[str]] = None
+    partner_domains: Optional[List[str]] = None
+    trademark_name: Optional[str] = None
+    trademark_reg_no: Optional[str] = None
+    org_name: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    m1_social_enabled: Optional[bool] = None
+    m2_apps_enabled: Optional[bool] = None
+    m3_email_enabled: Optional[bool] = None
+    m5_exec_enabled: Optional[bool] = None
+    m6_ads_enabled: Optional[bool] = None
+    m7_vip_enabled: Optional[bool] = None
+    m8_domain_enabled: Optional[bool] = None
+    social_platforms: Optional[List[str]] = None
+    min_impersonation_score: Optional[int] = Field(None, ge=0, le=100)
+    schedule_cron: Optional[str] = None
+    active: Optional[bool] = None
+
+
+class ImpersonationRuleOut(BaseModel):
+    id: int
+    brand_id: Optional[int]
+    name: str
+    brand_name: str
+    brand_name_uk: str
+    brand_name_ru: str
+    official_domains: List[str]
+    official_developer_ids: List[str]
+    executive_names: List[str]
+    partner_domains: List[str]
+    trademark_name: str
+    trademark_reg_no: str
+    org_name: str
+    contact_name: str
+    contact_email: str
+    contact_phone: str
+    m1_social_enabled: bool
+    m2_apps_enabled: bool
+    m3_email_enabled: bool
+    m5_exec_enabled: bool
+    m6_ads_enabled: bool
+    m7_vip_enabled: bool
+    m8_domain_enabled: bool
+    social_platforms: List[str]
+    min_impersonation_score: int
+    schedule_cron: str
+    active: bool
+    last_scan_at: Optional[datetime]
+    findings_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator("official_domains", "official_developer_ids", "executive_names", "partner_domains", "social_platforms", mode="before")
+    @classmethod
+    def parse_list_fields(cls, value):
+        return _parse_json_list(value)
+
+    model_config = {"from_attributes": True}
+
+
+class ImpersonationFindingOut(BaseModel):
+    id: int
+    rule_id: int
+    module: str
+    platform: str
+    finding_type: str
+    target_url: str
+    target_identifier: str
+    display_name: str
+    description: str
+    subscriber_count: Optional[int]
+    threat_score: int
+    signals_json: str
+    evidence_json: str
+    status: str
+    false_positive_reason: Optional[str]
+    reviewed_by: Optional[int]
+    reviewed_at: Optional[datetime]
+    fingerprint: str
+    first_seen: datetime
+    last_seen: datetime
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class ImpersonationFindingStatusUpdate(BaseModel):
+    status: Literal["new", "under_review", "takedown_requested", "resolved", "false_positive"]
+    false_positive_reason: Optional[str] = None
+
+
+class TakedownRequestCreate(BaseModel):
+    finding_id: int
+    notes: str = ""
+
+
+class TakedownRequestUpdate(BaseModel):
+    status: Optional[Literal["draft", "pending_review", "submitted", "resolved", "failed"]] = None
+    notes: Optional[str] = None
+
+
+class TakedownRequestOut(BaseModel):
+    id: int
+    finding_id: int
+    target_platform: str
+    target_url: str
+    cover_letter: str
+    submission_contact_json: str
+    status: str
+    submitted_at: Optional[datetime]
+    resolved_at: Optional[datetime]
+    submitted_by: Optional[int]
+    notes: str
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
