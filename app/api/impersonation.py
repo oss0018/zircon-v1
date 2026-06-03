@@ -451,7 +451,7 @@ async def update_finding_status(
 ):
     finding = await _get_finding_or_404(db, finding_id)
     if body.status == "false_positive" and not _sanitize_text(body.false_positive_reason, 1000):
-        raise HTTPException(status_code=400, detail="false_positive_reason is required for false positives")
+        raise HTTPException(status_code=400, detail="false_positive_reason cannot be empty or whitespace-only")
 
     finding.status = body.status
     finding.false_positive_reason = (

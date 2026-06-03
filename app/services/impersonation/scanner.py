@@ -64,7 +64,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 all_findings.extend(findings)
                 summary["m1"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
-                logger.error("[IMP] M1 scan error for rule %s: %s", rule_id, exc)
+                logger.error("[IMP M1] Scan error for rule %s: %s", rule_id, exc)
                 summary["m1"]["errors"] += 1
 
         if rule.m2_apps_enabled:
@@ -73,7 +73,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 all_findings.extend(findings)
                 summary["m2"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
-                logger.error("[IMP] M2 scan error for rule %s: %s", rule_id, exc)
+                logger.error("[IMP M2] Scan error for rule %s: %s", rule_id, exc)
                 summary["m2"]["errors"] += 1
 
         if rule.m3_email_enabled:
@@ -82,7 +82,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 all_findings.extend(findings)
                 summary["m3"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
-                logger.error("[IMP] M3 scan error for rule %s: %s", rule_id, exc)
+                logger.error("[IMP M3] Scan error for rule %s: %s", rule_id, exc)
                 summary["m3"]["errors"] += 1
 
         if rule.m5_exec_enabled:
@@ -91,7 +91,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 all_findings.extend(findings)
                 summary["m5"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
-                logger.error("[IMP] M5 scan error for rule %s: %s", rule_id, exc)
+                logger.error("[IMP M5] Scan error for rule %s: %s", rule_id, exc)
                 summary["m5"]["errors"] += 1
 
         if rule.m6_ads_enabled:
@@ -100,7 +100,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 all_findings.extend(findings)
                 summary["m6"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
-                logger.error("[IMP] M6 scan error for rule %s: %s", rule_id, exc)
+                logger.error("[IMP M6] Scan error for rule %s: %s", rule_id, exc)
                 summary["m6"]["errors"] += 1
 
         if rule.m7_vip_enabled:
@@ -109,7 +109,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 all_findings.extend(findings)
                 summary["m7"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
-                logger.error("[IMP] M7 scan error for rule %s: %s", rule_id, exc)
+                logger.error("[IMP M7] Scan error for rule %s: %s", rule_id, exc)
                 summary["m7"]["errors"] += 1
 
         if rule.m8_domain_enabled:
@@ -118,7 +118,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 all_findings.extend(findings)
                 summary["m8"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
-                logger.error("[IMP] M8 scan error for rule %s: %s", rule_id, exc)
+                logger.error("[IMP M8] Scan error for rule %s: %s", rule_id, exc)
                 summary["m8"]["errors"] += 1
 
         for finding_payload in all_findings:
