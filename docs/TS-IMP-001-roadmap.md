@@ -1,6 +1,297 @@
 # TS-IMP-001 Impersonation Monitoring — Status & Roadmap
 
 > **Generated:** 2026-06-03  
+> **Spec version:** TS-IMP-001 v2.0 (Phase 2 complete)  
+> **Module prefix:** `Brand Protection › Impersonation Monitoring`
+
+---
+
+## Executive Summary
+
+The Impersonation Monitoring backbone is **fully scaffolded through Phase 2**. Phase 1 delivered 3 database models, 16 REST API endpoints, a 4-tab Alpine.js frontend, M3 DMARC/SPF live scanning, and M8 NRD fuzzy domain detection. **Phase 2** has now been layered on top, adding 6 new database models, 7 new scanner stubs, 3 new service modules, 20+ new API endpoints, and 4 new frontend tabs — all passing a 34-test suite with zero regressions.
+
+The system boots cleanly, all tables auto-create, and every Phase 2 feature is accessible through the UI. The next phase is plugging real API calls into the Phase 2 scanner stubs.
+
+---
+
+## 1. Phase 1 Implementation Status (Baseline)
+
+### 1.1 Database Layer — Phase 1
+
+| File | Status | Notes |
+|------|--------|-------|
+| `app/models.py` | ✅ Complete | `ImpersonationRule`, `ImpersonationFinding`, `TakedownRequest` |
+| `app/database.py` | ✅ Complete | `Base.metadata.create_all` auto-creates tables on startup |
+
+### 1.2 REST API — Phase 1 (`/api/v1/impersonation`)
+
+| Endpoint | Method | Status |
+|----------|--------|--------|
+| `/rules` | GET/POST | ✅ |
+| `/rules/{id}` | GET/PUT/DELETE | ✅ |
+| `/rules/{id}/scan` | POST | ✅ |
+| `/findings` | GET | ✅ |
+| `/findings/export` | GET (CSV) | ✅ |
+| `/findings/{id}` | GET/PATCH | ✅ |
+| `/stats` | GET | ✅ |
+| `/takedowns` | GET/POST | ✅ |
+| `/takedowns/{id}` | GET/PATCH | ✅ |
+| `/status` | GET | ✅ |
+
+### 1.3 Scanner — Phase 1
+
+| Module | Status | Implementation |
+|--------|--------|---------------|
+| M1 Social | 🟡 Stub | Returns `[]`; needs Telethon + Apify |
+| M2 Apps | 🟡 Stub | Returns `[]`; needs google-play-scraper |
+| M3 Email | ✅ Live | `checkdmarc` DNS; detects missing DMARC, weak policy, missing SPF |
+| M4 Takedown | ✅ Live | Cover-letter generation in API |
+| M5 Executive | 🟡 Stub | Returns `[]`; `HIBPClient` already exists |
+| M6 Ads | 🟡 Stub | Returns `[]`; needs Google Ads Transparency |
+| M7 VIP | 🟡 Stub | Returns `[]`; can reuse lookalike similarity |
+| M8 Domains | ✅ Live | `rapidfuzz` token similarity vs NRD feed |
+
+### 1.4 Frontend — Phase 1
+
+| Tab | Status |
+|-----|--------|
+| Overview (stats, module breakdown, recent findings) | ✅ |
+| Findings (paginated table, filters, status actions) | ✅ |
+| Rules (CRUD modal, per-module toggles) | ✅ |
+| Takedowns (cover letter preview, status update) | ✅ |
+
+---
+
+## 2. Phase 2 Implementation Status ✅ NEW
+
+### 2.1 New Database Models — Phase 2
+
+Six new models added to `app/models.py` after `TakedownRequest`:
+
+| Model | Table | Purpose |
+|-------|-------|---------|
+| `AlertRule` | `impersonation_alert_rules` | Escalation rules: match module/type/score → Slack/PagerDuty/Teams/Telegram |
+| `LegalTask` | `impersonation_legal_tasks` | UDRP filings, C&D letters, trademark submissions |
+| `ThreatActor` | `impersonation_threat_actors` | Repeat offender infrastructure correlation |
+| `ThreatActorProfile` | `impersonation_threat_actor_profiles` | TLP-tagged actor notes, IOCs, target sectors |
+| `ServiceLevelAgreement` | `impersonation_slas` | SLA time targets by finding type/severity |
+| `AuditLogEntry` | `impersonation_audit_log` | Immutable audit trail of all state changes |
+
+### 2.2 New Pydantic Schemas — Phase 2
+
+Added to `app/schemas.py` after `TakedownRequestOut`:
+
+| Schema Group | Classes |
+|-------------|---------|
+| Alert Rules | `AlertRuleCreate`, `AlertRuleUpdate`, `AlertRuleOut` |
+| Legal Tasks | `LegalTaskCreate`, `LegalTaskUpdate`, `LegalTaskOut` |
+| Threat Actors | `ThreatActorCreate`, `ThreatActorUpdate`, `ThreatActorOut` |
+| Threat Actor Profiles | `ThreatActorProfileCreate`, `ThreatActorProfileUpdate`, `ThreatActorProfileOut` |
+| SLAs | `ServiceLevelAgreementCreate`, `ServiceLevelAgreementUpdate`, `ServiceLevelAgreementOut` |
+| Audit Log | `AuditLogEntryOut` |
+| Evidence Package | `EvidencePackageRequest` |
+
+### 2.3 New Scanner Stubs — Phase 2
+
+Added to `app/services/impersonation/scanner.py`:
+
+| Stub | Module | Integration |
+|------|--------|------------|
+| `_scan_m1_tiktok()` | M1 Social | TikTok API / Apify `clockworks/tiktok-scraper` |
+| `_scan_m1_linkedin()` | M1 Social | LinkedIn API / Apify `curious_coder/linkedin-company-search` |
+| `_scan_m1_youtube()` | M1 Social | YouTube Data API v3 (`YOUTUBE_API_KEY`) |
+| `_scan_m2_appstore()` | M2 Apps | App Store Connect API / `itunes-search` PyPI |
+| `_scan_m5_darkweb()` | M5 Executive | Tor/Stem + dark web monitoring / IntelX |
+| `_scan_m3_honeypot()` | M3 Email | SMTP catch-all + ML-based BEC detection |
+| `_scan_m3_inbound_headers()` | M3 Email | Microsoft Graph / Google Workspace API |
+
+All stubs are called by the orchestrator `run_scan_for_rule()` inside the appropriate module blocks.
+
+### 2.4 New Service Modules — Phase 2
+
+| File | Purpose | Key Functions |
+|------|---------|---------------|
+| `app/services/impersonation/alert_engine.py` | Dispatch alerts when findings match AlertRules | `dispatch_alerts()`, `_send_slack()`, `_send_pagerduty()`, `_send_teams()`, `_send_telegram()` |
+| `app/services/impersonation/evidence_generator.py` | UDRP evidence package builder | `build_evidence_package()`, `_urlscan_submit()`, `_whois_lookup()`, `_dns_resolve()`, `_archive_check()` |
+| `app/services/impersonation/threat_actor_correlator.py` | Correlate findings to ThreatActors via infrastructure signals | `correlate_finding()`, `link_finding_to_actor()`, `_extract_signals()`, `_score_overlap()` |
+
+### 2.5 New API Endpoints — Phase 2
+
+Added to `app/api/impersonation.py`:
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/alert-rules` | GET, POST | List / create alert rules |
+| `/alert-rules/{id}` | GET, PUT, DELETE | Single alert rule CRUD |
+| `/takedowns/{id}/generate-evidence-package` | POST | Build UDRP evidence package |
+| `/threat-actors` | GET, POST | List / create threat actors |
+| `/threat-actors/{id}` | GET, PUT, DELETE | Single threat actor CRUD |
+| `/threat-actors/{id}/correlate` | POST | Run infrastructure correlation |
+| `/threat-actors/{id}/profile` | GET, POST, PUT | Threat actor profile CRUD |
+| `/legal-tasks` | GET, POST | List / create legal tasks |
+| `/legal-tasks/{id}` | GET, PUT, DELETE | Single legal task CRUD |
+| `/slas` | GET, POST | List / create SLA records |
+| `/slas/{id}` | GET, PUT, DELETE | Single SLA CRUD |
+| `/audit-log` | GET | Paginated audit log with filters |
+
+### 2.6 New Frontend Tabs — Phase 2
+
+Added to `app/static/js/impersonation.js` and `app/static/index.html`:
+
+| Tab | Key Methods | State Variables |
+|-----|-------------|-----------------|
+| Alert Rules | `loadAlertRules`, `saveAlertRule`, `deleteAlertRule`, `openAlertRuleForm` | `alertRules`, `alertRuleForm`, `alertRulesLoading` |
+| Threat Actors | `loadThreatActors`, `saveThreatActor`, `deleteThreatActor`, `correlateActor`, `toggleActor` | `threatActors`, `threatActorForm`, `threatActorsLoading` |
+| Legal Tasks | `loadLegalTasks`, `saveLegalTask`, `deleteLegalTask` | `legalTasks`, `legalTaskForm`, `legalTasksLoading` |
+| SLA | `loadSlas`, `saveSla`, `deleteSla`, `slaMinutesToLabel` | `slas`, `slaForm`, `slasLoading` |
+
+`changeTab()` now also triggers lazy loading for the four new Phase 2 tabs.
+
+### 2.7 Tests — Phase 2
+
+| Test Suite | Tests | Status |
+|------------|-------|--------|
+| `tests/test_impersonation_monitoring.py` | 5 | ✅ All pass (Phase 1 — no regressions) |
+| `tests/test_impersonation_phase2.py` | 29 | ✅ All pass |
+
+Coverage includes: model imports, model columns, schema imports, schema defaults, schema JSON list parsing, scanner stub presence and return values, API endpoint signatures, service module imports and function signatures, HTML tab wiring, JS method presence, JS state variable presence.
+
+---
+
+## 3. Immediate Blockers
+
+There are **no blockers** preventing the system from running. All Phase 2 additions are purely additive and the system boots cleanly.
+
+---
+
+## 4. Phase 2 Integration Priorities (Short-Term)
+
+### 4.1 Alert Engine — Wire env vars
+
+| Var | Purpose |
+|-----|---------|
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook for alert dispatch |
+| `PAGERDUTY_ROUTING_KEY` | PagerDuty Events API v2 routing key |
+| `TEAMS_WEBHOOK_URL` | Microsoft Teams incoming webhook |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot for alert delivery |
+| `TELEGRAM_CHAT_ID` | Default Telegram chat for alerts |
+
+### 4.2 Evidence Generator — Wire env vars
+
+| Var | Purpose |
+|-----|---------|
+| `URLSCAN_API_KEY` | URLScan.io scan submission |
+| `WHOISXML_API_KEY` | WhoisXML API for WHOIS data |
+
+### 4.3 Dark Web Monitor — Wire env vars
+
+| Var | Purpose |
+|-----|---------|
+| `INTELX_API_KEY` | IntelX dark web search (already in Integrations system) |
+| `TOR_SOCKS_PROXY` | Optional Tor SOCKS5 proxy for onion sites |
+
+### 4.4 Social Media Phase 2 — Wire env vars
+
+| Var | Purpose |
+|-----|---------|
+| `YOUTUBE_API_KEY` | YouTube Data API v3 for M1 YouTube stub |
+| `APIFY_API_KEY` | Apify for TikTok, LinkedIn scraping (shared with M1/M2 Phase 1) |
+
+---
+
+## 5. Long-Term Roadmap
+
+### Sprint 1 (Phase 1 completion)
+- M7 VIP: wire lookalike similarity engine (0 new deps)
+- M5 Executive: wire existing `HIBPClient` (1 env var)
+
+### Sprint 2 (Phase 1 completion)
+- M1 Telegram: reuse `TelegramAdapter` from Social Listening
+- M3 Enhancements: BIMI/DKIM checks, auto-create Watchlist entries
+
+### Sprint 3 (Phase 2 integration)
+- Alert Engine: wire Slack/PagerDuty/Teams with `SLACK_WEBHOOK_URL` etc.
+- Evidence Generator: wire URLScan + WhoisXML
+
+### Sprint 4 (Phase 2 integration)
+- M1 YouTube: wire `YOUTUBE_API_KEY`
+- M1 TikTok: wire Apify `clockworks/tiktok-scraper`
+- M1 LinkedIn: wire Apify `curious_coder/linkedin-company-search`
+
+### Sprint 5 (Phase 2 integration)
+- M2 Apple App Store: wire `itunes-search` or App Store Connect API
+- M5 Dark Web: wire IntelX + optional Tor proxy
+- M3 Honeypot: wire SMTP catch-all
+
+### Sprint 6 (Phase 2 integration)
+- M3 Inbound Headers: wire Microsoft Graph or Google Workspace API
+- Threat Actor Correlator: automated correlation on every new finding
+- Legal Task workflow: integrate with Jira/Asana via webhook
+
+---
+
+## 6. Files Changed / Verified
+
+### Phase 1
+
+| File | State |
+|------|-------|
+| `app/models.py` | ✅ Phase 1 models (lines 742–824), Phase 2 models appended |
+| `app/schemas.py` | ✅ Phase 1 schemas (lines 924–1077), Phase 2 schemas appended |
+| `app/api/impersonation.py` | ✅ 16 Phase 1 endpoints + 20+ Phase 2 endpoints |
+| `app/services/impersonation/__init__.py` | ✅ (package marker) |
+| `app/services/impersonation/scanner.py` | ✅ Phase 1 stubs/live; Phase 2 stubs added |
+| `app/services/scheduler.py` | ✅ `_run_impersonation_scans` job wired |
+| `app/static/js/impersonation.js` | ✅ Phase 1 tabs + Phase 2 tabs |
+| `app/static/index.html` | ✅ nav, page panel, script tag, Phase 2 tab panels |
+
+### Phase 2 (new)
+
+| File | State |
+|------|-------|
+| `app/services/impersonation/alert_engine.py` | ✅ New — Slack/PagerDuty/Teams/Telegram dispatcher |
+| `app/services/impersonation/evidence_generator.py` | ✅ New — UDRP evidence package builder |
+| `app/services/impersonation/threat_actor_correlator.py` | ✅ New — Infrastructure signal correlation |
+| `tests/test_impersonation_phase2.py` | ✅ New — 29 Phase 2 tests, all passing |
+
+---
+
+## 7. Environment Variables Matrix
+
+| Module | Service | Env Var | Status |
+|--------|---------|---------|--------|
+| M1 | Telegram | `TELEGRAM_API_ID` | ✅ Social Listening |
+| M1 | Telegram | `TELEGRAM_API_HASH` | ✅ Social Listening |
+| M1 | Telegram | `TELEGRAM_SESSION_STRING` | ✅ Social Listening |
+| M1 | VK | `VK_SERVICE_TOKEN` | ❌ Not yet |
+| M1 | Apify | `APIFY_API_KEY` | ❌ Not yet |
+| M1 | YouTube | `YOUTUBE_API_KEY` | ❌ Phase 2 stub |
+| M1 | TikTok (Apify) | `APIFY_API_KEY` | ❌ Phase 2 stub |
+| M1 | LinkedIn (Apify) | `APIFY_API_KEY` | ❌ Phase 2 stub |
+| M2 | VirusTotal | `VIRUSTOTAL_API_KEY` | ✅ Integrations |
+| M2 | Apple App Store | *(itunes-search or App Store Connect)* | ❌ Phase 2 stub |
+| M3 | checkdmarc (DNS) | *(none)* | ✅ live |
+| M3 | Honeypot SMTP | `SMTP_SERVER`, `SMTP_USER`, `SMTP_PASS` | ❌ Phase 2 stub |
+| M3 | Inbound Headers | `MSGRAPH_CLIENT_ID`, `MSGRAPH_CLIENT_SECRET` | ❌ Phase 2 stub |
+| M5 | HIBP | `HIBP_API_KEY` | ✅ Integrations |
+| M5 | IntelX | `INTELX_API_KEY` | ✅ Integrations |
+| M5 | Dark Web (Tor) | `TOR_SOCKS_PROXY` | ❌ Phase 2 stub |
+| M6 | Google Ads Transparency | *(public API)* | N/A |
+| M6 | Yandex Direct | `YANDEX_OAUTH_TOKEN` | ❌ Not yet |
+| M7/M8 | NRD feed / lookalike | *(internal)* | ✅ live |
+| Alert Engine | Slack | `SLACK_WEBHOOK_URL` | ❌ Phase 2 new |
+| Alert Engine | PagerDuty | `PAGERDUTY_ROUTING_KEY` | ❌ Phase 2 new |
+| Alert Engine | Teams | `TEAMS_WEBHOOK_URL` | ❌ Phase 2 new |
+| Alert Engine | Telegram | `TELEGRAM_BOT_TOKEN` | ❌ Phase 2 new |
+| Alert Engine | Telegram | `TELEGRAM_CHAT_ID` | ❌ Phase 2 new |
+| Evidence Gen | URLScan.io | `URLSCAN_API_KEY` | ❌ Phase 2 new |
+| Evidence Gen | WhoisXML | `WHOISXML_API_KEY` | ❌ Phase 2 new |
+
+---
+
+*End of TS-IMP-001 Status & Roadmap Report — Phase 2*
+
+> **Generated:** 2026-06-03  
 > **Spec version:** TS-IMP-001 v1.0  
 > **Module prefix:** `Brand Protection › Impersonation Monitoring`
 
