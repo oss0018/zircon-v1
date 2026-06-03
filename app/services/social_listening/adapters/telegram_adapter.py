@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from os import getenv
@@ -15,10 +16,12 @@ class TelegramAdapter:
     _DEFAULT_CHANNELS = ["@cybersecua", "@hackersnews", "@darkwebinformer"]
     _MAX_TERMS = 20
     _MAX_MESSAGES = 20
+    _MAX_FLOOD_WAIT_SECONDS = 300
 
     async def collect(self, rule: SocialListeningRule) -> list[dict]:
         try:
             from telethon import TelegramClient  # type: ignore
+            from telethon.errors import FloodWaitError  # type: ignore
             from telethon.sessions import StringSession  # type: ignore
         except ImportError:
             logger.warning("social listening: telethon is not installed; telegram adapter skipped")
@@ -33,6 +36,9 @@ class TelegramAdapter:
             return []
         if not session_string:
             logger.warning("social listening: TELEGRAM_SESSION_STRING missing; telegram adapter skipped")
+            return []
+        if len(session_string) < 20:
+            logger.warning("social listening: TELEGRAM_SESSION_STRING seems invalid (too short); telegram adapter skipped")
             return []
 
         try:
@@ -69,6 +75,28 @@ class TelegramAdapter:
                 for channel in channels:
                     try:
                         messages = await client.get_messages(channel, search=term_text, limit=self._MAX_MESSAGES)
+                    except FloodWaitError as exc:
+                        wait_seconds = int(getattr(exc, "seconds", 0))
+                        if wait_seconds > 0:
+                            if wait_seconds > self._MAX_FLOOD_WAIT_SECONDS:
+                                logger.warning(
+                                    "social listening: telegram flood wait too long (%ss) for term '%s' in %s; skipping",
+                                    wait_seconds,
+                                    term_text,
+                                    channel,
+                                )
+                                continue
+                            await asyncio.sleep(wait_seconds)
+                        try:
+                            messages = await client.get_messages(channel, search=term_text, limit=self._MAX_MESSAGES)
+                        except Exception as retry_exc:
+                            logger.warning(
+                                "social listening: telegram retry failed for term '%s' in %s: %s",
+                                term_text,
+                                channel,
+                                retry_exc,
+                            )
+                            continue
                     except Exception as exc:
                         logger.warning(
                             "social listening: telegram search failed for term '%s' in %s: %s",
@@ -100,7 +128,13 @@ class TelegramAdapter:
                                 "published_at": getattr(message, "date", None),
                             }
                         )
+        except Exception as exc:
+            logger.warning("social listening: telegram client start/search failed: %s", exc)
+            return []
         finally:
-            await client.disconnect()
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
 
         return collected

@@ -34,7 +34,10 @@ class SocialListeningCollector:
             "pastebin": PasteAdapter(),
             "telegram": TelegramAdapter(),
             "twitter": TwitterAdapter(),
-            "habrahabr": RSSAdapter(feed_url_template="https://habr.com/ru/search/feed?q={term}", source_platform="habrahabr"),
+            "habrahabr": RSSAdapter(
+                feed_url_template="https://habr.com/ru/search/feed/?query={term}&target_type=posts",
+                source_platform="habrahabr",
+            ),
         }
         self._nlp = NLPPipeline()
         self._alert_engine = AlertEngine()

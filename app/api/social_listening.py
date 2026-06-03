@@ -51,6 +51,8 @@ def _rule_to_out(rule: SocialListeningRule) -> SLRuleOut:
         "severity_threshold": rule.severity_threshold,
         "alert_on": rule.alert_on,
         "schedule_cron": rule.schedule_cron,
+        "alert_email": rule.alert_email or "",
+        "alert_telegram": rule.alert_telegram or "",
         "store_all": rule.store_all,
         "active": rule.active,
         "created_at": rule.created_at,
@@ -370,6 +372,8 @@ async def create_rule(
         severity_threshold=data.severity_threshold,
         alert_on=data.alert_on,
         schedule_cron=data.schedule_cron,
+        alert_email=data.alert_email,
+        alert_telegram=data.alert_telegram,
         store_all=data.store_all,
         active=data.active,
     )

@@ -552,6 +552,8 @@ class SLRuleCreate(BaseModel):
     severity_threshold: int = Field(2, ge=1, le=5)
     alert_on: str = "EVERY_MENTION"
     schedule_cron: str = "*/15 * * * *"
+    alert_email: str = ""
+    alert_telegram: str = ""
     store_all: bool = False
     active: bool = True
 
@@ -565,6 +567,17 @@ class SLRuleCreate(BaseModel):
     def sanitize_list_fields(cls, v: List[str]) -> List[str]:
         return [_sanitize(str(item).strip(), max_length=200) for item in v if str(item).strip()]
 
+    @field_validator("alert_email")
+    @classmethod
+    def sanitize_email(cls, v: str) -> str:
+        v = v.strip()[:254]
+        return _html.escape(v, quote=True)
+
+    @field_validator("alert_telegram")
+    @classmethod
+    def sanitize_telegram(cls, v: str) -> str:
+        return _sanitize(v.strip(), max_length=100)
+
 
 class SLRuleUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
@@ -577,6 +590,8 @@ class SLRuleUpdate(BaseModel):
     severity_threshold: Optional[int] = Field(None, ge=1, le=5)
     alert_on: Optional[str] = None
     schedule_cron: Optional[str] = None
+    alert_email: Optional[str] = None
+    alert_telegram: Optional[str] = None
     store_all: Optional[bool] = None
     active: Optional[bool] = None
 
@@ -594,6 +609,21 @@ class SLRuleUpdate(BaseModel):
             return v
         return [_sanitize(str(item).strip(), max_length=200) for item in v if str(item).strip()]
 
+    @field_validator("alert_email")
+    @classmethod
+    def sanitize_optional_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()[:254]
+        return _html.escape(v, quote=True)
+
+    @field_validator("alert_telegram")
+    @classmethod
+    def sanitize_optional_telegram(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return _sanitize(v.strip(), max_length=100)
+
 
 class SLRuleOut(BaseModel):
     id: int
@@ -607,6 +637,8 @@ class SLRuleOut(BaseModel):
     severity_threshold: int
     alert_on: str
     schedule_cron: str
+    alert_email: str = ""
+    alert_telegram: str = ""
     store_all: bool
     active: bool
     created_at: datetime
@@ -1043,4 +1075,3 @@ class TakedownRequestOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
-
