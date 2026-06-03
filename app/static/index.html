@@ -5876,32 +5876,290 @@
               </template>
 
             </div><!-- /ti-dashboard -->
-
             <!-- ── IMPERSONATION MONITORING ───────────────────────── -->
-            <div x-show="page === 'impersonation-monitoring'">
+            <div x-show="page === 'impersonation-monitoring'" x-data="impersonationPage" x-init="init()">
               <div class="flex justify-between items-center mb-4">
                 <div>
                   <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;"
                       x-text="t('impersonation_monitoring')"></h2>
                 </div>
+                <button class="btn btn-secondary" @click="refreshAll()">Refresh</button>
               </div>
 
-              <div class="card" style="padding:60px 40px;text-align:center;max-width:560px;margin:40px auto;">
-                <div style="margin-bottom:20px;">
-                  <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                       style="display:block;margin:0 auto;opacity:0.35;">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                  </svg>
+              <div class="card mb-4" style="padding:16px;display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn" :class="activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('overview')">Overview</button>
+                <button class="btn" :class="activeTab === 'findings' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('findings')">Findings</button>
+                <button class="btn" :class="activeTab === 'rules' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('rules')">Rules</button>
+                <button class="btn" :class="activeTab === 'takedowns' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('takedowns')">Takedowns</button>
+              </div>
+
+              <div x-show="activeTab === 'overview'">
+                <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px;">
+                  <div class="card" style="padding:16px;"><div class="text-muted">Total Findings</div><div style="font-size:28px;font-weight:700;" x-text="stats.total || 0"></div></div>
+                  <div class="card" style="padding:16px;"><div class="text-muted">High Risk</div><div style="font-size:28px;font-weight:700;color:var(--danger);" x-text="stats.high_risk || 0"></div></div>
+                  <div class="card" style="padding:16px;"><div class="text-muted">Pending Takedowns</div><div style="font-size:28px;font-weight:700;color:var(--warning);" x-text="stats.pending_takedowns || 0"></div></div>
+                  <div class="card" style="padding:16px;"><div class="text-muted">Active Rules</div><div style="font-size:28px;font-weight:700;color:var(--accent-green);" x-text="stats.active_rules || 0"></div></div>
                 </div>
-                <div style="font-size:1.3rem;font-weight:700;color:var(--text-primary);margin-bottom:10px;">
-                  In Development
+                <div class="card" style="padding:16px;overflow:auto;">
+                  <div style="font-size:16px;font-weight:600;margin-bottom:12px;">By Module</div>
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+                        <th style="padding:10px 8px;">Module</th>
+                        <th style="padding:10px 8px;">Total</th>
+                        <th style="padding:10px 8px;">New</th>
+                        <th style="padding:10px 8px;">Resolved</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="row in moduleRows()" :key="row.key">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                          <td style="padding:10px 8px;"><span class="badge" :class="row.badge" x-text="row.label"></span></td>
+                          <td style="padding:10px 8px;" x-text="row.stats.total || 0"></td>
+                          <td style="padding:10px 8px;" x-text="row.stats.new || 0"></td>
+                          <td style="padding:10px 8px;" x-text="row.stats.resolved || 0"></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
                 </div>
-                <div class="text-muted" style="font-size:0.9rem;line-height:1.6;margin-bottom:24px;">
-                  Impersonation Monitoring is currently under development.<br>
-                  This module will detect and track domains and profiles impersonating your brand across the web.
+              </div>
+
+              <div x-show="activeTab === 'findings'">
+                <div class="card mb-4" style="padding:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:end;">
+                  <div>
+                    <label class="text-muted text-sm">Module</label>
+                    <select x-model="findingsFilter.module" @change="findingsPage=1; loadFindings()" style="width:100%;margin-top:6px;">
+                      <option value="">All</option>
+                      <option value="m1">m1</option><option value="m2">m2</option><option value="m3">m3</option>
+                      <option value="m5">m5</option><option value="m6">m6</option><option value="m7">m7</option><option value="m8">m8</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="text-muted text-sm">Platform</label>
+                    <input type="text" x-model="findingsFilter.platform" @change="findingsPage=1; loadFindings()" placeholder="telegram / domain / app" style="width:100%;margin-top:6px;">
+                  </div>
+                  <div>
+                    <label class="text-muted text-sm">Status</label>
+                    <select x-model="findingsFilter.status" @change="findingsPage=1; loadFindings()" style="width:100%;margin-top:6px;">
+                      <option value="">All</option>
+                      <option value="new">new</option>
+                      <option value="under_review">under_review</option>
+                      <option value="takedown_requested">takedown_requested</option>
+                      <option value="resolved">resolved</option>
+                      <option value="false_positive">false_positive</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="text-muted text-sm">Min Score: <span x-text="findingsFilter.min_score"></span></label>
+                    <input type="range" min="0" max="100" x-model.number="findingsFilter.min_score" @change="findingsPage=1; loadFindings()" style="width:100%;margin-top:8px;">
+                  </div>
+                  <div style="grid-column:1 / -1;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                    <div class="text-muted">Showing <span x-text="findingsRangeLabel()"></span> of <span x-text="findingsTotal"></span></div>
+                    <button class="btn btn-secondary" @click="exportFindings()">Export CSV</button>
+                  </div>
                 </div>
-                <span class="badge badge-yellow" style="font-size:0.8rem;padding:6px 14px;">🚧 Coming Soon</span>
+                <div class="card" style="padding:0;overflow:auto;">
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+                        <th style="padding:12px 10px;">Module</th>
+                        <th style="padding:12px 10px;">Platform</th>
+                        <th style="padding:12px 10px;">Finding Type</th>
+                        <th style="padding:12px 10px;">Target</th>
+                        <th style="padding:12px 10px;">Display Name</th>
+                        <th style="padding:12px 10px;">Score</th>
+                        <th style="padding:12px 10px;">Status</th>
+                        <th style="padding:12px 10px;">First Seen</th>
+                        <th style="padding:12px 10px;">Actions</th>
+                      </tr>
+                    </thead>
+                      <template x-for="finding in findings" :key="finding.id">
+                        <tbody>
+                          <tr style="border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;" @click="toggleFinding(finding.id)">
+                            <td style="padding:12px 10px;"><span class="badge" :class="moduleBadgeClass(finding.module)" x-text="moduleLabel(finding.module)"></span></td>
+                            <td style="padding:12px 10px;" x-text="finding.platform"></td>
+                            <td style="padding:12px 10px;" x-text="finding.finding_type"></td>
+                            <td style="padding:12px 10px;max-width:220px;word-break:break-word;"><a :href="finding.target_url || '#'" target="_blank" style="color:var(--accent-blue);" x-text="finding.target_identifier"></a></td>
+                            <td style="padding:12px 10px;" x-text="finding.display_name || '—'"></td>
+                            <td style="padding:12px 10px;"><span class="badge" :class="scoreBadgeClass(finding.threat_score)" x-text="finding.threat_score"></span></td>
+                            <td style="padding:12px 10px;"><span class="badge" :class="statusBadgeClass(finding.status)" x-text="finding.status"></span></td>
+                            <td style="padding:12px 10px;" x-text="formatDateTime(finding.first_seen)"></td>
+                            <td style="padding:12px 10px;display:flex;gap:6px;flex-wrap:wrap;" @click.stop>
+                              <button class="btn btn-secondary" @click="updateFindingStatus(finding, 'under_review')">Review</button>
+                              <button class="btn btn-secondary" @click="createTakedown(finding)">Takedown</button>
+                              <button class="btn btn-secondary" @click="updateFindingStatus(finding, 'resolved')">Resolve</button>
+                              <button class="btn btn-secondary" @click="updateFindingStatus(finding, 'false_positive')">False Positive</button>
+                            </td>
+                          </tr>
+                          <tr x-show="expandedFindingId === finding.id" style="background:rgba(255,255,255,0.02);">
+                            <td colspan="9" style="padding:16px 12px;">
+                              <div class="grid" style="grid-template-columns:2fr 1fr;gap:16px;">
+                                <div>
+                                  <div style="font-weight:600;margin-bottom:8px;">Description</div>
+                                  <div class="text-muted" x-text="finding.description || 'No description provided.'"></div>
+                                  <div style="font-weight:600;margin:16px 0 8px;">Signals</div>
+                                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                    <template x-for="signal in parseJsonList(finding.signals_json)" :key="signal">
+                                      <span class="badge badge-blue" x-text="signal"></span>
+                                    </template>
+                                    <template x-if="parseJsonList(finding.signals_json).length === 0">
+                                      <span class="text-muted">No signals recorded.</span>
+                                    </template>
+                                  </div>
+                                </div>
+                                <div>
+                                  <div style="font-weight:600;margin-bottom:8px;">Evidence</div>
+                                  <template x-for="entry in parseEvidence(finding.evidence_json)" :key="entry[0]">
+                                    <div style="margin-bottom:6px;"><span class="text-muted" x-text="entry[0] + ':'"></span> <span x-text="String(entry[1])"></span></div>
+                                  </template>
+                                  <template x-if="parseEvidence(finding.evidence_json).length === 0">
+                                    <div class="text-muted">No structured evidence recorded.</div>
+                                  </template>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </template>
+                  </table>
+                  <div style="padding:12px 16px;display:flex;justify-content:flex-end;gap:8px;">
+                    <button class="btn btn-secondary" @click="prevFindingsPage()">Previous</button>
+                    <button class="btn btn-secondary" @click="nextFindingsPage()">Next</button>
+                  </div>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'rules'">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                  <div class="text-muted">Manage impersonation monitoring rules and trigger scans on demand.</div>
+                  <button class="btn btn-primary" @click="openCreateRule()">Add Rule</button>
+                </div>
+
+                <div x-show="ruleForm.show" class="card mb-4" style="padding:16px;">
+                  <div style="font-size:16px;font-weight:600;margin-bottom:12px;" x-text="ruleForm.editing ? 'Edit Rule' : 'Add Rule'"></div>
+                  <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">
+                    <div><label class="text-muted text-sm">Name</label><input type="text" x-model="ruleForm.data.name" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Brand ID</label><input type="number" x-model="ruleForm.data.brand_id" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Brand Name</label><input type="text" x-model="ruleForm.data.brand_name" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Brand Name (UK)</label><input type="text" x-model="ruleForm.data.brand_name_uk" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Brand Name (RU)</label><input type="text" x-model="ruleForm.data.brand_name_ru" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Social Platforms</label><input type="text" x-model="ruleForm.data.social_platforms_text" placeholder="telegram, instagram, vk" style="width:100%;margin-top:6px;"></div>
+                    <div style="grid-column:1 / -1;"><label class="text-muted text-sm">Official Domains</label><input type="text" x-model="ruleForm.data.official_domains_text" placeholder="brand.com, brand.ua" style="width:100%;margin-top:6px;"></div>
+                    <div style="grid-column:1 / -1;"><label class="text-muted text-sm">Official Developer IDs</label><input type="text" x-model="ruleForm.data.official_developer_ids_text" placeholder="com.company.app" style="width:100%;margin-top:6px;"></div>
+                    <div style="grid-column:1 / -1;"><label class="text-muted text-sm">Executive Names</label><input type="text" x-model="ruleForm.data.executive_names_text" placeholder="CEO Name, CFO Name" style="width:100%;margin-top:6px;"></div>
+                    <div style="grid-column:1 / -1;"><label class="text-muted text-sm">Partner Domains</label><input type="text" x-model="ruleForm.data.partner_domains_text" placeholder="partner.com" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Trademark Name</label><input type="text" x-model="ruleForm.data.trademark_name" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Trademark Reg. No.</label><input type="text" x-model="ruleForm.data.trademark_reg_no" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Organisation</label><input type="text" x-model="ruleForm.data.org_name" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Contact Name</label><input type="text" x-model="ruleForm.data.contact_name" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Contact Email</label><input type="email" x-model="ruleForm.data.contact_email" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Contact Phone</label><input type="text" x-model="ruleForm.data.contact_phone" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Minimum Score</label><input type="number" min="0" max="100" x-model="ruleForm.data.min_impersonation_score" style="width:100%;margin-top:6px;"></div>
+                    <div><label class="text-muted text-sm">Schedule Cron</label><input type="text" x-model="ruleForm.data.schedule_cron" style="width:100%;margin-top:6px;"></div>
+                    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding-top:26px;">
+                      <label><input type="checkbox" x-model="ruleForm.data.active"> Active</label>
+                      <label><input type="checkbox" x-model="ruleForm.data.m1_social_enabled"> M1 Social</label>
+                      <label><input type="checkbox" x-model="ruleForm.data.m2_apps_enabled"> M2 Apps</label>
+                      <label><input type="checkbox" x-model="ruleForm.data.m3_email_enabled"> M3 Email</label>
+                      <label><input type="checkbox" x-model="ruleForm.data.m5_exec_enabled"> M5 Executive</label>
+                      <label><input type="checkbox" x-model="ruleForm.data.m6_ads_enabled"> M6 Ads</label>
+                      <label><input type="checkbox" x-model="ruleForm.data.m7_vip_enabled"> M7 VIP</label>
+                      <label><input type="checkbox" x-model="ruleForm.data.m8_domain_enabled"> M8 Domains</label>
+                    </div>
+                  </div>
+                  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+                    <button class="btn btn-secondary" @click="resetRuleForm()">Cancel</button>
+                    <button class="btn btn-primary" @click="saveRule()">Save Rule</button>
+                  </div>
+                </div>
+
+                <div class="card" style="padding:0;overflow:auto;">
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+                        <th style="padding:12px 10px;">Name</th>
+                        <th style="padding:12px 10px;">Brand Name</th>
+                        <th style="padding:12px 10px;">Active Modules</th>
+                        <th style="padding:12px 10px;">Last Scan</th>
+                        <th style="padding:12px 10px;">Status</th>
+                        <th style="padding:12px 10px;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="rule in rules" :key="rule.id">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                          <td style="padding:12px 10px;"><div x-text="rule.name"></div><div class="text-muted text-sm" x-text="rule.findings_count + ' findings'"></div></td>
+                          <td style="padding:12px 10px;" x-text="rule.brand_name"></td>
+                          <td style="padding:12px 10px;">
+                            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                              <template x-for="module in activeModules(rule)" :key="module.key">
+                                <span class="badge" :class="module.badge" x-text="module.label"></span>
+                              </template>
+                            </div>
+                          </td>
+                          <td style="padding:12px 10px;" x-text="formatDateTime(rule.last_scan_at)"></td>
+                          <td style="padding:12px 10px;"><span class="badge" :class="rule.active ? 'badge badge-green' : 'badge badge-gray'" x-text="rule.active ? 'Active' : 'Paused'"></span></td>
+                          <td style="padding:12px 10px;display:flex;gap:6px;flex-wrap:wrap;">
+                            <button class="btn btn-secondary" @click="openEditRule(rule)">Edit</button>
+                            <button class="btn btn-secondary" @click="deleteRule(rule)">Delete</button>
+                            <button class="btn btn-secondary" @click="scanRule(rule)">Scan Now</button>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div x-show="activeTab === 'takedowns'">
+                <div class="card mb-4" style="padding:16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:end;">
+                  <div>
+                    <label class="text-muted text-sm">Status</label>
+                    <select x-model="takedownsFilter.status" @change="loadTakedowns()" style="width:100%;margin-top:6px;">
+                      <option value="">All</option>
+                      <option value="draft">draft</option>
+                      <option value="pending_review">pending_review</option>
+                      <option value="submitted">submitted</option>
+                      <option value="resolved">resolved</option>
+                      <option value="failed">failed</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="text-muted text-sm">Platform</label>
+                    <input type="text" x-model="takedownsFilter.platform" @change="loadTakedowns()" placeholder="telegram / google_play / namecheap" style="width:100%;margin-top:6px;">
+                  </div>
+                </div>
+                <div class="card" style="padding:0;overflow:auto;">
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+                        <th style="padding:12px 10px;">Platform</th>
+                        <th style="padding:12px 10px;">Target URL</th>
+                        <th style="padding:12px 10px;">Status</th>
+                        <th style="padding:12px 10px;">Created</th>
+                        <th style="padding:12px 10px;">Actions</th>
+                      </tr>
+                    </thead>
+                      <template x-for="takedown in takedowns" :key="takedown.id">
+                        <tbody>
+                          <tr style="border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;" @click="toggleTakedown(takedown.id)">
+                            <td style="padding:12px 10px;" x-text="takedown.target_platform"></td>
+                            <td style="padding:12px 10px;max-width:320px;word-break:break-word;" x-text="takedown.target_url"></td>
+                            <td style="padding:12px 10px;"><span class="badge" :class="statusBadgeClass(takedown.status)" x-text="takedown.status"></span></td>
+                            <td style="padding:12px 10px;" x-text="formatDateTime(takedown.created_at)"></td>
+                            <td style="padding:12px 10px;display:flex;gap:6px;flex-wrap:wrap;" @click.stop>
+                              <button class="btn btn-secondary" @click="updateTakedownStatus(takedown, 'submitted')">Mark Submitted</button>
+                              <button class="btn btn-secondary" @click="updateTakedownStatus(takedown, 'resolved')">Mark Resolved</button>
+                            </td>
+                          </tr>
+                          <tr x-show="expandedTakedownId === takedown.id" style="background:rgba(255,255,255,0.02);">
+                            <td colspan="5" style="padding:16px 12px;white-space:pre-wrap;" x-text="takedown.cover_letter"></td>
+                          </tr>
+                        </tbody>
+                      </template>
+                  </table>
+                </div>
               </div>
             </div><!-- /impersonation-monitoring -->
 

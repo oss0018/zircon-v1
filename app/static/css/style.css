@@ -862,6 +862,8 @@ tr:hover td {
 .badge-red { background: rgba(255, 0, 60, 0.15); color: var(--danger); }
 .badge-yellow { background: rgba(255, 179, 0, 0.15); color: var(--warning); }
 .badge-gray { background: rgba(148, 163, 184, 0.1); color: var(--text-secondary); }
+.badge-purple { background: rgba(124, 58, 237, 0.15); color: var(--accent-purple); }
+.badge-orange { background: rgba(255, 140, 0, 0.15); color: #ff8c00; }
 
 /* ── Search Bar ───────────────────────────────────────────────── */
 .search-bar {
