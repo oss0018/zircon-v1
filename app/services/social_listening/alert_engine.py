@@ -125,6 +125,7 @@ class AlertEngine:
                     f"{snippet}"
                 )
                 try:
+                    asyncio.get_running_loop()
                     task = asyncio.create_task(notify(combined_title, body_text, alert_email, alert_telegram))
                     _PENDING_NOTIFY_TASKS.add(task)
                     task.add_done_callback(_on_notify_task_done)

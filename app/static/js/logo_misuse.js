@@ -22,11 +22,15 @@ document.addEventListener('alpine:init', () => {
     // Search modal
     showSearchModal: false,
     searchBrandId: null,
-    searchForm: { search_type: 'text', query: '', max_results: 20 },
+    searchForm: { query: '', max_results: 20 },
     searchResults: [],
 
     // Add case modal
     showAddModal: false,
+    showQuickBrandModal: false,
+    quickBrand: { name: '', url: '' },
+    quickBrandLoading: false,
+    quickBrandError: '',
     newCase: {
       brand_id: '',
       source_url: '',
@@ -116,9 +120,44 @@ document.addEventListener('alpine:init', () => {
     openSearchModal(brandId) {
       this.searchBrandId = brandId;
       const brand = this.brands.find(b => b.id === brandId);
-      this.searchForm = { search_type: 'text', query: brand ? brand.name : '', max_results: 20 };
+      this.searchForm = { query: brand ? brand.name : '', max_results: 20 };
       this.searchResults = [];
       this.showSearchModal = true;
+    },
+
+    onNewCaseBrandChange() {
+      if (this.newCase.brand_id !== '__new__') return;
+      this.newCase.brand_id = '';
+      this.quickBrand = { name: '', url: '' };
+      this.quickBrandError = '';
+      this.showQuickBrandModal = true;
+    },
+
+    async saveQuickBrand() {
+      this.quickBrandError = '';
+      const name = (this.quickBrand.name || '').trim();
+      const url = (this.quickBrand.url || '').trim();
+      if (!name) {
+        this.quickBrandError = 'Brand name is required';
+        return;
+      }
+      this.quickBrandLoading = true;
+      try {
+        const created = await api.post('/brands/', {
+          name,
+          url,
+          keywords: '',
+          similarity_threshold: 0.8,
+          monitoring_enabled: false,
+        });
+        await this.loadBrands();
+        this.newCase.brand_id = String(created.id);
+        this.showQuickBrandModal = false;
+      } catch (e) {
+        this.quickBrandError = e.message || 'Failed to create brand';
+      } finally {
+        this.quickBrandLoading = false;
+      }
     },
 
     async triggerSearch() {

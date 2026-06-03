@@ -5,7 +5,7 @@ Endpoints:
   POST   /brands/{brand_id}/logo            — upload brand logo
   DELETE /brands/{brand_id}/logo            — delete brand logo
   GET    /brands/{brand_id}/logo            — serve brand logo
-  POST   /brands/{brand_id}/search          — RSS-based misuse search
+  POST   /brands/{brand_id}/search          — logo-focused misuse search
   GET    /cases                             — list cases (filters: brand_id, status, match_type, q)
   GET    /cases/export                      — export as CSV or JSON (must be before /cases/{id})
   GET    /cases/{case_id}                   — get single case
@@ -231,6 +231,8 @@ async def search_brand_misuse(
     brand = res.scalar_one_or_none()
     if not brand:
         raise HTTPException(status_code=404, detail="Brand not found")
+    if not brand.logo_path:
+        raise HTTPException(status_code=400, detail="Upload brand logo before running logo search")
 
     query = sanitize_string(str(body.get("query", brand.name)).strip(), max_length=200)
     try:
@@ -430,6 +432,9 @@ async def create_case(
     res = await db.execute(select(Brand).where(Brand.id == data.brand_id))
     if not res.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Brand not found")
+
+    if data.match_type not in {"logo", "manual"}:
+        raise HTTPException(status_code=400, detail="Only 'logo' and 'manual' case types are supported")
 
     case = LogoMisuseCase(**data.model_dump())
     db.add(case)

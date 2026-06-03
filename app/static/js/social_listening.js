@@ -30,6 +30,10 @@ document.addEventListener('alpine:init', () => {
 
     showRuleModal: false,
     editingRule: null,
+    showQuickBrandModal: false,
+    quickBrand: { name: '', url: '' },
+    quickBrandLoading: false,
+    quickBrandError: '',
     ruleForm: {
       name: '',
       brand_id: '',
@@ -41,6 +45,8 @@ document.addEventListener('alpine:init', () => {
       severity_threshold: 2,
       alert_on: 'EVERY_MENTION',
       schedule_cron: '*/15 * * * *',
+      alert_email: '',
+      alert_telegram: '',
       store_all: false,
       active: true,
     },
@@ -161,6 +167,8 @@ document.addEventListener('alpine:init', () => {
         severity_threshold: 2,
         alert_on: 'EVERY_MENTION',
         schedule_cron: '*/15 * * * *',
+        alert_email: '',
+        alert_telegram: '',
         store_all: false,
         active: true,
       };
@@ -180,10 +188,47 @@ document.addEventListener('alpine:init', () => {
         severity_threshold: Number(rule.severity_threshold || 2),
         alert_on: rule.alert_on || 'EVERY_MENTION',
         schedule_cron: rule.schedule_cron || '*/15 * * * *',
+        alert_email: rule.alert_email || '',
+        alert_telegram: rule.alert_telegram || '',
         store_all: !!rule.store_all,
         active: !!rule.active,
       };
       this.showRuleModal = true;
+    },
+
+    onRuleBrandChange() {
+      if (this.ruleForm.brand_id !== '__new__') return;
+      this.ruleForm.brand_id = '';
+      this.quickBrand = { name: '', url: '' };
+      this.quickBrandError = '';
+      this.showQuickBrandModal = true;
+    },
+
+    async saveQuickBrand() {
+      this.quickBrandError = '';
+      const name = (this.quickBrand.name || '').trim();
+      const url = (this.quickBrand.url || '').trim();
+      if (!name) {
+        this.quickBrandError = 'Brand name is required';
+        return;
+      }
+      this.quickBrandLoading = true;
+      try {
+        const created = await api.post('/brands/', {
+          name,
+          url,
+          keywords: '',
+          similarity_threshold: 0.8,
+          monitoring_enabled: false,
+        });
+        await this.loadBrands();
+        this.ruleForm.brand_id = String(created.id);
+        this.showQuickBrandModal = false;
+      } catch (e) {
+        this.quickBrandError = e.message || 'Failed to create brand';
+      } finally {
+        this.quickBrandLoading = false;
+      }
     },
 
     parseCsv(value) {
@@ -206,6 +251,8 @@ document.addEventListener('alpine:init', () => {
           severity_threshold: Number(this.ruleForm.severity_threshold || 2),
           alert_on: this.ruleForm.alert_on || 'EVERY_MENTION',
           schedule_cron: (this.ruleForm.schedule_cron || '').trim() || '*/15 * * * *',
+          alert_email: (this.ruleForm.alert_email || '').trim(),
+          alert_telegram: (this.ruleForm.alert_telegram || '').trim(),
           store_all: !!this.ruleForm.store_all,
           active: !!this.ruleForm.active,
         };
