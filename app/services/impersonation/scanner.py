@@ -68,6 +68,16 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 logger.error("[IMP M1] Scan error for rule %s: %s", rule_id, exc)
                 summary["m1"]["errors"] += 1
 
+            # Phase 2 extended social platforms
+            for _p2_stub in (_scan_m1_tiktok, _scan_m1_linkedin, _scan_m1_youtube):
+                try:
+                    p2_findings = await _p2_stub(rule_data)
+                    all_findings.extend(p2_findings)
+                    summary["m1"]["scanned"] += len(p2_findings)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("[IMP M1] Phase-2 scan error for rule %s: %s", rule_id, exc)
+                    summary["m1"]["errors"] += 1
+
         if rule.m2_apps_enabled:
             try:
                 findings = await _scan_m2_apps(rule_data)
@@ -75,6 +85,15 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 summary["m2"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
                 logger.error("[IMP M2] Scan error for rule %s: %s", rule_id, exc)
+                summary["m2"]["errors"] += 1
+
+            # Phase 2: Apple App Store
+            try:
+                p2_findings = await _scan_m2_appstore(rule_data)
+                all_findings.extend(p2_findings)
+                summary["m2"]["scanned"] += len(p2_findings)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[IMP M2] Phase-2 appstore scan error for rule %s: %s", rule_id, exc)
                 summary["m2"]["errors"] += 1
 
         if rule.m3_email_enabled:
@@ -86,6 +105,16 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 logger.error("[IMP M3] Scan error for rule %s: %s", rule_id, exc)
                 summary["m3"]["errors"] += 1
 
+            # Phase 2: Honeypot + Inbound headers
+            for _p2_stub in (_scan_m3_honeypot, _scan_m3_inbound_headers):
+                try:
+                    p2_findings = await _p2_stub(rule_data)
+                    all_findings.extend(p2_findings)
+                    summary["m3"]["scanned"] += len(p2_findings)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("[IMP M3] Phase-2 scan error for rule %s: %s", rule_id, exc)
+                    summary["m3"]["errors"] += 1
+
         if rule.m5_exec_enabled:
             try:
                 findings = await _scan_m5_executive(rule_data)
@@ -93,6 +122,15 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 summary["m5"]["scanned"] = len(findings)
             except Exception as exc:  # noqa: BLE001
                 logger.error("[IMP M5] Scan error for rule %s: %s", rule_id, exc)
+                summary["m5"]["errors"] += 1
+
+            # Phase 2: Dark web monitoring
+            try:
+                p2_findings = await _scan_m5_darkweb(rule_data)
+                all_findings.extend(p2_findings)
+                summary["m5"]["scanned"] += len(p2_findings)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[IMP M5] Phase-2 dark web scan error for rule %s: %s", rule_id, exc)
                 summary["m5"]["errors"] += 1
 
         if rule.m6_ads_enabled:
@@ -175,10 +213,76 @@ async def _scan_m1_social(rule: dict) -> list:
     return []
 
 
+async def _scan_m1_tiktok(rule: dict) -> list:
+    """M1 Phase 2: TikTok Account Impersonation Detection — stub.
+
+    Searches for fake accounts using keywords: brand name, brand+official,
+    brand+support, executive names. Checks follower engagement patterns,
+    account age, and bio for phishing keywords.
+
+    Integration: TikTok API or Apify TikTok scraper.
+    Required env vars: TIKTOK_API_KEY or APIFY_TOKEN
+    """
+    logger.info(
+        "[IMP M1] TikTok scan stub for '%s'. Configure TikTok API/Apify integration to enable real detection.",
+        rule["brand_name"],
+    )
+    return []
+
+
+async def _scan_m1_linkedin(rule: dict) -> list:
+    """M1 Phase 2: LinkedIn Account Impersonation Detection — stub.
+
+    Searches by company name and executive profiles. Flags accounts with brand
+    name combined with high executive impersonation confidence.
+
+    Integration: LinkedIn API (limited public access).
+    Required env vars: LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET
+    """
+    logger.info(
+        "[IMP M1] LinkedIn scan stub for '%s'. Configure LinkedIn API integration to enable real detection.",
+        rule["brand_name"],
+    )
+    return []
+
+
+async def _scan_m1_youtube(rule: dict) -> list:
+    """M1 Phase 2: YouTube Channel Impersonation Detection — stub.
+
+    Searches by brand name in channel titles/descriptions. Checks for phishing
+    links in channel homepage/about section.
+
+    Integration: YouTube Data API v3.
+    Required env vars: YOUTUBE_API_KEY
+    """
+    logger.info(
+        "[IMP M1] YouTube scan stub for '%s'. Configure YouTube Data API integration to enable real detection.",
+        rule["brand_name"],
+    )
+    return []
+
+
 async def _scan_m2_apps(rule: dict) -> list:
     """M2: Malicious & Fake App Detection — stub."""
     logger.info(
         "[IMP M2] App store scan stub for '%s'. Install google-play-scraper and configure Apify to enable real detection.",
+        rule["brand_name"],
+    )
+    return []
+
+
+async def _scan_m2_appstore(rule: dict) -> list:
+    """M2 Phase 2: Apple App Store Impersonation Detection — stub.
+
+    Monitors for fake brand apps on Apple App Store. Detects impersonation in
+    app name, icon, and description.
+
+    Integration: App Store Connect API or Apify App Store scraper.
+    Required env vars: APPSTORE_KEY_ID, APPSTORE_ISSUER_ID, APPSTORE_PRIVATE_KEY
+    or APIFY_TOKEN (for Apify App Store scraper actor)
+    """
+    logger.info(
+        "[IMP M2] Apple App Store scan stub for '%s'. Configure App Store Connect API/Apify to enable real detection.",
         rule["brand_name"],
     )
     return []
@@ -306,6 +410,22 @@ async def _scan_m5_executive(rule: dict) -> list:
     return []
 
 
+async def _scan_m5_darkweb(rule: dict) -> list:
+    """M5 Phase 2: Dark Web Executive Monitoring — stub.
+
+    Monitors Tor-accessible paste sites and data breach forums for executive
+    credentials and bulk credential dumps.
+
+    Integration: Tor network access (Stem library) + dark web monitoring service.
+    Required env vars: DARKWEB_API_KEY, TOR_SOCKS_PROXY
+    """
+    logger.info(
+        "[IMP M5] Dark web scan stub for '%s'. Configure Tor/dark-web service integration to enable real detection.",
+        rule["brand_name"],
+    )
+    return []
+
+
 async def _scan_m6_ads(rule: dict) -> list:
     """M6: Ad Fraud Detection — stub."""
     logger.info(
@@ -318,6 +438,46 @@ async def _scan_m6_ads(rule: dict) -> list:
 async def _scan_m7_vip(rule: dict) -> list:
     """M7: VIP Client & Partner Phishing Protection — stub."""
     logger.info("[IMP M7] VIP partner phishing scan stub for '%s'.", rule["brand_name"])
+    return []
+
+
+async def _scan_m3_honeypot(rule: dict) -> list:
+    """M3 Phase 2: MX Honeypot for CEO Fraud Detection — stub.
+
+    Sets up catch-all email addresses to detect incoming CEO fraud emails.
+    Pattern: ceo-honeypot@{protected_domain}, finance-honeypot@{protected_domain}.
+    Uses ML-based BEC detection on incoming messages.
+
+    Integration: SMTP server access + Email security service.
+    Required env vars: HONEYPOT_SMTP_HOST, HONEYPOT_SMTP_PORT, HONEYPOT_MAILBOXES
+    """
+    domains = [d for d in (rule.get("official_domains") or []) if d]
+    if not domains:
+        return []
+    logger.info(
+        "[IMP M3] MX honeypot scan stub for '%s'. Configure SMTP/honeypot integration to enable CEO fraud detection.",
+        rule["brand_name"],
+    )
+    return []
+
+
+async def _scan_m3_inbound_headers(rule: dict) -> list:
+    """M3 Phase 2: Inbound Email Header Analysis — stub.
+
+    Analyses received emails for spoofing patterns: SPF failures, DKIM failures,
+    DMARC failures. Requires Exchange/Gmail integration for email header access.
+
+    Integration: Microsoft Graph API or Google Workspace API.
+    Required env vars: MSGRAPH_CLIENT_ID, MSGRAPH_TENANT_ID, MSGRAPH_CLIENT_SECRET
+    or GOOGLE_WORKSPACE_SERVICE_ACCOUNT_JSON
+    """
+    domains = [d for d in (rule.get("official_domains") or []) if d]
+    if not domains:
+        return []
+    logger.info(
+        "[IMP M3] Inbound header analysis stub for '%s'. Configure Microsoft Graph/Google Workspace API to enable real detection.",
+        rule["brand_name"],
+    )
     return []
 
 

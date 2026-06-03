@@ -5892,6 +5892,10 @@
                 <button class="btn" :class="activeTab === 'findings' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('findings')">Findings</button>
                 <button class="btn" :class="activeTab === 'rules' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('rules')">Rules</button>
                 <button class="btn" :class="activeTab === 'takedowns' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('takedowns')">Takedowns</button>
+                <button class="btn" :class="activeTab === 'alert-rules' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('alert-rules')">Alert Rules</button>
+                <button class="btn" :class="activeTab === 'threat-actors' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('threat-actors')">Threat Actors</button>
+                <button class="btn" :class="activeTab === 'legal-tasks' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('legal-tasks')">Legal Tasks</button>
+                <button class="btn" :class="activeTab === 'sla' ? 'btn-primary' : 'btn-secondary'" @click="changeTab('sla')">SLA</button>
               </div>
 
               <div x-show="activeTab === 'overview'">
@@ -6162,6 +6166,286 @@
                   </table>
                 </div>
               </div>
+
+              <!-- ── Alert Rules Tab ───────────────────────────────── -->
+              <div x-show="activeTab === 'alert-rules'">
+                <div class="flex justify-between items-center mb-4">
+                  <div style="font-size:16px;font-weight:600;">Alert Rules</div>
+                  <button class="btn btn-primary" @click="openAlertRuleForm(null)">Add Alert Rule</button>
+                </div>
+                <template x-if="alertRuleForm.show">
+                  <div class="card mb-4" style="padding:20px;">
+                    <div style="font-weight:600;margin-bottom:12px;" x-text="alertRuleForm.editing ? 'Edit Alert Rule' : 'New Alert Rule'"></div>
+                    <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+                      <div><label class="text-muted text-sm">Name *</label><input x-model="alertRuleForm.data.name" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Min Threat Score</label><input type="number" min="0" max="100" x-model="alertRuleForm.data.min_threat_score" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Match Module (e.g. m1)</label><input x-model="alertRuleForm.data.match_module" placeholder="Any" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Match Finding Type</label><input x-model="alertRuleForm.data.match_finding_type" placeholder="Any" style="width:100%;margin-top:4px;"></div>
+                      <div style="grid-column:1/-1;"><label class="text-muted text-sm">Channels JSON (array of channel configs)</label><textarea x-model="alertRuleForm.data.channels_json" rows="3" style="width:100%;margin-top:4px;font-family:monospace;font-size:12px;" placeholder='[{"type":"slack","webhook":"https://hooks.slack.com/..."}]'></textarea></div>
+                      <div><label class="text-muted text-sm">Description</label><input x-model="alertRuleForm.data.description" style="width:100%;margin-top:4px;"></div>
+                      <div style="display:flex;align-items:center;gap:8px;padding-top:20px;"><input type="checkbox" x-model="alertRuleForm.data.active" id="ar_active"><label for="ar_active">Active</label></div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:16px;">
+                      <button class="btn btn-primary" @click="saveAlertRule()">Save</button>
+                      <button class="btn btn-secondary" @click="resetAlertRuleForm()">Cancel</button>
+                    </div>
+                  </div>
+                </template>
+                <div class="card" style="padding:16px;overflow:auto;">
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+                        <th style="padding:10px 8px;">Name</th>
+                        <th style="padding:10px 8px;">Module</th>
+                        <th style="padding:10px 8px;">Finding Type</th>
+                        <th style="padding:10px 8px;">Min Score</th>
+                        <th style="padding:10px 8px;">Status</th>
+                        <th style="padding:10px 8px;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="ar in alertRules" :key="ar.id">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                          <td style="padding:10px 8px;" x-text="ar.name"></td>
+                          <td style="padding:10px 8px;" x-text="ar.match_module || '—'"></td>
+                          <td style="padding:10px 8px;" x-text="ar.match_finding_type || '—'"></td>
+                          <td style="padding:10px 8px;" x-text="ar.min_threat_score"></td>
+                          <td style="padding:10px 8px;"><span :class="ar.active ? 'badge badge-green' : 'badge badge-gray'" x-text="ar.active ? 'Active' : 'Inactive'"></span></td>
+                          <td style="padding:10px 8px;white-space:nowrap;">
+                            <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" @click="openAlertRuleForm(ar)">Edit</button>
+                            <button class="btn" style="padding:4px 10px;font-size:12px;background:var(--danger);color:#fff;margin-left:4px;" @click="deleteAlertRule(ar)">Delete</button>
+                          </td>
+                        </tr>
+                      </template>
+                      <tr x-show="!alertRulesLoading && alertRules.length === 0">
+                        <td colspan="6" style="padding:24px;text-align:center;color:var(--text-muted);">No alert rules configured.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- ── Threat Actors Tab ──────────────────────────────── -->
+              <div x-show="activeTab === 'threat-actors'">
+                <div class="flex justify-between items-center mb-4">
+                  <div style="font-size:16px;font-weight:600;">Threat Actors</div>
+                  <button class="btn btn-primary" @click="openThreatActorForm(null)">Add Threat Actor</button>
+                </div>
+                <template x-if="threatActorForm.show">
+                  <div class="card mb-4" style="padding:20px;">
+                    <div style="font-weight:600;margin-bottom:12px;" x-text="threatActorForm.editing ? 'Edit Threat Actor' : 'New Threat Actor'"></div>
+                    <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+                      <div><label class="text-muted text-sm">Name *</label><input x-model="threatActorForm.data.name" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Country of Origin</label><input x-model="threatActorForm.data.country_of_origin" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Known Aliases (CSV)</label><input x-model="threatActorForm.data.known_aliases_text" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Attack Patterns (CSV)</label><input x-model="threatActorForm.data.attack_patterns_text" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Registrar Names (CSV)</label><input x-model="threatActorForm.data.registrar_names_text" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Hosting ASNs (CSV)</label><input x-model="threatActorForm.data.hosting_asns_text" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Registrant Emails (CSV)</label><input x-model="threatActorForm.data.registrant_emails_text" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Payment Gateways (CSV)</label><input x-model="threatActorForm.data.payment_gateways_text" style="width:100%;margin-top:4px;"></div>
+                      <div style="grid-column:1/-1;"><label class="text-muted text-sm">Description</label><textarea x-model="threatActorForm.data.description" rows="2" style="width:100%;margin-top:4px;"></textarea></div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:16px;">
+                      <button class="btn btn-primary" @click="saveThreatActor()">Save</button>
+                      <button class="btn btn-secondary" @click="resetThreatActorForm()">Cancel</button>
+                    </div>
+                  </div>
+                </template>
+                <div class="card" style="padding:16px;overflow:auto;">
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+                        <th style="padding:10px 8px;">Name</th>
+                        <th style="padding:10px 8px;">Country</th>
+                        <th style="padding:10px 8px;">Findings</th>
+                        <th style="padding:10px 8px;">Last Seen</th>
+                        <th style="padding:10px 8px;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="actor in threatActors" :key="actor.id">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                          <td style="padding:10px 8px;cursor:pointer;" @click="toggleActor(actor.id)"><span style="font-weight:500;" x-text="actor.name"></span></td>
+                          <td style="padding:10px 8px;" x-text="actor.country_of_origin || '—'"></td>
+                          <td style="padding:10px 8px;" x-text="(actor.linked_finding_ids || []).length"></td>
+                          <td style="padding:10px 8px;" x-text="formatDateTime(actor.last_seen)"></td>
+                          <td style="padding:10px 8px;white-space:nowrap;">
+                            <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" @click="openThreatActorForm(actor)">Edit</button>
+                            <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;margin-left:4px;" @click="correlateActor(actor)">Correlate</button>
+                            <button class="btn" style="padding:4px 10px;font-size:12px;background:var(--danger);color:#fff;margin-left:4px;" @click="deleteThreatActor(actor)">Delete</button>
+                          </td>
+                        </tr>
+                        <tr x-show="expandedActorId === actor.id" style="background:rgba(255,255,255,0.02);">
+                          <td colspan="5" style="padding:16px 12px;">
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+                              <div><span class="text-muted">Aliases:</span> <span x-text="(actor.known_aliases||[]).join(', ') || '—'"></span></div>
+                              <div><span class="text-muted">Attack Patterns:</span> <span x-text="(actor.attack_patterns||[]).join(', ') || '—'"></span></div>
+                              <div><span class="text-muted">Registrars:</span> <span x-text="(actor.registrar_names||[]).join(', ') || '—'"></span></div>
+                              <div><span class="text-muted">Hosting ASNs:</span> <span x-text="(actor.hosting_asns||[]).join(', ') || '—'"></span></div>
+                              <div><span class="text-muted">Registrant Emails:</span> <span x-text="(actor.registrant_emails||[]).join(', ') || '—'"></span></div>
+                              <div><span class="text-muted">Linked Findings:</span> <span x-text="(actor.linked_finding_ids||[]).join(', ') || '—'"></span></div>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                      <tr x-show="!threatActorsLoading && threatActors.length === 0">
+                        <td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);">No threat actors recorded.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- ── Legal Tasks Tab ────────────────────────────────── -->
+              <div x-show="activeTab === 'legal-tasks'">
+                <div class="flex justify-between items-center mb-4">
+                  <div style="font-size:16px;font-weight:600;">Legal Tasks</div>
+                  <button class="btn btn-primary" @click="openLegalTaskForm(null)">Add Legal Task</button>
+                </div>
+                <template x-if="legalTaskForm.show">
+                  <div class="card mb-4" style="padding:20px;">
+                    <div style="font-weight:600;margin-bottom:12px;" x-text="legalTaskForm.editing ? 'Edit Legal Task' : 'New Legal Task'"></div>
+                    <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+                      <div>
+                        <label class="text-muted text-sm">Type</label>
+                        <select x-model="legalTaskForm.data.task_type" style="width:100%;margin-top:4px;">
+                          <option value="udrp">UDRP</option>
+                          <option value="cease_and_desist">Cease &amp; Desist</option>
+                          <option value="trademark_filing">Trademark Filing</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="text-muted text-sm">Status</label>
+                        <select x-model="legalTaskForm.data.status" style="width:100%;margin-top:4px;">
+                          <option value="open">Open</option>
+                          <option value="in_progress">In Progress</option>
+                          <option value="submitted">Submitted</option>
+                          <option value="resolved">Resolved</option>
+                          <option value="closed">Closed</option>
+                        </select>
+                      </div>
+                      <div style="grid-column:1/-1;"><label class="text-muted text-sm">Title *</label><input x-model="legalTaskForm.data.title" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Due Date</label><input type="date" x-model="legalTaskForm.data.due_date" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">External Ref (Jira/Asana)</label><input x-model="legalTaskForm.data.external_ref" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Finding ID</label><input type="number" x-model="legalTaskForm.data.finding_id" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Takedown ID</label><input type="number" x-model="legalTaskForm.data.takedown_id" style="width:100%;margin-top:4px;"></div>
+                      <div style="grid-column:1/-1;"><label class="text-muted text-sm">Notes</label><textarea x-model="legalTaskForm.data.notes" rows="2" style="width:100%;margin-top:4px;"></textarea></div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:16px;">
+                      <button class="btn btn-primary" @click="saveLegalTask()">Save</button>
+                      <button class="btn btn-secondary" @click="resetLegalTaskForm()">Cancel</button>
+                    </div>
+                  </div>
+                </template>
+                <div class="card" style="padding:16px;overflow:auto;">
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+                        <th style="padding:10px 8px;">Title</th>
+                        <th style="padding:10px 8px;">Type</th>
+                        <th style="padding:10px 8px;">Status</th>
+                        <th style="padding:10px 8px;">Due</th>
+                        <th style="padding:10px 8px;">Ext Ref</th>
+                        <th style="padding:10px 8px;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="task in legalTasks" :key="task.id">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                          <td style="padding:10px 8px;" x-text="task.title"></td>
+                          <td style="padding:10px 8px;" x-text="task.task_type"></td>
+                          <td style="padding:10px 8px;"><span :class="statusBadgeClass(task.status)" x-text="task.status"></span></td>
+                          <td style="padding:10px 8px;" x-text="task.due_date ? formatDateTime(task.due_date).substring(0,10) : '—'"></td>
+                          <td style="padding:10px 8px;" x-text="task.external_ref || '—'"></td>
+                          <td style="padding:10px 8px;white-space:nowrap;">
+                            <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" @click="openLegalTaskForm(task)">Edit</button>
+                            <button class="btn" style="padding:4px 10px;font-size:12px;background:var(--danger);color:#fff;margin-left:4px;" @click="deleteLegalTask(task)">Delete</button>
+                          </td>
+                        </tr>
+                      </template>
+                      <tr x-show="!legalTasksLoading && legalTasks.length === 0">
+                        <td colspan="6" style="padding:24px;text-align:center;color:var(--text-muted);">No legal tasks recorded.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- ── SLA Tab ─────────────────────────────────────────── -->
+              <div x-show="activeTab === 'sla'">
+                <div class="flex justify-between items-center mb-4">
+                  <div style="font-size:16px;font-weight:600;">SLA Definitions</div>
+                  <button class="btn btn-primary" @click="openSlaForm(null)">Add SLA</button>
+                </div>
+                <template x-if="slaForm.show">
+                  <div class="card mb-4" style="padding:20px;">
+                    <div style="font-weight:600;margin-bottom:12px;" x-text="slaForm.editing ? 'Edit SLA' : 'New SLA'"></div>
+                    <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+                      <div style="grid-column:1/-1;"><label class="text-muted text-sm">Name *</label><input x-model="slaForm.data.name" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Match Module (e.g. m1)</label><input x-model="slaForm.data.match_module" placeholder="Any" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Match Severity</label>
+                        <select x-model="slaForm.data.match_severity" style="width:100%;margin-top:4px;">
+                          <option value="">Any</option>
+                          <option value="critical">Critical</option>
+                          <option value="high">High</option>
+                          <option value="medium">Medium</option>
+                          <option value="low">Low</option>
+                        </select>
+                      </div>
+                      <div><label class="text-muted text-sm">Time to Detect (min)</label><input type="number" min="0" x-model="slaForm.data.time_to_detect_min" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Time to Triage (min)</label><input type="number" min="0" x-model="slaForm.data.time_to_triage_min" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Time to Takedown (min)</label><input type="number" min="0" x-model="slaForm.data.time_to_takedown_min" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Time to Resolve (min)</label><input type="number" min="0" x-model="slaForm.data.time_to_resolve_min" style="width:100%;margin-top:4px;"></div>
+                      <div><label class="text-muted text-sm">Description</label><input x-model="slaForm.data.description" style="width:100%;margin-top:4px;"></div>
+                      <div style="display:flex;align-items:center;gap:8px;padding-top:20px;"><input type="checkbox" x-model="slaForm.data.active" id="sla_active"><label for="sla_active">Active</label></div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:16px;">
+                      <button class="btn btn-primary" @click="saveSla()">Save</button>
+                      <button class="btn btn-secondary" @click="resetSlaForm()">Cancel</button>
+                    </div>
+                  </div>
+                </template>
+                <div class="card" style="padding:16px;overflow:auto;">
+                  <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                      <tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+                        <th style="padding:10px 8px;">Name</th>
+                        <th style="padding:10px 8px;">Module</th>
+                        <th style="padding:10px 8px;">Severity</th>
+                        <th style="padding:10px 8px;">Detect</th>
+                        <th style="padding:10px 8px;">Triage</th>
+                        <th style="padding:10px 8px;">Takedown</th>
+                        <th style="padding:10px 8px;">Resolve</th>
+                        <th style="padding:10px 8px;">Status</th>
+                        <th style="padding:10px 8px;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="sla in slas" :key="sla.id">
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+                          <td style="padding:10px 8px;" x-text="sla.name"></td>
+                          <td style="padding:10px 8px;" x-text="sla.match_module || '—'"></td>
+                          <td style="padding:10px 8px;" x-text="sla.match_severity || '—'"></td>
+                          <td style="padding:10px 8px;" x-text="slaMinutesToLabel(sla.time_to_detect_min)"></td>
+                          <td style="padding:10px 8px;" x-text="slaMinutesToLabel(sla.time_to_triage_min)"></td>
+                          <td style="padding:10px 8px;" x-text="slaMinutesToLabel(sla.time_to_takedown_min)"></td>
+                          <td style="padding:10px 8px;" x-text="slaMinutesToLabel(sla.time_to_resolve_min)"></td>
+                          <td style="padding:10px 8px;"><span :class="sla.active ? 'badge badge-green' : 'badge badge-gray'" x-text="sla.active ? 'Active' : 'Inactive'"></span></td>
+                          <td style="padding:10px 8px;white-space:nowrap;">
+                            <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" @click="openSlaForm(sla)">Edit</button>
+                            <button class="btn" style="padding:4px 10px;font-size:12px;background:var(--danger);color:#fff;margin-left:4px;" @click="deleteSla(sla)">Delete</button>
+                          </td>
+                        </tr>
+                      </template>
+                      <tr x-show="!slasLoading && slas.length === 0">
+                        <td colspan="9" style="padding:24px;text-align:center;color:var(--text-muted);">No SLA definitions configured.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
             </div><!-- /impersonation-monitoring -->
 
             <!-- ── LOGO & CONTENT MISUSE ───────────────────────────── -->
