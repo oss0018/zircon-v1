@@ -2,6 +2,7 @@ import csv
 import io
 import json
 from datetime import datetime, timezone
+from sqlalchemy import or_
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -274,6 +275,7 @@ async def get_actor(
 @router.get("/actors/{actor_id}/iocs")
 async def list_actor_iocs(
     actor_id: int,
+    limit: int = Query(200, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -282,7 +284,19 @@ async def list_actor_iocs(
     actor = actor_res.scalar_one_or_none()
     if not actor:
         raise HTTPException(status_code=404, detail="Actor not found")
-    rows = (await db.execute(select(CTIIndicator))).scalars().all()
+    rows = (
+        await db.execute(
+            select(CTIIndicator)
+            .where(
+                or_(
+                    CTIIndicator.actor_names.like(f'%"{actor.name}"%'),
+                    CTIIndicator.actor_names.like(f"%{actor.name}%"),
+                )
+            )
+            .order_by(CTIIndicator.created_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
     actor_lower = actor.name.lower()
     return [
         {"id": i.id, "value": i.value, "ioc_type": i.ioc_type, "severity": i.severity, "score": i.score}

@@ -1,4 +1,5 @@
 import re
+import ipaddress
 
 _DEFANG_REPLACEMENTS = [
     (r"hxxps?://", lambda m: "http://" if m.group(0).startswith("hxxp://") else "https://"),
@@ -17,7 +18,8 @@ def refang_text(text: str) -> str:
 
 def extract_iocs(text: str) -> dict[str, list[str]]:
     content = refang_text(text)
-    ips = sorted(set(re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", content)))
+    ip_candidates = set(re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", content))
+    ips = sorted({ip for ip in ip_candidates if _is_valid_ipv4(ip)})
     domains = sorted(set(re.findall(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}\b", content)))
     urls = sorted(set(re.findall(r"\bhttps?://[^\s<>'\"]+", content, flags=re.IGNORECASE)))
     emails = sorted(set(re.findall(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}\b", content)))
@@ -29,3 +31,10 @@ def extract_iocs(text: str) -> dict[str, list[str]]:
         "emails": emails,
         "hashes": hashes,
     }
+
+
+def _is_valid_ipv4(value: str) -> bool:
+    try:
+        return isinstance(ipaddress.ip_address(value), ipaddress.IPv4Address)
+    except ValueError:
+        return False

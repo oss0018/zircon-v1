@@ -16,10 +16,10 @@ def test_stix_factory_indicator_creation():
 
 
 def test_ioc_extractor_refangs_inputs():
-    parsed = extract_iocs("hxxp://evil[.]com/path from user@evil[.]com and 8[.]8[.]8[.]8")
-    assert "http://evil.com/path" in parsed["urls"]
-    assert "evil.com" in parsed["domains"]
-    assert "user@evil.com" in parsed["emails"]
+    parsed = extract_iocs("hxxp://sample[.]example/path from user@sample[.]example and 8[.]8[.]8[.]8")
+    assert "http://sample.example/path" in parsed["urls"]
+    assert "sample.example" in parsed["domains"]
+    assert "user@sample.example" in parsed["emails"]
     assert "8.8.8.8" in parsed["ips"]
 
 

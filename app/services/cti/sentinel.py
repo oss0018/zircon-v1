@@ -1,7 +1,7 @@
 import hmac
 import hashlib
 import base64
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def generate_sentinel_kql_rule(ioc_value: str, ioc_type: str = "ip") -> str:
@@ -31,4 +31,4 @@ def build_log_analytics_signature(workspace_id: str, shared_key_b64: str, body: 
 
 
 def utc_rfc1123_now() -> str:
-    return datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
+    return datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
