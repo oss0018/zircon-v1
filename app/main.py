@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources, social_listening, logo_misuse, infra_intel, lookalike, vulnscan
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources, social_listening, logo_misuse, infra_intel, lookalike, vulnscan, cti
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
 _SPA_HTML_CACHE: str = ""
@@ -210,6 +210,7 @@ app.include_router(logo_misuse.router, prefix="/api/v1/logo-misuse", tags=["logo
 app.include_router(infra_intel.router, prefix="/api/v1/infra", tags=["infra-intelligence"])
 app.include_router(lookalike.router, prefix="/api/v1/lookalike", tags=["lookalike-domains"])
 app.include_router(vulnscan.router, prefix="/api/v1/vulnscan", tags=["vulnscan"])
+app.include_router(cti.router, prefix="/api/v1/cti", tags=["cti"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)
