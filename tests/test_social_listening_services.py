@@ -105,13 +105,17 @@ def test_alert_engine_creates_background_notification(monkeypatch):
 
     scheduled = {"called": False}
 
-    async def _fake_notify(_title, _message, _email, _telegram):
+    async def _fake_notify(title, message, email, telegram):
         return None
+
+    class _Task:
+        def add_done_callback(self, _callback):
+            return None
 
     def _fake_create_task(coro):
         scheduled["called"] = True
         coro.close()
-        return None
+        return _Task()
 
     monkeypatch.setattr(notifications, "notify", _fake_notify)
     monkeypatch.setattr("app.services.social_listening.alert_engine.asyncio.create_task", _fake_create_task)

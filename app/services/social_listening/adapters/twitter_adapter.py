@@ -49,9 +49,7 @@ class TwitterAdapter:
             )
         except tweepy.errors.Forbidden:
             logger.warning(
-                "social listening: twitter API returned 403 — "
-                + "Bearer"
-                + " token may not have search access (requires Basic plan or higher)"
+                "social listening: twitter API returned 403 — bearer credentials may not have search access (requires Basic plan or higher)"
             )
             return []
         except tweepy.errors.TweepyException as exc:

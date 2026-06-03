@@ -16,6 +16,7 @@ class TelegramAdapter:
     _DEFAULT_CHANNELS = ["@cybersecua", "@hackersnews", "@darkwebinformer"]
     _MAX_TERMS = 20
     _MAX_MESSAGES = 20
+    _MAX_FLOOD_WAIT_SECONDS = 300
 
     async def collect(self, rule: SocialListeningRule) -> list[dict]:
         try:
@@ -75,8 +76,16 @@ class TelegramAdapter:
                     try:
                         messages = await client.get_messages(channel, search=term_text, limit=self._MAX_MESSAGES)
                     except FloodWaitError as exc:
-                        wait_seconds = int(getattr(exc, "seconds", 0) or 0)
+                        wait_seconds = int(getattr(exc, "seconds", 0))
                         if wait_seconds > 0:
+                            if wait_seconds > self._MAX_FLOOD_WAIT_SECONDS:
+                                logger.warning(
+                                    "social listening: telegram flood wait too long (%ss) for term '%s' in %s; skipping",
+                                    wait_seconds,
+                                    term_text,
+                                    channel,
+                                )
+                                continue
                             await asyncio.sleep(wait_seconds)
                         try:
                             messages = await client.get_messages(channel, search=term_text, limit=self._MAX_MESSAGES)

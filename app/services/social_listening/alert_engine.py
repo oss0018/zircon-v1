@@ -1,10 +1,27 @@
 import asyncio
 import json
+import logging
 import re
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SLAlert, SLMention, SocialListeningRule
+
+logger = logging.getLogger(__name__)
+_PENDING_NOTIFY_TASKS: set[asyncio.Task] = set()
+
+
+def _on_notify_task_done(task: asyncio.Task) -> None:
+    _PENDING_NOTIFY_TASKS.discard(task)
+    if task.cancelled():
+        return
+    try:
+        exc = task.exception()
+    except Exception as err:
+        logger.warning("social listening: failed reading notification task result: %s", err)
+        return
+    if exc:
+        logger.warning("social listening: notification task failed: %s", exc)
 
 
 class AlertEngine:
@@ -108,7 +125,9 @@ class AlertEngine:
                     f"{snippet}"
                 )
                 try:
-                    asyncio.create_task(notify(combined_title, body_text, alert_email, alert_telegram))
-                except Exception:
-                    pass
+                    task = asyncio.create_task(notify(combined_title, body_text, alert_email, alert_telegram))
+                    _PENDING_NOTIFY_TASKS.add(task)
+                    task.add_done_callback(_on_notify_task_done)
+                except Exception as exc:
+                    logger.warning("social listening: failed to schedule notification task: %s", exc)
         return alerts
