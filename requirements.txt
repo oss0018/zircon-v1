@@ -43,3 +43,4 @@ celery>=5.4.0
 redis>=5.0.7
 geoip2>=4.8.0
 python-whois>=0.9.4
+pytest-asyncio>=1.0.0
