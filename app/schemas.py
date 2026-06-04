@@ -161,7 +161,7 @@ class IntegrationUpdate(BaseModel):
 # ── Search ───────────────────────────────────────────────────────────────────
 class SearchQuery(BaseModel):
     query: str = Field(..., min_length=1)
-    source: str = "local"  # local | osint | all
+    source: str = "local"  # local | osint | deep_search | all
     integrations: List[str] = []
     query_type: str = "general"  # email/domain/ip/url/hash/general
     limit: int = 50
@@ -816,7 +816,7 @@ class TIDashboardOut(BaseModel):
 
 class StorageSourceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    source_type: str = Field(..., pattern=r"^(s3|sftp|webdav)$")
+    source_type: str = Field(..., pattern=r"^(s3|sftp|webdav|localfs|api)$")
     config: dict = {}                       # raw config dict (secrets will be encrypted)
     is_enabled: bool = True
     schedule: str = "@hourly"
@@ -870,6 +870,7 @@ class StorageSourceOut(BaseModel):
     last_run_scanned: int
     last_run_indexed: int
     last_run_errors: int
+    last_run_error_msg: str = ""
     created_at: datetime
     updated_at: datetime
 

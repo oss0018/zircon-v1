@@ -79,6 +79,17 @@ document.addEventListener('alpine:init', () => {
           showToast(`Found ${this.grepTotal} matches in ${this.grepFilesScanned} files`, 'success');
         }
 
+        if (this.source === 'deep_search' || this.source === 'all') {
+          const data = await api.post('/search/', {
+            query: this.query,
+            source: 'deep_search',
+            query_type: this.queryType,
+            limit: 50,
+          });
+          this.results = this.results.concat(data.results || []);
+          if (this.source === 'deep_search') this.resultTab = 'osint';
+        }
+
         // OSINT if selected
         if ((this.source === 'osint' || this.source === 'all') && this.selectedIntegrations.length > 0) {
           const data = await api.post('/search/', {
@@ -88,8 +99,9 @@ document.addEventListener('alpine:init', () => {
             query_type: this.queryType,
             limit: 50,
           });
-          this.results = data.results || [];
+          this.results = this.results.concat(data.results || []);
           if (this.source === 'osint') this.resultTab = 'osint';
+          if (this.source === 'all' && this.results.length > 0) this.resultTab = 'osint';
         }
 
         await this.loadHistory();

@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     uploads_dir: str = "./data/uploads"
     monitored_dir: str = "./data/monitored"
     deep_search_dir: str = "deep_search_data"
+    deep_search_staging_dir: str = "/tmp/ds_staging"
+    elasticsearch_url: str = ""
+    elasticsearch_username: str = ""
+    elasticsearch_password: str = ""
 
     http_port: int = 8181
     https_port: int = 8443

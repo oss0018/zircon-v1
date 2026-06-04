@@ -11,11 +11,36 @@ services:
       - "8443:8443"
     depends_on:
       - redis
+      - elasticsearch
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=changeme
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.0
+    profiles: ["admin-tools"]
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=changeme
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
 
   celery_cti:
     build: .
@@ -24,6 +49,17 @@ services:
       - .env
     depends_on:
       - redis
+
+  celery_deepsearch:
+    build: .
+    command: celery -A app.services.cti.tasks.celery_app worker --loglevel=info -Q deep_search --concurrency=4
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    volumes:
+      - /mnt/local_dumps:/mnt/local_dumps:ro
+      - staging_tmp:/tmp/ds_staging
 
   cti_beat_scheduler:
     build: .
@@ -40,3 +76,7 @@ services:
       - .env
     depends_on:
       - redis
+
+volumes:
+  es_data:
+  staging_tmp:
