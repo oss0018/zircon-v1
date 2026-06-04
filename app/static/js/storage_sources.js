@@ -100,7 +100,7 @@ document.addEventListener('alpine:init', () => {
         { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'https://api.example.com/files' },
         { key: 'method', label: 'Method', type: 'select', required: true, options: ['GET', 'POST'] },
         { key: 'auth_type', label: 'Auth Type', type: 'select', required: true, options: ['none', 'bearer', 'api_key', 'basic'] },
-        { key: 'bearer_token', label: '******', type: 'password', required: false, placeholder: 'Optional' },
+        { key: 'bearer_token', label: 'Bearer Auth', type: 'password', required: false, placeholder: 'Optional' },
         { key: 'api_token', label: 'API Token', type: 'password', required: false, placeholder: 'Optional' },
         { key: 'api_key_header', label: 'API Key Header', type: 'text', required: false, placeholder: 'X-API-Key' },
         { key: 'username', label: 'Username', type: 'text', required: false, placeholder: 'Optional' },

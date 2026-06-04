@@ -23,6 +23,7 @@ This repository copy preserves the Deep Search technical specification reference
   - `ZIRCON_ELASTICSEARCH_URL`
   - `ZIRCON_ELASTICSEARCH_USERNAME`
   - `ZIRCON_ELASTICSEARCH_PASSWORD`
+- The compose mount used by the deep-search worker can be overridden with `DEEP_SEARCH_LOCAL_MOUNT`.
 - Docker Compose includes Elasticsearch, Kibana, and a `celery_deepsearch` worker profile/service entry.
 
 ## Source of truth

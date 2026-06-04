@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from app.schemas import StorageSourceOut
 from app.services.connectors import APISourceConnector, LocalFSConnector, get_connector
 
 
@@ -31,6 +32,28 @@ def test_storage_sources_support_api_and_localfs_ui():
     js = Path("app/static/js/storage_sources.js").read_text(encoding="utf-8")
     assert "{ value: 'api',    label: 'API Source' }" in js
     assert "{ value: 'localfs', label: 'Local Filesystem' }" in js
+    assert "Bearer Auth" in js
+
+
+def test_storage_source_schema_exposes_last_run_error_message():
+    payload = StorageSourceOut(
+        id=1,
+        name="Example",
+        source_type="api",
+        is_enabled=True,
+        schedule="@hourly",
+        max_file_size_mb=25,
+        recursive=True,
+        last_run_at=None,
+        last_run_status="error",
+        last_run_scanned=10,
+        last_run_indexed=0,
+        last_run_errors=1,
+        last_run_error_msg="boom",
+        created_at="2026-06-04T00:00:00Z",
+        updated_at="2026-06-04T00:00:00Z",
+    )
+    assert payload.model_dump()["last_run_error_msg"] == "boom"
 
 
 def test_deep_search_spec_reference_exists():

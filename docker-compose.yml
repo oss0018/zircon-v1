@@ -58,7 +58,7 @@ services:
     depends_on:
       - redis
     volumes:
-      - /mnt/local_dumps:/mnt/local_dumps:ro
+      - ${DEEP_SEARCH_LOCAL_MOUNT:-/mnt/local_dumps}:/mnt/local_dumps:ro
       - staging_tmp:/tmp/ds_staging
 
   cti_beat_scheduler:
