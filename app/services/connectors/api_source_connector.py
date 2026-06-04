@@ -144,7 +144,8 @@ class APISourceConnector(StorageConnector):
                 for chunk in response.iter_bytes(chunk_size=65536):
                     total += len(chunk)
                     if total > max_bytes:
-                        chunks.append(chunk[: max_bytes - (total - len(chunk))])
+                        remaining_bytes = max_bytes - (total - len(chunk))
+                        chunks.append(chunk[:remaining_bytes])
                         break
                     chunks.append(chunk)
         return b"".join(chunks)
