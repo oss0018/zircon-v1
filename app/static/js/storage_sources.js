@@ -37,6 +37,8 @@ document.addEventListener('alpine:init', () => {
     ],
 
     sourceTypes: [
+      { value: 'api',    label: 'API Source' },
+      { value: 'localfs', label: 'Local Filesystem' },
       { value: 's3',     label: 'S3 / S3-compatible' },
       { value: 'sftp',   label: 'SFTP' },
       { value: 'webdav', label: 'WebDAV' },
@@ -93,6 +95,29 @@ document.addEventListener('alpine:init', () => {
       ];
     },
 
+    apiFields() {
+      return [
+        { key: 'base_url', label: 'Base URL', type: 'text', required: true, placeholder: 'https://api.example.com/files' },
+        { key: 'method', label: 'Method', type: 'select', required: true, options: ['GET', 'POST'] },
+        { key: 'auth_type', label: 'Auth Type', type: 'select', required: true, options: ['none', 'bearer', 'api_key', 'basic'] },
+        { key: 'bearer_token', label: 'Bearer Auth', type: 'password', required: false, placeholder: 'Optional' },
+        { key: 'api_token', label: 'API Token', type: 'password', required: false, placeholder: 'Optional' },
+        { key: 'api_key_header', label: 'API Key Header', type: 'text', required: false, placeholder: 'X-API-Key' },
+        { key: 'username', label: 'Username', type: 'text', required: false, placeholder: 'Optional' },
+        { key: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Optional' },
+        { key: 'items_json_path', label: 'Items JSON Path', type: 'text', required: false, placeholder: 'data.items' },
+        { key: 'item_path_field', label: 'Item Path Field', type: 'text', required: false, placeholder: 'path' },
+        { key: 'item_size_field', label: 'Item Size Field', type: 'text', required: false, placeholder: 'size' },
+        { key: 'item_mtime_field', label: 'Item Mtime Field', type: 'text', required: false, placeholder: 'mtime' },
+      ];
+    },
+
+    localFsFields() {
+      return [
+        { key: 'base_path', label: 'Base Path', type: 'text', required: true, placeholder: '/mnt/local_dumps' },
+      ];
+    },
+
     webdavFields() {
       return [
         { key: 'base_url',  label: 'Base URL',  type: 'text',     required: true,  placeholder: 'https://dav.example.com/files' },
@@ -104,6 +129,8 @@ document.addEventListener('alpine:init', () => {
     },
 
     configFields(sourceType) {
+      if (sourceType === 'api')    return this.apiFields();
+      if (sourceType === 'localfs') return this.localFsFields();
       if (sourceType === 's3')     return this.s3Fields();
       if (sourceType === 'sftp')   return this.sftpFields();
       if (sourceType === 'webdav') return this.webdavFields();

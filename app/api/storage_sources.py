@@ -29,7 +29,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Secret field names that must never be returned to the client
-_SECRET_FIELDS = {"secret_key", "password", "private_key", "token"}
+_SECRET_FIELDS = {
+    "secret_key",
+    "password",
+    "private_key",
+    "private_key_pem",
+    "token",
+    "api_token",
+    "bearer_token",
+    "key_passphrase",
+}
 
 
 def _mask_config(config: dict) -> dict:
