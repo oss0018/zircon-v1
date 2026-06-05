@@ -21,12 +21,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import get_db
-from app.models import User, StorageSource, StorageFileCatalog
+from app.models import User, StorageSource, StorageFileCatalog, DSStorageSource
 from app.schemas import StorageSourceCreate, StorageSourceUpdate, StorageSourceOut, StorageFileCatalogOut
 from app.services.crypto import encrypt, decrypt
+from app.services.deep_search_audit import DeepSearchAuditEvent, audit_log
+from app.services.deep_search_rbac import require_role
+from app.services.storage_credential_vault import StorageCredentialVault
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_vault: StorageCredentialVault | None = None
 
 # Secret field names that must never be returned to the client
 _SECRET_FIELDS = {
@@ -39,6 +43,59 @@ _SECRET_FIELDS = {
     "bearer_token",
     "key_passphrase",
 }
+
+
+def _get_vault() -> StorageCredentialVault:
+    global _vault
+    if _vault is None:
+        _vault = StorageCredentialVault()
+    return _vault
+
+
+def _decrypt_config_payload(config_encrypted: str) -> dict:
+    try:
+        raw = json.loads(decrypt(config_encrypted) or "{}")
+    except Exception:
+        raw = {}
+    try:
+        return _get_vault().decrypt_credentials(raw)
+    except Exception:
+        return raw
+
+
+def _encrypt_config_payload(config: dict) -> str:
+    encrypted_creds = _get_vault().encrypt_credentials(config or {})
+    return encrypt(json.dumps(encrypted_creds))
+
+
+async def _sync_ds_source(db: AsyncSession, source: StorageSource, config: dict, user: User):
+    result = await db.execute(select(DSStorageSource).where(DSStorageSource.id == source.id))
+    ds_source = result.scalar_one_or_none()
+    if ds_source is None:
+        ds_source = DSStorageSource(id=source.id)
+        db.add(ds_source)
+    ds_source.display_name = source.name
+    ds_source.source_type = source.source_type
+    ds_source.enabled = source.is_enabled
+    ds_source.schedule_cron = source.schedule
+    ds_source.max_file_size_mb = source.max_file_size_mb
+    ds_source.path = str(config.get("path", "") or "")
+    ds_source.host = str(config.get("host", "") or "")
+    try:
+        ds_source.port = int(config["port"]) if config.get("port") not in (None, "") else None
+    except Exception:
+        ds_source.port = None
+    ds_source.protocol = str(config.get("protocol", "") or "")
+    ds_source.bucket_name = str(config.get("bucket_name", "") or "")
+    ds_source.api_config = {
+        k: v for k, v in (config or {}).items()
+        if k not in _SECRET_FIELDS
+    }
+    ds_source.credentials = {
+        k: v for k, v in (config or {}).items()
+        if k in _SECRET_FIELDS or k in {"username", "access_key", "endpoint_url", "region"}
+    }
+    ds_source.created_by = getattr(user, "id", None)
 
 
 def _mask_config(config: dict) -> dict:
@@ -54,10 +111,7 @@ def _mask_config(config: dict) -> dict:
 
 def _merge_config(existing_encrypted: str, updates: dict) -> dict:
     """Merge *updates* into the existing (decrypted) config, keeping old secrets if update is '***'."""
-    try:
-        existing = json.loads(decrypt(existing_encrypted) or "{}")
-    except Exception:
-        existing = {}
+    existing = _decrypt_config_payload(existing_encrypted)
     for k, v in updates.items():
         if k in _SECRET_FIELDS and v == "***":
             continue  # keep existing secret
@@ -78,18 +132,27 @@ async def list_storage_sources(
 async def create_storage_source(
     data: StorageSourceCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("sec_engineer", "admin")),
 ):
+    encrypted_config = _encrypt_config_payload(data.config)
     source = StorageSource(
         name=data.name,
         source_type=data.source_type,
-        config_encrypted=encrypt(json.dumps(data.config)),
+        config_encrypted=encrypted_config,
         is_enabled=data.is_enabled,
         schedule=data.schedule,
         max_file_size_mb=data.max_file_size_mb,
         recursive=data.recursive,
     )
     db.add(source)
+    await db.flush()
+    await _sync_ds_source(db, source, data.config or {}, current_user)
+    await audit_log(
+        DeepSearchAuditEvent.SOURCE_CREATE,
+        current_user.id,
+        {"source_id": source.id, "source_type": source.source_type},
+        db,
+    )
     await db.commit()
     await db.refresh(source)
     return source
@@ -119,10 +182,7 @@ async def get_storage_source_config(
     source = result.scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=404, detail="Storage source not found")
-    try:
-        config = json.loads(decrypt(source.config_encrypted) or "{}")
-    except Exception:
-        config = {}
+    config = _decrypt_config_payload(source.config_encrypted)
     return {"config": _mask_config(config)}
 
 
@@ -131,7 +191,7 @@ async def update_storage_source(
     source_id: int,
     data: StorageSourceUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("sec_engineer", "admin")),
 ):
     result = await db.execute(select(StorageSource).where(StorageSource.id == source_id))
     source = result.scalar_one_or_none()
@@ -150,7 +210,16 @@ async def update_storage_source(
         source.recursive = data.recursive
     if data.config is not None:
         merged = _merge_config(source.config_encrypted, data.config)
-        source.config_encrypted = encrypt(json.dumps(merged))
+        source.config_encrypted = _encrypt_config_payload(merged)
+        await audit_log(
+            DeepSearchAuditEvent.SOURCE_CREDENTIALS_EDIT,
+            current_user.id,
+            {"source_id": source.id},
+            db,
+        )
+
+    source_config = _decrypt_config_payload(source.config_encrypted)
+    await _sync_ds_source(db, source, source_config, current_user)
 
     await db.commit()
     await db.refresh(source)
@@ -161,12 +230,21 @@ async def update_storage_source(
 async def delete_storage_source(
     source_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("sec_engineer", "admin")),
 ):
     result = await db.execute(select(StorageSource).where(StorageSource.id == source_id))
     source = result.scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=404, detail="Storage source not found")
+    ds_row = (await db.execute(select(DSStorageSource).where(DSStorageSource.id == source_id))).scalar_one_or_none()
+    if ds_row:
+        await db.delete(ds_row)
+    await audit_log(
+        DeepSearchAuditEvent.SOURCE_DELETE,
+        current_user.id,
+        {"source_id": source_id},
+        db,
+    )
     await db.delete(source)
     await db.commit()
     return {"ok": True}
@@ -188,7 +266,7 @@ async def test_storage_source(
     from app.services.connectors import get_connector
 
     try:
-        config = json.loads(decrypt(source.config_encrypted) or "{}")
+        config = _decrypt_config_payload(source.config_encrypted)
         connector = get_connector(source.source_type, config)
         loop = asyncio.get_event_loop()
         test_result = await loop.run_in_executor(None, connector.test_connection)
