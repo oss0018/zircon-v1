@@ -43,6 +43,7 @@ _SECRET_FIELDS = {
     "bearer_token",
     "key_passphrase",
 }
+_CREDENTIAL_METADATA_FIELDS = {"username", "access_key", "endpoint_url", "region"}
 
 
 def _get_vault() -> StorageCredentialVault:
@@ -55,11 +56,11 @@ def _get_vault() -> StorageCredentialVault:
 def _decrypt_config_payload(config_encrypted: str) -> dict:
     try:
         raw = json.loads(decrypt(config_encrypted) or "{}")
-    except Exception:
+    except (TypeError, json.JSONDecodeError):
         raw = {}
     try:
         return _get_vault().decrypt_credentials(raw)
-    except Exception:
+    except ValueError:
         return raw
 
 
@@ -69,6 +70,7 @@ def _encrypt_config_payload(config: dict) -> str:
 
 
 async def _sync_ds_source(db: AsyncSession, source: StorageSource, config: dict, user: User):
+    """Mirror legacy storage_sources rows into ds_sources for Deep Search phase-1 schema."""
     result = await db.execute(select(DSStorageSource).where(DSStorageSource.id == source.id))
     ds_source = result.scalar_one_or_none()
     if ds_source is None:
@@ -82,8 +84,10 @@ async def _sync_ds_source(db: AsyncSession, source: StorageSource, config: dict,
     ds_source.path = str(config.get("path", "") or "")
     ds_source.host = str(config.get("host", "") or "")
     try:
-        ds_source.port = int(config["port"]) if config.get("port") not in (None, "") else None
-    except Exception:
+        port_value = config.get("port")
+        ds_source.port = int(port_value) if port_value not in (None, "") else None
+    except (TypeError, ValueError):
+        logger.warning("Invalid port value for source %s: %r", source.id, config.get("port"))
         ds_source.port = None
     ds_source.protocol = str(config.get("protocol", "") or "")
     ds_source.bucket_name = str(config.get("bucket_name", "") or "")
@@ -93,7 +97,7 @@ async def _sync_ds_source(db: AsyncSession, source: StorageSource, config: dict,
     }
     ds_source.credentials = {
         k: v for k, v in (config or {}).items()
-        if k in _SECRET_FIELDS or k in {"username", "access_key", "endpoint_url", "region"}
+        if k in _SECRET_FIELDS or k in _CREDENTIAL_METADATA_FIELDS
     }
     ds_source.created_by = getattr(user, "id", None)
 

@@ -1,10 +1,12 @@
 import base64
+import binascii
 import hashlib
 import json
 import logging
 import os
 from typing import Any
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ class StorageCredentialVault:
 
         try:
             kek = base64.b64decode(raw_kek)
-        except Exception as exc:  # noqa: BLE001
+        except (binascii.Error, ValueError) as exc:
             raise ValueError("DS_CREDENTIAL_KEK must be valid base64") from exc
         if len(kek) != 32:
             raise ValueError("DS_CREDENTIAL_KEK must decode to exactly 32 bytes")
@@ -64,7 +66,7 @@ class StorageCredentialVault:
             nonce = base64.b64decode(nonce_b64)
             ciphertext = base64.b64decode(ciphertext_b64)
             plain = self._aesgcm.decrypt(nonce, ciphertext, None)
-        except Exception as exc:  # noqa: BLE001
+        except (binascii.Error, ValueError, InvalidTag) as exc:
             raise ValueError(f"Failed to decrypt credential field '{field}': invalid KEK or ciphertext") from exc
         return plain.decode("utf-8")
 
@@ -97,6 +99,6 @@ class StorageCredentialVault:
                 parsed = json.loads(value)
                 if isinstance(parsed, dict):
                     return parsed
-            except Exception:  # noqa: BLE001
+            except json.JSONDecodeError:
                 return {}
         return {}

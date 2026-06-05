@@ -1,9 +1,11 @@
 import os
-from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 from app.models import DSChunk, DSFile, DSLeakRecord, DSMonitoredEntity, DSStorageSource
+from app.services.deep_search_audit import DeepSearchAuditEvent
+from app.services.deep_search_rbac import require_role
 from app.services.security import PathTraversalError, sanitise_path
 from app.services.storage_credential_vault import StorageCredentialVault
 
@@ -100,14 +102,20 @@ def test_deep_search_schema_models_have_required_uniques():
     assert "uq_ds_monitored_entities_type_value" in monitored_uniques
 
 
-def test_storage_source_api_wires_audit_and_rbac_and_vault():
-    source = Path("app/api/storage_sources.py").read_text(encoding="utf-8")
-    assert "require_role(\"sec_engineer\", \"admin\")" in source
-    assert "DeepSearchAuditEvent.SOURCE_CREATE" in source
-    assert "DeepSearchAuditEvent.SOURCE_DELETE" in source
-    assert "DeepSearchAuditEvent.SOURCE_CREDENTIALS_EDIT" in source
-    assert "_encrypt_config_payload" in source
-    assert "_decrypt_config_payload" in source
+@pytest.mark.asyncio
+async def test_deep_search_rbac_require_role_accepts_and_rejects():
+    dependency = require_role("sec_engineer", "admin")
+    allowed_user = type("U", (), {"role": "admin"})()
+    denied_user = type("U", (), {"role": "analyst"})()
+    assert await dependency(allowed_user) is allowed_user
+    with pytest.raises(HTTPException):
+        await dependency(denied_user)
+
+
+def test_deep_search_audit_event_values_are_canonical():
+    assert DeepSearchAuditEvent.SOURCE_CREATE.value == "source.create"
+    assert DeepSearchAuditEvent.SOURCE_DELETE.value == "source.delete"
+    assert DeepSearchAuditEvent.SOURCE_CREDENTIALS_EDIT.value == "source.credentials_edit"
 
 
 def test_ds_storage_source_model_includes_credentials_column():

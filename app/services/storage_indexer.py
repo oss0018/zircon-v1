@@ -243,7 +243,8 @@ async def run_source_indexing(source_id: int) -> dict:
         raw_config = json.loads(decrypt(source.config_encrypted) or "{}")
         try:
             config = StorageCredentialVault().decrypt_credentials(raw_config)
-        except Exception:
+        except ValueError as exc:
+            logger.warning("[storage_indexer] credential decrypt failed for source %d: %s", source_id, exc)
             config = raw_config
 
         max_file_size_bytes = (source.max_file_size_mb or 25) * 1024 * 1024
