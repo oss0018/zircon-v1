@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import ImpersonationFinding
 
@@ -14,7 +15,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _score_filter_from_severity(severity: Optional[str]):
+def _score_filter_from_severity(severity: Optional[str]) -> Optional[ColumnElement[bool]]:
     if not severity:
         return None
     normalized = severity.strip().lower()

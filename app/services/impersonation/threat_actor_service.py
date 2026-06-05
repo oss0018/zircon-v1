@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ImpersonationFinding, ThreatActor
 from app.services.impersonation.threat_actor_correlator import correlate_finding, link_finding_to_actor
 
+CORRELATION_BATCH_SIZE = 200
+
 
 async def list_threat_actors(db: AsyncSession) -> list[ThreatActor]:
     return (await db.execute(select(ThreatActor).order_by(ThreatActor.last_seen.desc()))).scalars().all()
@@ -34,11 +36,23 @@ async def delete_threat_actor(db: AsyncSession, actor_id: int) -> None:
 
 async def correlate_actor_findings(db: AsyncSession, actor_id: int) -> dict:
     actor = await get_threat_actor_or_404(db, actor_id)
-    findings = (await db.execute(select(ImpersonationFinding))).scalars().all()
     matched = 0
-    for finding in findings:
-        matches = await correlate_finding(finding.id, db=db)
-        if any(match_actor_id == actor.id for match_actor_id, _ in matches):
-            await link_finding_to_actor(finding.id, actor.id, db=db)
-            matched += 1
+    offset = 0
+    while True:
+        findings = (
+            await db.execute(
+                select(ImpersonationFinding.id)
+                .order_by(ImpersonationFinding.id)
+                .limit(CORRELATION_BATCH_SIZE)
+                .offset(offset)
+            )
+        ).scalars().all()
+        if not findings:
+            break
+        for finding_id in findings:
+            matches = await correlate_finding(finding_id, db=db)
+            if any(match_actor_id == actor.id for match_actor_id, _ in matches):
+                await link_finding_to_actor(finding_id, actor.id, db=db)
+                matched += 1
+        offset += CORRELATION_BATCH_SIZE
     return {"actor_id": actor.id, "matched_findings": matched}

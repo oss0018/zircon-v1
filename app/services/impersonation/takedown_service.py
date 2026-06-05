@@ -45,6 +45,7 @@ async def update_takedown(
 ) -> TakedownRequest:
     row = await get_takedown_or_404(db, takedown_id)
     if status is not None:
+        # API compatibility: frontend may send "completed", while DB/UI status remains "resolved".
         normalized = "resolved" if status == "completed" else status
         row.status = normalized
         if normalized == "submitted":

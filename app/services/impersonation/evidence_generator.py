@@ -143,7 +143,7 @@ async def _http_headers_snapshot(url: str) -> dict:
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             resp = await client.get(url)
-            headers = {k: v for k, v in resp.headers.items()}
+            headers = dict(resp.headers)
             return {"status_code": resp.status_code, "headers": headers}
     except Exception as exc:  # noqa: BLE001
         logger.warning("[EvidenceGen] Header capture failed for %s: %s", url, exc)

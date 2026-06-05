@@ -679,6 +679,7 @@ async def update_takedown(
 ):
     takedown = await _get_takedown_or_404(db, takedown_id)
     if body.status is not None:
+        # Compatibility: frontend workflow may submit "completed", stored status remains "resolved".
         normalized_status = "resolved" if body.status == "completed" else body.status
         takedown.status = normalized_status
         if normalized_status == "submitted":

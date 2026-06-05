@@ -41,12 +41,12 @@ def compute_sla_compliance(
             return None
         return int((end - start).total_seconds() // 60)
 
-    detect_min = _minutes(detected_at, triaged_at)
+    detect_to_triage_min = _minutes(detected_at, triaged_at)
     takedown_min = _minutes(triaged_at, takedown_completed_at)
     resolve_min = _minutes(detected_at, resolved_at)
     return {
-        "detect_sla_met": detect_min is None or detect_min <= policy.time_to_detect_min,
-        "triage_sla_met": detect_min is None or detect_min <= policy.time_to_triage_min,
-        "takedown_sla_met": takedown_min is None or takedown_min <= policy.time_to_takedown_min,
-        "resolve_sla_met": resolve_min is None or resolve_min <= policy.time_to_resolve_min,
+        "detect_sla_met": detect_to_triage_min is not None and detect_to_triage_min <= policy.time_to_detect_min,
+        "triage_sla_met": detect_to_triage_min is not None and detect_to_triage_min <= policy.time_to_triage_min,
+        "takedown_sla_met": takedown_min is not None and takedown_min <= policy.time_to_takedown_min,
+        "resolve_sla_met": resolve_min is not None and resolve_min <= policy.time_to_resolve_min,
     }
