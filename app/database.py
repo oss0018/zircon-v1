@@ -404,6 +404,39 @@ def _migrate_cti_schema(conn) -> None:
         logger.warning("Could not migrate CTI schema: %s", exc)
 
 
+def _migrate_ds_source_credentials(conn) -> None:
+    """Encrypt plaintext sensitive credentials in ds_sources.credentials."""
+    from sqlalchemy import inspect, text
+    import json
+
+    from app.services.storage_credential_vault import StorageCredentialVault
+
+    try:
+        inspector = inspect(conn)
+        if "ds_sources" not in set(inspector.get_table_names()):
+            return
+        rows = conn.execute(text("SELECT id, credentials FROM ds_sources")).fetchall()
+        if not rows:
+            return
+        vault = StorageCredentialVault()
+        is_postgres = conn.engine.dialect.name == "postgresql"
+        update_stmt = (
+            text("UPDATE ds_sources SET credentials = CAST(:credentials AS JSONB) WHERE id = :id")
+            if is_postgres
+            else text("UPDATE ds_sources SET credentials = :credentials WHERE id = :id")
+        )
+        for row in rows:
+            creds = vault.parse_json_credentials(row.credentials)
+            if not creds:
+                continue
+            encrypted = vault.encrypt_credentials(creds)
+            if encrypted == creds:
+                continue
+            conn.execute(update_stmt, {"credentials": json.dumps(encrypted), "id": row.id})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate ds_sources credentials: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -427,3 +460,5 @@ async def init_db():
         await conn.run_sync(_migrate_lookalike_domains)
         # Ensure CTI MVP schema columns exist on upgrades
         await conn.run_sync(_migrate_cti_schema)
+        # Encrypt existing ds_sources credentials (if ds_sources already exists)
+        await conn.run_sync(_migrate_ds_source_credentials)

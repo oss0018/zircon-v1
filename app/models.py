@@ -1,11 +1,30 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Text, ForeignKey, BigInteger, UniqueConstraint, Index
+from sqlalchemy import (
+    JSON,
+    Column,
+    Integer,
+    String,
+    Boolean,
+    Float,
+    DateTime,
+    Text,
+    ForeignKey,
+    BigInteger,
+    UniqueConstraint,
+    Index,
+    Computed,
+)
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from app.database import Base
+from app.config import settings
 
 
 def _utcnow():
     return datetime.now(timezone.utc)
+
+
+_IS_POSTGRES = settings.database_url.startswith("postgresql")
 
 
 class User(Base):
@@ -424,6 +443,134 @@ class StorageFileCatalog(Base):
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     source = relationship("StorageSource", back_populates="catalog_entries")
+
+
+# ── Deep Search (TS-DS-001 Phase 1 foundation) ───────────────────────────────
+
+_DS_JSON = JSONB if _IS_POSTGRES else JSON
+_DS_TEXT_ARRAY = ARRAY(Text) if _IS_POSTGRES else JSON
+_DS_TSVECTOR = TSVECTOR if _IS_POSTGRES else Text
+
+
+class DSStorageSource(Base):
+    __tablename__ = "ds_sources"
+    id = Column(Integer, primary_key=True)
+    display_name = Column(String(255), nullable=False)
+    source_type = Column(String(32), nullable=False)
+    host = Column(String(255), default="")
+    port = Column(Integer, nullable=True)
+    path = Column(String(2048), default="")
+    protocol = Column(String(32), default="")
+    bucket_name = Column(String(255), default="")
+    credentials = Column(_DS_JSON, default=dict)
+    api_config = Column(_DS_JSON, default=dict)
+    schedule_cron = Column(String(100), default="@hourly")
+    max_file_size_mb = Column(Integer, default=25)
+    include_extensions = Column(_DS_TEXT_ARRAY, default=list)
+    exclude_extensions = Column(_DS_TEXT_ARRAY, default=list)
+    enabled = Column(Boolean, default=True)
+    last_crawl_at = Column(DateTime, nullable=True)
+    last_crawl_started_at = Column(DateTime, nullable=True)
+    last_crawl_completed_at = Column(DateTime, nullable=True)
+    last_crawl_status = Column(String(20), default="")
+    last_crawl_error = Column(Text, default="")
+    last_crawl_files_scanned = Column(Integer, default=0)
+    last_crawl_files_indexed = Column(Integer, default=0)
+    health_status = Column(String(20), default="unknown")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class DSFile(Base):
+    __tablename__ = "ds_files"
+    __table_args__ = (
+        UniqueConstraint("source_id", "file_path", name="uq_ds_files_source_path"),
+        Index("idx_ds_files_source", "source_id"),
+        Index("idx_ds_files_status", "index_status"),
+        Index("idx_ds_files_severity", "severity_max"),
+        Index("idx_ds_files_path", "file_path"),
+    )
+    id = Column(Integer, primary_key=True)
+    source_id = Column(Integer, ForeignKey("ds_sources.id", ondelete="CASCADE"), nullable=False)
+    file_path = Column(String(4096), nullable=False)
+    file_name = Column(String(512), default="")
+    index_status = Column(String(20), default="pending")
+    parse_mode = Column(String(20), default="auto")
+    leak_count = Column(Integer, default=0)
+    severity_max = Column(Integer, default=0)
+    has_credentials = Column(Boolean, default=False)
+    has_pii = Column(Boolean, default=False)
+    has_api_keys = Column(Boolean, default=False)
+    pattern_names = Column(_DS_TEXT_ARRAY, default=list)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class DSChunk(Base):
+    __tablename__ = "ds_chunks"
+    __table_args__ = (
+        Index("idx_ds_chunks_file", "file_id"),
+        Index("idx_ds_chunks_fts", "fts_vector", postgresql_using="gin"),
+    )
+    id = Column(Integer, primary_key=True)
+    file_id = Column(Integer, ForeignKey("ds_files.id", ondelete="CASCADE"), nullable=False)
+    chunk_index = Column(Integer, default=0)
+    content = Column(Text, default="")
+    if _IS_POSTGRES:
+        fts_vector = Column(
+            _DS_TSVECTOR,
+            Computed("to_tsvector('simple', content)", persisted=True),
+        )
+    else:
+        fts_vector = Column(Text, default="")
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class DSLeakRecord(Base):
+    __tablename__ = "ds_leak_records"
+    __table_args__ = (
+        Index("idx_ds_leak_file", "file_id"),
+        Index("idx_ds_leak_category", "category"),
+        Index("idx_ds_leak_severity", "severity"),
+        Index("idx_ds_leak_email", "email"),
+        Index("idx_ds_leak_domain", "email_domain"),
+        Index("idx_ds_leak_pattern", "pattern_name"),
+    )
+    id = Column(Integer, primary_key=True)
+    file_id = Column(Integer, ForeignKey("ds_files.id", ondelete="CASCADE"), nullable=False)
+    chunk_id = Column(Integer, ForeignKey("ds_chunks.id", ondelete="CASCADE"), nullable=True)
+    pattern_name = Column(String(120), nullable=False)
+    category = Column(String(80), default="")
+    severity = Column(Integer, default=0)
+    matched_value = Column(Text, default="")
+    matched_value_masked = Column(Text, default="")
+    context_before = Column(Text, default="")
+    context_after = Column(Text, default="")
+    line_number = Column(Integer, nullable=True)
+    char_offset = Column(Integer, nullable=True)
+    email = Column(String(320), default="")
+    email_domain = Column(String(255), default="")
+    password_plain = Column(Text, default="")
+    password_hash = Column(Text, default="")
+    hash_type = Column(String(50), default="")
+    status = Column(String(20), default="open")
+    is_false_positive = Column(Boolean, default=False)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class DSMonitoredEntity(Base):
+    __tablename__ = "ds_monitored_entities"
+    __table_args__ = (
+        UniqueConstraint("entity_type", "entity_value", name="uq_ds_monitored_entities_type_value"),
+    )
+    id = Column(Integer, primary_key=True)
+    entity_type = Column(String(50), nullable=False)
+    entity_value = Column(String(1024), nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 # ── Infrastructure Intelligence ───────────────────────────────────────────────
