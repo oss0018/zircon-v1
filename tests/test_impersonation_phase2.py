@@ -21,6 +21,13 @@ SCANNER = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'scanner.py'
 ALERT_ENGINE = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'alert_engine.py'
 EVIDENCE_GEN = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'evidence_generator.py'
 CORRELATOR = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'threat_actor_correlator.py'
+FINDINGS_SERVICE = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'findings_service.py'
+TAKEDOWN_SERVICE = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'takedown_service.py'
+RULES_SERVICE = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'rules_service.py'
+ALERT_SERVICE = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'alert_service.py'
+THREAT_ACTOR_SERVICE = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'threat_actor_service.py'
+LEGAL_TASK_SERVICE = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'legal_task_service.py'
+SLA_SERVICE = REPO_ROOT / 'app' / 'services' / 'impersonation' / 'sla_service.py'
 IMPERSONATION_JS = REPO_ROOT / 'app' / 'static' / 'js' / 'impersonation.js'
 INDEX_HTML = REPO_ROOT / 'app' / 'static' / 'index.html'
 
@@ -82,6 +89,11 @@ def test_sla_model_time_columns():
     assert 'time_to_resolve_min' in cols
 
 
+def test_sla_policy_alias_exists():
+    from app.models import SLAPolicy, ServiceLevelAgreement
+    assert SLAPolicy is ServiceLevelAgreement
+
+
 def test_audit_log_model_columns():
     from app.models import AuditLogEntry
     cols = {c.key for c in AuditLogEntry.__table__.columns}
@@ -111,6 +123,8 @@ def test_phase2_schemas_are_importable():
         ServiceLevelAgreementCreate,
         ServiceLevelAgreementOut,
         ServiceLevelAgreementUpdate,
+        SLAPolicyOut,
+        ImpersonationStatsOut,
         AuditLogEntryOut,
         EvidencePackageRequest,
     )
@@ -118,6 +132,8 @@ def test_phase2_schemas_are_importable():
     assert AlertRuleCreate
     assert ThreatActorOut
     assert ServiceLevelAgreementCreate
+    assert SLAPolicyOut
+    assert ImpersonationStatsOut
     assert EvidencePackageRequest
 
 
@@ -250,6 +266,7 @@ def test_phase2_api_endpoints_present():
     assert '@router.delete("/alert-rules/{rule_id}"' in source
     # Evidence package
     assert '@router.post("/takedowns/{takedown_id}/generate-evidence-package")' in source
+    assert '@router.post("/takedowns/{takedown_id}/generate-evidence")' in source
     # Threat actors
     assert '@router.get("/threat-actors"' in source
     assert '@router.post("/threat-actors"' in source
@@ -306,6 +323,7 @@ def test_evidence_generator_has_build_function():
     assert '_whois_lookup' in source
     assert '_dns_resolve' in source
     assert '_archive_check' in source
+    assert '_http_headers_snapshot' in source
 
 
 def test_threat_actor_correlator_file_exists():
@@ -318,6 +336,35 @@ def test_threat_actor_correlator_has_correlate_function():
     assert 'async def link_finding_to_actor' in source
     assert '_extract_signals' in source
     assert '_score_overlap' in source
+
+
+def test_phase2_service_layer_files_exist():
+    for path in (
+        FINDINGS_SERVICE,
+        TAKEDOWN_SERVICE,
+        RULES_SERVICE,
+        ALERT_SERVICE,
+        THREAT_ACTOR_SERVICE,
+        LEGAL_TASK_SERVICE,
+        SLA_SERVICE,
+    ):
+        assert path.exists(), f"{path.name} not found"
+
+
+def test_phase2_service_layer_has_expected_functions():
+    service_sources = {
+        FINDINGS_SERVICE: ["async def list_findings", "async def update_finding_status"],
+        TAKEDOWN_SERVICE: ["async def list_takedowns", "async def update_takedown"],
+        RULES_SERVICE: ["async def list_rules", "async def get_rule_or_404"],
+        ALERT_SERVICE: ["async def list_alert_rules", "async def dispatch_for_finding"],
+        THREAT_ACTOR_SERVICE: ["async def list_threat_actors", "async def correlate_actor_findings"],
+        LEGAL_TASK_SERVICE: ["async def list_legal_tasks", "async def get_legal_task_or_404"],
+        SLA_SERVICE: ["async def list_slas", "def compute_sla_compliance"],
+    }
+    for path, expected_snippets in service_sources.items():
+        source = path.read_text(encoding='utf-8')
+        for snippet in expected_snippets:
+            assert snippet in source, f"{snippet} missing in {path.name}"
 
 
 # ── Frontend tests ────────────────────────────────────────────────────────────

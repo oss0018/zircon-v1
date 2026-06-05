@@ -1057,7 +1057,7 @@ class TakedownRequestCreate(BaseModel):
 
 
 class TakedownRequestUpdate(BaseModel):
-    status: Optional[Literal["draft", "pending_review", "submitted", "resolved", "failed"]] = None
+    status: Optional[Literal["draft", "pending_review", "submitted", "resolved", "completed", "failed"]] = None
     notes: Optional[str] = None
 
 
@@ -1076,6 +1076,24 @@ class TakedownRequestOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+
+class ImpersonationStatsByModuleOut(BaseModel):
+    total: int = 0
+    new: int = 0
+    resolved: int = 0
+
+
+class ImpersonationStatsOut(BaseModel):
+    total: int = 0
+    high_risk: int = 0
+    pending_takedowns: int = 0
+    active_rules: int = 0
+    by_module: Dict[str, ImpersonationStatsByModuleOut] = Field(default_factory=dict)
+    by_status: Dict[str, int] = Field(default_factory=dict)
+    by_platform: Dict[str, int] = Field(default_factory=dict)
+    score_bands: Dict[str, int] = Field(default_factory=dict)
+    trend_14d: List[Dict[str, int | str]] = Field(default_factory=list)
 
 
 # ── Phase 2 Schemas (TS-IMP-001 v2) ──────────────────────────────────────────
@@ -1300,6 +1318,18 @@ class ServiceLevelAgreementOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+
+class SLAPolicyCreate(ServiceLevelAgreementCreate):
+    pass
+
+
+class SLAPolicyUpdate(ServiceLevelAgreementUpdate):
+    pass
+
+
+class SLAPolicyOut(ServiceLevelAgreementOut):
+    pass
 
 
 class AuditLogEntryOut(BaseModel):

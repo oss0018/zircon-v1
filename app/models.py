@@ -1068,6 +1068,10 @@ class ServiceLevelAgreement(Base):
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+# Backward-compatible alias used by Phase 2 API contracts/specs.
+SLAPolicy = ServiceLevelAgreement
+
+
 class AuditLogEntry(Base):
     """Immutable audit log for all state changes and user actions."""
     __tablename__ = "impersonation_audit_log"
