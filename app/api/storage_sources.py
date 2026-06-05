@@ -76,6 +76,7 @@ async def _sync_ds_source(db: AsyncSession, source: StorageSource, config: dict,
     if ds_source is None:
         ds_source = DSStorageSource(id=source.id)
         db.add(ds_source)
+        ds_source.created_by = getattr(user, "id", None)
     ds_source.display_name = source.name
     ds_source.source_type = source.source_type
     ds_source.enabled = source.is_enabled
@@ -95,11 +96,9 @@ async def _sync_ds_source(db: AsyncSession, source: StorageSource, config: dict,
         k: v for k, v in (config or {}).items()
         if k not in _SECRET_FIELDS
     }
-    ds_source.credentials = {
-        k: v for k, v in (config or {}).items()
-        if k in _SECRET_FIELDS or k in _CREDENTIAL_METADATA_FIELDS
-    }
-    ds_source.created_by = getattr(user, "id", None)
+    # NOTE: Phase 1 keeps storage_sources.config_encrypted as the sole credential source of truth.
+    # PR 2/4 should populate ds_sources.credentials only via the vault-backed ingestion pipeline.
+    ds_source.credentials = {}
 
 
 def _mask_config(config: dict) -> dict:
