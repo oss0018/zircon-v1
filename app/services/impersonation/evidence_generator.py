@@ -138,6 +138,18 @@ async def _archive_check(url: str) -> dict:
         return {"error": str(exc)}
 
 
+async def _http_headers_snapshot(url: str) -> dict:
+    """Capture response headers for evidentiary context."""
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            resp = await client.get(url)
+            headers = dict(resp.headers)
+            return {"status_code": resp.status_code, "headers": headers}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[EvidenceGen] Header capture failed for %s: %s", url, exc)
+        return {"error": str(exc)}
+
+
 async def build_evidence_package(
     takedown_id: int,
     include_screenshot: bool = True,
@@ -218,5 +230,7 @@ async def build_evidence_package(
 
     if include_archive and target_url:
         package["components"]["archive"] = await _archive_check(target_url)
+    if target_url:
+        package["components"]["headers"] = await _http_headers_snapshot(target_url)
 
     return package

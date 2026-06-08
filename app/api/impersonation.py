@@ -21,6 +21,7 @@ from app.database import get_db
 from app.models import ImpersonationFinding, ImpersonationRule, TakedownRequest, User
 from app.models import AlertRule, LegalTask, ThreatActor, ThreatActorProfile, ServiceLevelAgreement, AuditLogEntry
 from app.schemas import (
+    ImpersonationStatsOut,
     ImpersonationFindingOut,
     ImpersonationFindingStatusUpdate,
     ImpersonationRuleCreate,
@@ -42,8 +43,8 @@ from app.schemas import (
     ThreatActorProfileOut,
     ThreatActorProfileUpdate,
     ServiceLevelAgreementCreate,
-    ServiceLevelAgreementOut,
     ServiceLevelAgreementUpdate,
+    SLAPolicyOut,
     AuditLogEntryOut,
     EvidencePackageRequest,
 )
@@ -211,6 +212,7 @@ def _finding_filters(
     module: Optional[str],
     platform: Optional[str],
     status: Optional[str],
+    severity: Optional[str],
     min_score: int,
 ):
     filters = []
@@ -222,6 +224,14 @@ def _finding_filters(
         filters.append(ImpersonationFinding.platform.ilike(f"%{_sanitize_text(platform, 50)}%"))
     if status:
         filters.append(ImpersonationFinding.status == _sanitize_text(status, 30))
+    if severity:
+        normalized = _sanitize_text(severity, 16).lower()
+        if normalized in {"critical", "high"}:
+            filters.append(ImpersonationFinding.threat_score >= 80)
+        elif normalized == "medium":
+            filters.append(ImpersonationFinding.threat_score.between(60, 79))
+        elif normalized == "low":
+            filters.append(ImpersonationFinding.threat_score < 60)
     filters.append(ImpersonationFinding.threat_score >= min_score)
     return filters
 
@@ -424,13 +434,14 @@ async def list_findings(
     module: Optional[str] = Query(None),
     platform: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
     min_score: int = Query(0, ge=0, le=100),
     limit: int = Query(25, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    filters = _finding_filters(rule_id, module, platform, status, min_score)
+    filters = _finding_filters(rule_id, module, platform, status, severity, min_score)
     total_stmt = select(func.count(ImpersonationFinding.id))
     items_stmt = select(ImpersonationFinding)
     for filter_clause in filters:
@@ -482,7 +493,7 @@ async def update_finding_status(
     return _finding_to_out(finding)
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=ImpersonationStatsOut)
 async def get_stats(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -668,11 +679,13 @@ async def update_takedown(
 ):
     takedown = await _get_takedown_or_404(db, takedown_id)
     if body.status is not None:
-        takedown.status = body.status
-        if body.status == "submitted":
+        # Compatibility: frontend workflow may submit "completed", stored status remains "resolved".
+        normalized_status = "resolved" if body.status == "completed" else body.status
+        takedown.status = normalized_status
+        if normalized_status == "submitted":
             takedown.submitted_at = _utcnow()
             takedown.submitted_by = current_user.id
-        if body.status == "resolved":
+        if normalized_status == "resolved":
             takedown.resolved_at = _utcnow()
     if body.notes is not None:
         takedown.notes = _sanitize_text(body.notes, 2000)
@@ -818,6 +831,16 @@ async def generate_evidence_package(
         narrative=_sanitize_text(body.narrative, 5000),
     )
     return package
+
+
+@router.post("/takedowns/{takedown_id}/generate-evidence")
+async def generate_evidence(
+    takedown_id: int,
+    body: EvidencePackageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await generate_evidence_package(takedown_id, body, db, current_user)
 
 
 # ── Threat Actors ─────────────────────────────────────────────────────────────
@@ -1102,7 +1125,7 @@ async def delete_legal_task(
 
 # ── SLA ───────────────────────────────────────────────────────────────────────
 
-@router.get("/slas", response_model=list[ServiceLevelAgreementOut])
+@router.get("/slas", response_model=list[SLAPolicyOut])
 async def list_slas(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -1111,7 +1134,7 @@ async def list_slas(
     return rows
 
 
-@router.post("/slas", response_model=ServiceLevelAgreementOut, status_code=201)
+@router.post("/slas", response_model=SLAPolicyOut, status_code=201)
 async def create_sla(
     body: ServiceLevelAgreementCreate,
     db: AsyncSession = Depends(get_db),
@@ -1134,7 +1157,7 @@ async def create_sla(
     return sla
 
 
-@router.get("/slas/{sla_id}", response_model=ServiceLevelAgreementOut)
+@router.get("/slas/{sla_id}", response_model=SLAPolicyOut)
 async def get_sla(
     sla_id: int,
     db: AsyncSession = Depends(get_db),
@@ -1146,7 +1169,7 @@ async def get_sla(
     return row
 
 
-@router.put("/slas/{sla_id}", response_model=ServiceLevelAgreementOut)
+@router.put("/slas/{sla_id}", response_model=SLAPolicyOut)
 async def update_sla(
     sla_id: int,
     body: ServiceLevelAgreementUpdate,
