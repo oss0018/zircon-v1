@@ -7,12 +7,27 @@ import asyncio
 import json
 import hashlib
 import logging
+import os
+import re
 from datetime import datetime, timezone
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
+
+# ── Scanner constants ─────────────────────────────────────────────────────────
+# Maximum number of official domains used to derive candidate email addresses
+# for executive name entries that aren't already in email format.
+_MAX_DOMAINS_FOR_EMAIL_LASTNAME = 3   # firstname.lastname@<domain>
+_MAX_DOMAINS_FOR_EMAIL_FIRSTNAME = 2  # firstname@<domain>
+
+# Minimum length for a Telethon StringSession to be considered valid.
+_MIN_TELEGRAM_SESSION_LENGTH = 20
+
+# Maximum number of executive names converted to search terms per platform scan.
+_MAX_EXEC_SEARCH_TERMS = 2
 
 
 def _utcnow():
@@ -205,12 +220,33 @@ async def run_scan_for_rule(rule_id: int) -> dict:
 
 
 async def _scan_m1_social(rule: dict) -> list:
-    """M1: Fake Social Media Account Detection — stub."""
-    logger.info(
-        "[IMP M1] Social scan stub for '%s'. Configure Telethon/Apify integrations to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    """M1: Fake Social Media Account Detection.
+
+    Dispatches to platform-specific sub-scanners (Telegram, Instagram, VK)
+    based on ``rule["social_platforms"]``.
+    """
+    platforms = [str(p).lower() for p in (rule.get("social_platforms") or [])]
+    findings: list[dict] = []
+
+    if "telegram" in platforms:
+        try:
+            findings.extend(await _scan_m1_telegram(rule))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[IMP M1] Telegram sub-scan error: %s", exc)
+
+    if "instagram" in platforms:
+        try:
+            findings.extend(await _scan_m1_instagram(rule))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[IMP M1] Instagram sub-scan error: %s", exc)
+
+    if "vk" in platforms:
+        try:
+            findings.extend(await _scan_m1_vk(rule))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[IMP M1] VK sub-scan error: %s", exc)
+
+    return findings
 
 
 async def _scan_m1_tiktok(rule: dict) -> list:
@@ -263,12 +299,8 @@ async def _scan_m1_youtube(rule: dict) -> list:
 
 
 async def _scan_m2_apps(rule: dict) -> list:
-    """M2: Malicious & Fake App Detection — stub."""
-    logger.info(
-        "[IMP M2] App store scan stub for '%s'. Install google-play-scraper and configure Apify to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    """M2: Malicious & Fake App Detection — Google Play."""
+    return await _scan_m2_google_play(rule)
 
 
 async def _scan_m2_appstore(rule: dict) -> list:
@@ -402,12 +434,110 @@ async def _scan_m3_email(rule: dict) -> list:
 
 
 async def _scan_m5_executive(rule: dict) -> list:
-    """M5: Executive Protection (HIBP / paste sites) — stub."""
-    logger.info(
-        "[IMP M5] Executive protection scan stub for '%s'. Configure HIBP API integration to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    """M5: Executive Protection — query executive emails against HIBP breach database.
+
+    Uses the existing ``HIBPClient`` at ``app.services.osint.hibp``.
+    Requires ``HIBP_API_KEY`` environment variable.
+
+    Each entry in ``rule["executive_names"]`` may be either:
+    - A full email address (``ceo@brand.com``) — queried directly.
+    - A display name (``Jane Doe``) — candidate emails are constructed as
+      ``firstname.lastname@<official_domain>`` and queried.
+    """
+    api_key = os.getenv("HIBP_API_KEY", "").strip()
+    if not api_key:
+        logger.info(
+            "[IMP M5] HIBP_API_KEY not configured; M5 executive scan skipped for '%s'.",
+            rule["brand_name"],
+        )
+        return []
+
+    executive_names: list[str] = rule.get("executive_names") or []
+    official_domains: list[str] = [
+        d.strip() for d in (rule.get("official_domains") or []) if d.strip()
+    ]
+
+    if not executive_names:
+        return []
+
+    from app.services.osint.hibp import HIBPClient  # local import to avoid circular refs
+
+    client = HIBPClient(api_key=api_key)
+    findings: list[dict] = []
+
+    for exec_entry in executive_names:
+        exec_entry = str(exec_entry).strip()
+        if not exec_entry:
+            continue
+
+        # Build list of candidate emails to check
+        if "@" in exec_entry:
+            emails_to_check = [exec_entry]
+        else:
+            # Derive email candidates from name + official domains
+            parts = exec_entry.lower().split()
+            if len(parts) >= 2:
+                # Strip characters that are invalid in the local part of an email address
+                _slug = re.sub(r"[^a-z0-9]", "", parts[0])
+                first = _slug or parts[0][:1]
+                _slug_last = re.sub(r"[^a-z0-9]", "", parts[-1])
+                last = _slug_last or parts[-1][:1]
+                emails_to_check = [
+                    f"{first}.{last}@{d}" for d in official_domains[:_MAX_DOMAINS_FOR_EMAIL_LASTNAME]
+                ] + [f"{first}@{d}" for d in official_domains[:_MAX_DOMAINS_FOR_EMAIL_FIRSTNAME]]
+            else:
+                continue
+
+        for email in emails_to_check:
+            try:
+                result = await client.search(email, query_type="email")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[IMP M5] HIBP query failed for %s: %s", email, exc)
+                continue
+
+            # HIBPClient returns {"error": ...} when key is missing
+            if result.get("error"):
+                logger.info("[IMP M5] HIBP returned error for %s: %s", email, result["error"])
+                break
+
+            # Breaches are either under "breaches" key or at root if list
+            if isinstance(result, list):
+                breaches = result
+            else:
+                breaches = result.get("breaches") or []
+
+            if not breaches:
+                continue
+
+            has_passwords = any(
+                "Passwords" in (b.get("DataClasses") or []) for b in breaches
+            )
+            threat_score = 90 if has_passwords else 75
+            breach_names = [b.get("Name", "Unknown") for b in breaches[:5]]
+            signals = [f"breach:{n}" for n in breach_names[:3]]
+            if has_passwords:
+                signals.append("has_passwords")
+
+            findings.append(
+                {
+                    "module": "m5",
+                    "platform": "breach_database",
+                    "finding_type": "executive_credentials_leaked",
+                    "target_url": f"https://haveibeenpwned.com/account/{email}",
+                    "target_identifier": email,
+                    "display_name": f"{exec_entry} <{email}>",
+                    "description": (
+                        f"Executive email '{email}' found in {len(breaches)} data breach(es): "
+                        f"{', '.join(breach_names)}."
+                        + (" Password hashes included." if has_passwords else "")
+                    ),
+                    "threat_score": threat_score,
+                    "signals": signals,
+                    "evidence": {"breaches": breaches[:10], "email": email},
+                }
+            )
+
+    return findings
 
 
 async def _scan_m5_darkweb(rule: dict) -> list:
@@ -436,9 +566,626 @@ async def _scan_m6_ads(rule: dict) -> list:
 
 
 async def _scan_m7_vip(rule: dict) -> list:
-    """M7: VIP Client & Partner Phishing Protection — stub."""
-    logger.info("[IMP M7] VIP partner phishing scan stub for '%s'.", rule["brand_name"])
-    return []
+    """M7: VIP Client & Partner Phishing Protection.
+
+    Compares every domain in the daily NRD feed against the rule's
+    ``official_domains`` and ``partner_domains`` using rapidfuzz similarity.
+    Domains with a similarity ratio ≥ 70 are flagged as potential
+    lookalike/typosquat targets aimed at the brand's VIP partners.
+
+    No external credentials required — reuses the existing NRD feed and
+    rapidfuzz similarity engine.
+    """
+    from app.services.impersonation.score_calculators import (
+        best_domain_similarity,
+        score_badge,
+    )
+
+    official = [d.strip() for d in (rule.get("official_domains") or []) if d.strip()]
+    partners = [d.strip() for d in (rule.get("partner_domains") or []) if d.strip()]
+    protected = official + partners
+
+    if not protected:
+        logger.info(
+            "[IMP M7] No official_domains or partner_domains configured for '%s'; M7 scan skipped.",
+            rule["brand_name"],
+        )
+        return []
+
+    try:
+        from app.services.lookalike.nrd_feed import fetch_nrd_domains
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M7] Could not import NRD feed module: %s", exc)
+        return []
+
+    try:
+        nrd_domains = await fetch_nrd_domains()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M7] fetch_nrd_domains failed: %s", exc)
+        return []
+
+    protected_lower = {d.lower() for d in protected}
+    threshold = 70.0  # similarity % to flag (as per spec)
+    findings: list[dict] = []
+
+    for fqdn in nrd_domains:
+        if not fqdn:
+            continue
+        fqdn_lower = fqdn.lower()
+        if fqdn_lower in protected_lower:
+            continue
+
+        score, ref_domain = best_domain_similarity(fqdn_lower, protected)
+        if score < threshold:
+            continue
+
+        threat_score = min(int(score), 95)
+        badge = score_badge(threat_score)
+
+        findings.append(
+            {
+                "module": "m7",
+                "platform": "domain_registry",
+                "finding_type": "vip_phishing_domain",
+                "target_url": f"http://{fqdn}",
+                "target_identifier": fqdn,
+                "display_name": fqdn,
+                "description": (
+                    f"{badge} Newly-registered domain '{fqdn}' closely resembles protected "
+                    f"domain '{ref_domain}' (similarity {int(score)}%). "
+                    f"May be used for VIP partner phishing."
+                ),
+                "threat_score": threat_score,
+                "signals": [
+                    "vip_domain_lookalike",
+                    f"score:{int(score)}",
+                    f"ref:{ref_domain}",
+                ],
+                "evidence": {
+                    "similarity": int(score),
+                    "reference_domain": ref_domain,
+                    "brand": rule["brand_name"],
+                    "feed": "whoisds",
+                },
+            }
+        )
+
+    return findings
+
+
+# ── M1 Platform-specific scanners ────────────────────────────────────────────
+
+
+async def _scan_m1_telegram(rule: dict) -> list:
+    """M1: Telegram — search public channels for brand impersonation.
+
+    Uses an existing Telethon session (``TELEGRAM_API_ID``, ``TELEGRAM_API_HASH``,
+    ``TELEGRAM_SESSION_STRING``) to query public channels.  Scores candidates by
+    name similarity, keyword overlap, subscriber count, and channel age.
+
+    Required env vars: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING
+    Output type: ``fake_telegram_account``
+    """
+    try:
+        from telethon import TelegramClient  # type: ignore
+        from telethon.tl.functions.contacts import SearchRequest  # type: ignore
+        from telethon.sessions import StringSession  # type: ignore
+    except ImportError:
+        logger.info("[IMP M1] telethon not installed; Telegram impersonation scan skipped.")
+        return []
+
+    api_id_raw = os.getenv("TELEGRAM_API_ID", "").strip()
+    api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
+    session_string = os.getenv("TELEGRAM_SESSION_STRING", "").strip()
+
+    if not api_id_raw or not api_hash or len(session_string) < _MIN_TELEGRAM_SESSION_LENGTH:
+        logger.info(
+            "[IMP M1] Telegram credentials not configured; Telegram impersonation scan skipped for '%s'.",
+            rule["brand_name"],
+        )
+        return []
+
+    try:
+        api_id = int(api_id_raw)
+    except ValueError:
+        logger.warning("[IMP M1] TELEGRAM_API_ID is not a valid integer; Telegram scan skipped.")
+        return []
+
+    brand = (rule.get("brand_name") or "").strip()
+    if not brand:
+        return []
+
+    try:
+        from rapidfuzz import fuzz as _fuzz  # type: ignore
+    except ImportError:
+        _fuzz = None
+
+    search_terms = [brand, f"{brand}_official", f"{brand}_support"]
+    for exec_name in (rule.get("executive_names") or [])[:_MAX_EXEC_SEARCH_TERMS]:
+        first = (str(exec_name).split() or [""])[0]
+        if first:
+            search_terms.append(first)
+
+    client = TelegramClient(StringSession(session_string), api_id, api_hash)
+    findings: list[dict] = []
+    seen_ids: set[int] = set()
+
+    try:
+        await client.start()
+        for term in search_terms:
+            try:
+                result = await client(SearchRequest(q=term, limit=20))
+                channels = list(getattr(result, "chats", []))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[IMP M1] Telegram search failed for '%s': %s", term, exc)
+                continue
+
+            for channel in channels:
+                channel_id = getattr(channel, "id", None)
+                if channel_id in seen_ids:
+                    continue
+                seen_ids.add(channel_id)
+
+                title = str(getattr(channel, "title", "") or "").strip()
+                username = str(getattr(channel, "username", "") or "").strip()
+                subscribers = int(getattr(channel, "participants_count", 0) or 0)
+                date = getattr(channel, "date", None)
+                is_verified = bool(getattr(channel, "verified", False))
+
+                if not title or is_verified:
+                    continue
+
+                # Scoring (max 100 pts)
+                score = 0
+                brand_lower = brand.lower()
+                title_lower = title.lower()
+
+                # Name similarity — up to 40 pts
+                if _fuzz:
+                    name_sim = _fuzz.partial_ratio(brand_lower, title_lower)
+                    score += min(int(name_sim * 0.4), 40)
+
+                # Brand exact match in name — 20 pts
+                if brand_lower in title_lower:
+                    score += 20
+
+                # Official/support/service keywords — 5 pts each
+                for kw in ("official", "support", "help", "service", "verified"):
+                    if kw in title_lower:
+                        score += 5
+
+                # Large subscriber count — 10 pts (increases credibility risk)
+                if subscribers > 1000:
+                    score += 10
+
+                # Newly created channel — 10 pts
+                if date is not None:
+                    try:
+                        if date.tzinfo is None:
+                            date = date.replace(tzinfo=timezone.utc)
+                        age_days = (datetime.now(timezone.utc) - date).days
+                        if age_days < 30:
+                            score += 10
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                min_score = int(rule.get("min_impersonation_score") or 40)
+                if score < min_score:
+                    continue
+
+                channel_url = (
+                    f"https://t.me/{username}"
+                    if username
+                    else f"https://t.me/c/{channel_id}"
+                )
+                findings.append(
+                    {
+                        "module": "m1",
+                        "platform": "telegram",
+                        "finding_type": "fake_telegram_account",
+                        "target_url": channel_url,
+                        "target_identifier": username or str(channel_id),
+                        "display_name": title,
+                        "description": (
+                            f"Telegram channel '{title}'"
+                            + (f" (@{username})" if username else "")
+                            + f" may be impersonating '{brand}' (score {score}). "
+                            f"Subscribers: {subscribers}."
+                        ),
+                        "threat_score": min(score, 95),
+                        "subscriber_count": subscribers,
+                        "signals": ["telegram_impersonation", f"score:{score}"],
+                        "evidence": {
+                            "channel_id": channel_id,
+                            "username": username,
+                            "title": title,
+                            "subscribers": subscribers,
+                        },
+                    }
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M1] Telegram client error: %s", exc)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+
+    return findings
+
+
+async def _scan_m1_instagram(rule: dict) -> list:
+    """M1: Instagram — detect fake brand accounts via Apify actor.
+
+    Calls the Apify Instagram Username Checker actor for a set of brand-derived
+    username patterns.  Scores results by name similarity and keyword presence.
+
+    Required env vars: APIFY_API_KEY
+    Output type: ``fake_instagram_account``
+    """
+    apify_key = os.getenv("APIFY_API_KEY", "").strip()
+    if not apify_key:
+        logger.info(
+            "[IMP M1] APIFY_API_KEY not configured; Instagram scan skipped for '%s'.",
+            rule["brand_name"],
+        )
+        return []
+
+    brand = (rule.get("brand_name") or "").strip()
+    if not brand:
+        return []
+
+    brand_slug = re.sub(r"[^a-z0-9]", "", brand.lower())
+
+    search_usernames = [
+        brand_slug,
+        f"{brand_slug}official",
+        f"{brand_slug}_official",
+        f"{brand_slug}.official",
+        f"{brand_slug}_support",
+    ]
+    for exec_name in (rule.get("executive_names") or [])[:_MAX_EXEC_SEARCH_TERMS]:
+        parts = str(exec_name).lower().split()
+        if len(parts) >= 2:
+            search_usernames.append(f"{parts[0]}_{parts[-1]}")
+
+    try:
+        from rapidfuzz import fuzz as _fuzz  # type: ignore
+    except ImportError:
+        _fuzz = None
+
+    findings: list[dict] = []
+    actor_url = (
+        "https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items"
+    )
+
+    for username in search_usernames:
+        payload = {
+            "usernames": [username],
+            "resultsLimit": 1,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    actor_url,
+                    json=payload,
+                    headers={"Authorization": "Bearer " + apify_key},
+                )
+                if resp.status_code not in (200, 201):
+                    logger.debug(
+                        "[IMP M1] Apify Instagram returned %s for '%s'",
+                        resp.status_code,
+                        username,
+                    )
+                    continue
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[IMP M1] Apify Instagram error for '%s': %s", username, exc)
+            continue
+
+        if not isinstance(data, list):
+            data = [data] if data else []
+
+        for account in data:
+            if not isinstance(account, dict):
+                continue
+            account_username = str(account.get("username") or username)
+            full_name = str(account.get("fullName") or account.get("full_name") or "")
+            followers = int(account.get("followersCount") or account.get("followers_count") or 0)
+            is_verified = bool(account.get("isVerified") or account.get("is_verified"))
+            bio = str(account.get("biography") or account.get("bio") or "")
+
+            if is_verified:
+                continue
+
+            # Scoring
+            score = 0
+            brand_lower = brand.lower()
+            if _fuzz:
+                name_sim = max(
+                    _fuzz.partial_ratio(brand_lower, account_username.lower()),
+                    _fuzz.partial_ratio(brand_lower, full_name.lower()) if full_name else 0,
+                )
+                score += min(int(name_sim * 0.5), 50)
+            elif brand_lower in account_username.lower():
+                score += 40
+
+            # Official/support keywords — 10 pts each
+            for kw in ("official", "support", "service", "help"):
+                if kw in account_username.lower() or kw in full_name.lower():
+                    score += 10
+
+            # Phishing bio keywords — 5 pts each
+            for kw in ("login", "verify", "click", "free", "giveaway"):
+                if kw in bio.lower():
+                    score += 5
+
+            min_score = int(rule.get("min_impersonation_score") or 40)
+            if score < min_score:
+                continue
+
+            findings.append(
+                {
+                    "module": "m1",
+                    "platform": "instagram",
+                    "finding_type": "fake_instagram_account",
+                    "target_url": f"https://www.instagram.com/{account_username}/",
+                    "target_identifier": account_username,
+                    "display_name": full_name or account_username,
+                    "description": (
+                        f"Instagram account '@{account_username}' may be impersonating "
+                        f"'{brand}' (score {score}). Followers: {followers}."
+                    ),
+                    "threat_score": min(score, 95),
+                    "subscriber_count": followers,
+                    "signals": ["instagram_impersonation", f"score:{score}"],
+                    "evidence": account,
+                }
+            )
+
+    return findings
+
+
+async def _scan_m1_vk(rule: dict) -> list:
+    """M1: VK (VKontakte) — detect fake brand communities via VK API.
+
+    Calls ``groups.search`` with brand-derived queries and scores results by
+    name similarity, keyword presence, verification status, and member count.
+
+    Required env vars: VK_SERVICE_TOKEN
+    Output type: ``fake_vk_account``
+    """
+    vk_token = os.getenv("VK_SERVICE_TOKEN", "").strip()
+    if not vk_token:
+        logger.info(
+            "[IMP M1] VK_SERVICE_TOKEN not configured; VK scan skipped for '%s'.",
+            rule["brand_name"],
+        )
+        return []
+
+    brand = (rule.get("brand_name") or "").strip()
+    if not brand:
+        return []
+
+    try:
+        from rapidfuzz import fuzz as _fuzz  # type: ignore
+    except ImportError:
+        _fuzz = None
+
+    findings: list[dict] = []
+    seen_ids: set[int] = set()
+    search_queries = [brand, f"{brand} official", f"{brand} support"]
+
+    for query in search_queries:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    "https://api.vk.com/method/groups.search",
+                    params={
+                        "q": query,
+                        "type": "group,public",
+                        "count": 10,
+                        "fields": "members_count,verified,screen_name",
+                        "access_token": vk_token,
+                        "v": "5.131",
+                    },
+                )
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[IMP M1] VK API error for query '%s': %s", query, exc)
+            continue
+
+        groups = (data.get("response") or {}).get("items") or []
+
+        for group in groups:
+            group_id = group.get("id")
+            if not group_id or group_id in seen_ids:
+                continue
+            seen_ids.add(group_id)
+
+            group_name = str(group.get("name") or "")
+            screen_name = str(group.get("screen_name") or "")
+            members = int(group.get("members_count") or 0)
+            is_verified = bool(group.get("verified"))
+
+            if is_verified:
+                continue
+
+            # Scoring
+            score = 0
+            brand_lower = brand.lower()
+            name_lower = group_name.lower()
+
+            # Name similarity — up to 40 pts
+            if _fuzz:
+                name_sim = _fuzz.partial_ratio(brand_lower, name_lower)
+                score += min(int(name_sim * 0.4), 40)
+
+            # Brand exact match — 20 pts
+            if brand_lower in name_lower:
+                score += 20
+
+            # Unverified brand-claiming community — 15 pts
+            if not is_verified and brand_lower in name_lower:
+                score += 15
+
+            # Official/support keywords — 5 pts each
+            for kw in ("official", "support", "help"):
+                if kw in name_lower:
+                    score += 5
+
+            min_score = int(rule.get("min_impersonation_score") or 40)
+            if score < min_score:
+                continue
+
+            group_url = (
+                f"https://vk.com/{screen_name}"
+                if screen_name
+                else f"https://vk.com/club{group_id}"
+            )
+            findings.append(
+                {
+                    "module": "m1",
+                    "platform": "vk",
+                    "finding_type": "fake_vk_account",
+                    "target_url": group_url,
+                    "target_identifier": screen_name or str(group_id),
+                    "display_name": group_name,
+                    "description": (
+                        f"VK community '{group_name}' ({group_url}) may be impersonating "
+                        f"'{brand}' (score {score}). Members: {members}."
+                    ),
+                    "threat_score": min(score, 95),
+                    "subscriber_count": members,
+                    "signals": ["vk_impersonation", f"score:{score}"],
+                    "evidence": group,
+                }
+            )
+
+    return findings
+
+
+# ── M2 Platform-specific scanners ────────────────────────────────────────────
+
+
+async def _scan_m2_google_play(rule: dict) -> list:
+    """M2: Google Play — detect fake brand apps via google-play-scraper.
+
+    Searches the Play Store by brand name and flags apps with ≥75% name
+    similarity that are **not** published by a known official developer ID.
+    Checks for suspicious permissions (SMS, contacts, location).
+
+    Required: ``pip install google-play-scraper``
+    Output type: ``fake_mobile_app``
+    """
+    brand = (rule.get("brand_name") or "").strip()
+    if not brand:
+        return []
+
+    try:
+        from google_play_scraper import search as gplay_search  # type: ignore
+    except ImportError:
+        logger.info(
+            "[IMP M2] google-play-scraper not installed; Google Play scan skipped for '%s'. "
+            "Install with: pip install google-play-scraper",
+            brand,
+        )
+        return []
+
+    try:
+        from rapidfuzz import fuzz as _fuzz  # type: ignore
+    except ImportError:
+        _fuzz = None
+
+    official_ids = {
+        str(i).strip().lower()
+        for i in (rule.get("official_developer_ids") or [])
+        if str(i).strip()
+    }
+
+    try:
+        results = await asyncio.to_thread(
+            gplay_search, brand, lang="en", country="us", n_hits=20
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M2] Google Play search failed for '%s': %s", brand, exc)
+        return []
+
+    _SUSPICIOUS_PERMS = {
+        "READ_CONTACTS",
+        "READ_SMS",
+        "ACCESS_FINE_LOCATION",
+        "SEND_SMS",
+        "CALL_PHONE",
+        "READ_CALL_LOG",
+    }
+
+    findings: list[dict] = []
+    brand_lower = brand.lower()
+
+    for app in (results or []):
+        app_id = str(app.get("appId") or "")
+        app_name = str(app.get("title") or "")
+        developer = str(app.get("developer") or "")
+        developer_id = str(app.get("developerId") or "").lower()
+
+        # Skip apps from official developers
+        if developer_id and developer_id in official_ids:
+            continue
+
+        # Name similarity
+        if _fuzz:
+            name_sim = max(
+                _fuzz.ratio(brand_lower, app_name.lower()),
+                _fuzz.partial_ratio(brand_lower, app_name.lower()),
+            )
+        else:
+            name_sim = 100.0 if brand_lower in app_name.lower() else 0.0
+
+        if name_sim < 75:
+            continue
+
+        # Suspicious permissions
+        permissions = set(app.get("permissions") or [])
+        suspicious = permissions & _SUSPICIOUS_PERMS
+        threat_score = min(int(name_sim) + (10 if suspicious else 0), 95)
+
+        signals = [f"name_similarity:{int(name_sim)}"]
+        if suspicious:
+            signals.append(f"suspicious_permissions:{','.join(sorted(suspicious))}")
+
+        findings.append(
+            {
+                "module": "m2",
+                "platform": "google_play",
+                "finding_type": "fake_mobile_app",
+                "target_url": f"https://play.google.com/store/apps/details?id={app_id}",
+                "target_identifier": app_id,
+                "display_name": app_name,
+                "description": (
+                    f"Google Play app '{app_name}' (ID: {app_id}) matches brand '{brand}' "
+                    f"(name similarity {int(name_sim)}%). Developer: {developer}."
+                    + (
+                        f" Suspicious permissions: {', '.join(sorted(suspicious))}."
+                        if suspicious
+                        else ""
+                    )
+                ),
+                "threat_score": threat_score,
+                "signals": signals,
+                "evidence": {
+                    "app_id": app_id,
+                    "developer": developer,
+                    "developer_id": developer_id,
+                    "name_similarity": int(name_sim),
+                    "installs": app.get("minInstalls"),
+                    "rating": app.get("score"),
+                    "suspicious_permissions": sorted(suspicious),
+                },
+            }
+        )
+
+    return findings
 
 
 async def _scan_m3_honeypot(rule: dict) -> list:
