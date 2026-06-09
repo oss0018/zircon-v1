@@ -301,6 +301,33 @@ async def trigger_source_index(
     return {"ok": True, "message": "Indexing started in background"}
 
 
+@router.post("/{source_id}/deep-ingest")
+async def trigger_deep_ingestion(
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("sec_engineer", "admin")),
+) -> dict:
+    """Manually trigger the Deep Search ingestion pipeline for a source."""
+    result = await db.execute(select(DSStorageSource).where(DSStorageSource.id == source_id))
+    source = result.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail="Deep Search source not found")
+    if not source.enabled:
+        raise HTTPException(status_code=400, detail="Storage source is disabled")
+
+    from app.tasks.deep_search_tasks import enqueue_ingest_source
+
+    await audit_log(
+        DeepSearchAuditEvent.SOURCE_INGEST_TRIGGERED_MANUAL,
+        current_user.id,
+        {"source_id": source_id, "user_id": current_user.id},
+        db,
+    )
+    await db.commit()
+    enqueue_ingest_source(source_id, triggered_by="manual", user_id=current_user.id)
+    return {"ok": True, "queued": True, "source_id": source_id}
+
+
 @router.get("/{source_id}/catalog", response_model=List[StorageFileCatalogOut])
 async def list_catalog(
     source_id: int,

@@ -495,6 +495,10 @@ class DSFile(Base):
     source_id = Column(Integer, ForeignKey("ds_sources.id", ondelete="CASCADE"), nullable=False)
     file_path = Column(String(4096), nullable=False)
     file_name = Column(String(512), default="")
+    size_bytes = Column(BigInteger, default=0)
+    mtime = Column(DateTime, nullable=True)
+    etag = Column(String(256), default="")
+    content_sha256 = Column(String(64), default="")
     index_status = Column(String(20), default="pending")
     parse_mode = Column(String(20), default="auto")
     leak_count = Column(Integer, default=0)
@@ -503,6 +507,8 @@ class DSFile(Base):
     has_pii = Column(Boolean, default=False)
     has_api_keys = Column(Boolean, default=False)
     pattern_names = Column(_DS_TEXT_ARRAY, default=list)
+    indexed_at = Column(DateTime, nullable=True)
+    last_seen_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -517,6 +523,8 @@ class DSChunk(Base):
     file_id = Column(Integer, ForeignKey("ds_files.id", ondelete="CASCADE"), nullable=False)
     chunk_index = Column(Integer, default=0)
     content = Column(Text, default="")
+    start_offset = Column(Integer, default=0)
+    end_offset = Column(Integer, default=0)
     if _IS_POSTGRES:
         fts_vector = Column(
             _DS_TSVECTOR,

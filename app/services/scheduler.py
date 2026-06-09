@@ -45,11 +45,10 @@ def start_scheduler():
         """Run indexing for all enabled storage sources whose schedule is due."""
         try:
             from app.database import AsyncSessionLocal
-            from app.models import StorageSource
+            from app.models import DSStorageSource, StorageSource
             from app.services.storage_indexer import run_source_indexing
+            from app.tasks.deep_search_tasks import enqueue_ingest_source
             from sqlalchemy import select
-            import re
-            from datetime import datetime, timezone
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
@@ -58,6 +57,12 @@ def start_scheduler():
                     )
                 )
                 sources = result.scalars().all()
+                ds_source_ids = {
+                    row[0]
+                    for row in (
+                        await db.execute(select(DSStorageSource.id).where(DSStorageSource.enabled.is_(True)))
+                    ).all()
+                }
 
             for source in sources:
                 if source.last_run_status == "running":
@@ -68,6 +73,8 @@ def start_scheduler():
                 if _is_source_due(source):
                     try:
                         await run_source_indexing(source.id)
+                        if source.id in ds_source_ids:
+                            enqueue_ingest_source(source.id, triggered_by="scheduler")
                     except Exception as exc:
                         print(f"[scheduler] Storage source {source.id} error: {exc}")
         except Exception as exc:
