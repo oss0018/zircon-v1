@@ -8,6 +8,7 @@ import json
 import hashlib
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -476,7 +477,11 @@ async def _scan_m5_executive(rule: dict) -> list:
             # Derive email candidates from name + official domains
             parts = exec_entry.lower().split()
             if len(parts) >= 2:
-                first, last = parts[0], parts[-1]
+                # Strip characters that are invalid in the local part of an email address
+                _slug = re.sub(r"[^a-z0-9]", "", parts[0])
+                first = _slug or parts[0][:1]
+                _slug_last = re.sub(r"[^a-z0-9]", "", parts[-1])
+                last = _slug_last or parts[-1][:1]
                 emails_to_check = [
                     f"{first}.{last}@{d}" for d in official_domains[:_MAX_DOMAINS_FOR_EMAIL_LASTNAME]
                 ] + [f"{first}@{d}" for d in official_domains[:_MAX_DOMAINS_FOR_EMAIL_FIRSTNAME]]
@@ -830,7 +835,7 @@ async def _scan_m1_instagram(rule: dict) -> list:
     if not brand:
         return []
 
-    brand_slug = brand.lower().replace(" ", "")
+    brand_slug = re.sub(r"[^a-z0-9]", "", brand.lower())
 
     search_usernames = [
         brand_slug,

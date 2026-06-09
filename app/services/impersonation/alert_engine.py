@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -132,6 +133,10 @@ async def _send_email_notification(to_address: str, subject: str, body: str) -> 
     ZIRCON_SMTP_HOST / ZIRCON_SMTP_USER / ZIRCON_SMTP_PASSWORD from env.
     """
     if not to_address:
+        return False
+    # Basic email format validation before attempting SMTP
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", to_address):
+        logger.warning("[AlertEngine] Skipping email dispatch — invalid address: %s", to_address)
         return False
     try:
         from app.services.notifications import send_email  # local import
