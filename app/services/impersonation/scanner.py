@@ -16,6 +16,18 @@ from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
+# ── Scanner constants ─────────────────────────────────────────────────────────
+# Maximum number of official domains used to derive candidate email addresses
+# for executive name entries that aren't already in email format.
+_MAX_DOMAINS_FOR_EMAIL_LASTNAME = 3   # firstname.lastname@<domain>
+_MAX_DOMAINS_FOR_EMAIL_FIRSTNAME = 2  # firstname@<domain>
+
+# Minimum length for a Telethon StringSession to be considered valid.
+_MIN_TELEGRAM_SESSION_LENGTH = 20
+
+# Maximum number of executive names converted to search terms per platform scan.
+_MAX_EXEC_SEARCH_TERMS = 2
+
 
 def _utcnow():
     return datetime.now(timezone.utc)
@@ -466,8 +478,8 @@ async def _scan_m5_executive(rule: dict) -> list:
             if len(parts) >= 2:
                 first, last = parts[0], parts[-1]
                 emails_to_check = [
-                    f"{first}.{last}@{d}" for d in official_domains[:3]
-                ] + [f"{first}@{d}" for d in official_domains[:2]]
+                    f"{first}.{last}@{d}" for d in official_domains[:_MAX_DOMAINS_FOR_EMAIL_LASTNAME]
+                ] + [f"{first}@{d}" for d in official_domains[:_MAX_DOMAINS_FOR_EMAIL_FIRSTNAME]]
             else:
                 continue
 
@@ -661,7 +673,7 @@ async def _scan_m1_telegram(rule: dict) -> list:
     api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
     session_string = os.getenv("TELEGRAM_SESSION_STRING", "").strip()
 
-    if not api_id_raw or not api_hash or len(session_string) < 20:
+    if not api_id_raw or not api_hash or len(session_string) < _MIN_TELEGRAM_SESSION_LENGTH:
         logger.info(
             "[IMP M1] Telegram credentials not configured; Telegram impersonation scan skipped for '%s'.",
             rule["brand_name"],
@@ -684,7 +696,7 @@ async def _scan_m1_telegram(rule: dict) -> list:
         _fuzz = None
 
     search_terms = [brand, f"{brand}_official", f"{brand}_support"]
-    for exec_name in (rule.get("executive_names") or [])[:2]:
+    for exec_name in (rule.get("executive_names") or [])[:_MAX_EXEC_SEARCH_TERMS]:
         first = (str(exec_name).split() or [""])[0]
         if first:
             search_terms.append(first)
@@ -827,7 +839,7 @@ async def _scan_m1_instagram(rule: dict) -> list:
         f"{brand_slug}.official",
         f"{brand_slug}_support",
     ]
-    for exec_name in (rule.get("executive_names") or [])[:2]:
+    for exec_name in (rule.get("executive_names") or [])[:_MAX_EXEC_SEARCH_TERMS]:
         parts = str(exec_name).lower().split()
         if len(parts) >= 2:
             search_usernames.append(f"{parts[0]}_{parts[-1]}")

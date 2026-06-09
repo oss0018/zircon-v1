@@ -110,7 +110,7 @@ class TestScanM7Vip:
         # "acmee.com" is very similar to "acme.com" (>70%); should produce a finding
         assert isinstance(result, list)
         identifiers = [f["target_identifier"] for f in result]
-        assert "acmee.com" in identifiers
+        assert any(ident == "acmee.com" for ident in identifiers)
 
     @pytest.mark.asyncio
     async def test_m7_vip_skips_exact_protected_domains(self):
@@ -609,6 +609,7 @@ class TestScannerFunctionSignatures:
         assert "APIFY_API_KEY" in env_example
         assert "VK_SERVICE_TOKEN" in env_example
         assert "PAGERDUTY_API_KEY" in env_example
+        assert "PAGERDUTY_SERVICE_ID" in env_example
 
     def test_requirements_has_google_play_scraper(self):
         reqs = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
