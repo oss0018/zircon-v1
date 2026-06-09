@@ -437,6 +437,30 @@ def _migrate_ds_source_credentials(conn) -> None:
         logger.warning("Could not migrate ds_sources credentials: %s", exc)
 
 
+def _migrate_sl_rules(conn) -> None:
+    """Add alert_email and alert_telegram columns to sl_rules if missing."""
+    from sqlalchemy import inspect, text
+
+    ALLOWED_NEW_COLS: dict[str, str] = {
+        "alert_email": "VARCHAR(254) DEFAULT ''",
+        "alert_telegram": "VARCHAR(100) DEFAULT ''",
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+        if "sl_rules" not in tables:
+            return
+        existing_cols = {c["name"] for c in inspector.get_columns("sl_rules")}
+        for col_name, col_type in ALLOWED_NEW_COLS.items():
+            if col_name not in existing_cols:
+                conn.execute(
+                    text(f"ALTER TABLE sl_rules ADD COLUMN {col_name} {col_type}")
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate sl_rules: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -462,3 +486,5 @@ async def init_db():
         await conn.run_sync(_migrate_cti_schema)
         # Encrypt existing ds_sources credentials (if ds_sources already exists)
         await conn.run_sync(_migrate_ds_source_credentials)
+        # Add alert_email / alert_telegram to sl_rules if upgrading from older version
+        await conn.run_sync(_migrate_sl_rules)
