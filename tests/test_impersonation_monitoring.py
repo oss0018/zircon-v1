@@ -100,4 +100,4 @@ def test_scanner_stub_is_present_and_importable():
     assert 'async def run_scan_for_rule(rule_id: int) -> dict:' in source
     assert '_make_fingerprint' in source
     assert 'Duplicate finding skipped' in source
-    assert 'Social scan stub' in source
+    assert '_scan_m1_social' in source

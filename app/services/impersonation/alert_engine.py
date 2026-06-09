@@ -3,7 +3,7 @@ Alert Engine — Impersonation Monitoring Phase 2 (TS-IMP-001 v2).
 
 Dispatches real-time notifications when a new ImpersonationFinding matches
 one or more AlertRule records.  Supports Slack, PagerDuty, Microsoft Teams,
-and Telegram channels.  Called from the scanner orchestrator after new
+Telegram, and Email channels.  Called from the scanner orchestrator after new
 findings are persisted.
 
 Usage::
@@ -29,10 +29,20 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _score_badge(threat_score: int) -> str:
+    """Return an emoji badge for the given threat score."""
+    if threat_score >= 80:
+        return "🔴"
+    if threat_score >= 50:
+        return "🟡"
+    return "🟢"
+
+
 def _finding_to_text(finding: Any) -> str:
     """Build a human-readable alert body from an ImpersonationFinding ORM row."""
+    badge = _score_badge(finding.threat_score or 0)
     lines = [
-        f"🚨 Impersonation Finding — {finding.module.upper()} / {finding.platform}",
+        f"{badge} Impersonation Finding — {finding.module.upper()} / {finding.platform}",
         f"Type: {finding.finding_type}",
         f"Target: {finding.display_name or finding.target_identifier}",
         f"URL: {finding.target_url or '—'}",
@@ -45,6 +55,8 @@ def _finding_to_text(finding: Any) -> str:
 
 async def _send_slack(webhook_url: str, text: str) -> bool:
     """POST a plain-text message to a Slack Incoming Webhook."""
+    if not webhook_url:
+        return False
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(webhook_url, json={"text": text})
@@ -100,6 +112,8 @@ async def _send_teams(webhook_url: str, title: str, body: str) -> bool:
 
 async def _send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
     """Send a Telegram message via the Bot API."""
+    if not bot_token or not chat_id:
+        return False
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -108,6 +122,22 @@ async def _send_telegram(bot_token: str, chat_id: str, text: str) -> bool:
         return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("[AlertEngine] Telegram dispatch failed: %s", exc)
+        return False
+
+
+async def _send_email_notification(to_address: str, subject: str, body: str) -> bool:
+    """Send an alert email via the configured SMTP server.
+
+    Delegates to ``app.services.notifications.send_email`` which reads
+    ZIRCON_SMTP_HOST / ZIRCON_SMTP_USER / ZIRCON_SMTP_PASSWORD from env.
+    """
+    if not to_address:
+        return False
+    try:
+        from app.services.notifications import send_email  # local import
+        return await send_email(to_address, subject, body)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[AlertEngine] Email dispatch failed: %s", exc)
         return False
 
 
@@ -124,6 +154,8 @@ async def _dispatch_channel(channel: dict, title: str, body: str) -> bool:
         return await _send_telegram(
             channel.get("bot_token", ""), channel.get("chat_id", ""), body
         )
+    if channel_type == "email":
+        return await _send_email_notification(channel.get("to", ""), title, body)
     logger.warning("[AlertEngine] Unknown channel type '%s' — skipping.", channel_type)
     return False
 
@@ -185,8 +217,10 @@ async def dispatch_alerts(finding_id: int, db: AsyncSession | None = None) -> di
 
         stats["rules_checked"] = len(alert_rules)
         body = _finding_to_text(finding_row)
+        badge = _score_badge(finding_row.threat_score or 0)
         title = (
-            f"Impersonation alert: {finding_row.module.upper()} score={finding_row.threat_score}"
+            f"{badge} Impersonation alert: {finding_row.module.upper()} "
+            f"score={finding_row.threat_score}"
         )
 
         for rule in alert_rules:

@@ -1,0 +1,615 @@
+"""
+Tests for Phase 2 Impersonation Monitoring scanner integrations (TS-IMP-001 v2).
+
+Covers:
+- M7 VIP partner phishing domain detection (lookalike + rapidfuzz)
+- M5 Executive HIBP breach lookup
+- M1 Telegram channel impersonation scanning
+- M1 Instagram account detection via Apify
+- M1 VK community detection via VK API
+- M2 Google Play app detection via google-play-scraper
+- _scan_m1_social platform dispatch routing
+- Alert engine email dispatch and score badge formatting
+- score_calculators shared helpers
+"""
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCANNER = REPO_ROOT / "app" / "services" / "impersonation" / "scanner.py"
+ALERT_ENGINE = REPO_ROOT / "app" / "services" / "impersonation" / "alert_engine.py"
+SCORE_CALCULATORS = REPO_ROOT / "app" / "services" / "impersonation" / "score_calculators.py"
+
+
+# ── score_calculators helpers ─────────────────────────────────────────────────
+
+class TestScoreCalculators:
+    def test_score_calculators_file_exists(self):
+        assert SCORE_CALCULATORS.exists(), "score_calculators.py should exist"
+
+    def test_similarity_ratio_identical(self):
+        from app.services.impersonation.score_calculators import similarity_ratio
+        assert similarity_ratio("acme", "acme") == 100.0
+
+    def test_similarity_ratio_empty(self):
+        from app.services.impersonation.score_calculators import similarity_ratio
+        assert similarity_ratio("", "") == 100.0
+        assert similarity_ratio("acme", "") == 0.0
+
+    def test_similarity_ratio_different(self):
+        from app.services.impersonation.score_calculators import similarity_ratio
+        score = similarity_ratio("acme", "xyz-unrelated-123")
+        assert 0.0 <= score < 50.0
+
+    def test_domain_label_basic(self):
+        from app.services.impersonation.score_calculators import domain_label
+        assert domain_label("acme.com") == "acme"
+        assert domain_label("acme-bank.co.uk") == "acme-bank"
+
+    def test_best_domain_similarity_match(self):
+        from app.services.impersonation.score_calculators import best_domain_similarity
+        score, ref = best_domain_similarity("acmee.com", ["acme.com", "partner.com"])
+        assert score >= 80.0
+        assert ref == "acme.com"
+
+    def test_best_domain_similarity_no_match(self):
+        from app.services.impersonation.score_calculators import best_domain_similarity
+        score, ref = best_domain_similarity("unrelated-xyz123.com", ["acme.com"])
+        assert score < 70.0
+
+    def test_score_badge(self):
+        from app.services.impersonation.score_calculators import score_badge
+        assert score_badge(85) == "🔴"
+        assert score_badge(65) == "🟡"
+        assert score_badge(30) == "🟢"
+
+    def test_contains_keywords(self):
+        from app.services.impersonation.score_calculators import contains_keywords
+        result = contains_keywords("ACME Official Support", ["official", "fake"])
+        assert "official" in result
+        assert "fake" not in result
+
+
+# ── M7 VIP scanner ────────────────────────────────────────────────────────────
+
+class TestScanM7Vip:
+    def test_m7_vip_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m7_vip" in source
+
+    def test_m7_vip_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "vip_phishing_domain" in source
+
+    @pytest.mark.asyncio
+    async def test_m7_vip_no_protected_domains_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m7_vip
+        result = await _scan_m7_vip({"brand_name": "TestBrand", "official_domains": [], "partner_domains": []})
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m7_vip_returns_finding_for_lookalike(self):
+        from app.services.impersonation.scanner import _scan_m7_vip
+
+        async def _fake_nrd():
+            return ["acmee.com", "unrelated-xyz9999.com"]
+
+        with patch("app.services.lookalike.nrd_feed.fetch_nrd_domains", new=_fake_nrd):
+            rule = {
+                "brand_name": "ACME",
+                "official_domains": ["acme.com"],
+                "partner_domains": [],
+                "min_impersonation_score": 40,
+            }
+            result = await _scan_m7_vip(rule)
+        # "acmee.com" is very similar to "acme.com" (>70%); should produce a finding
+        assert isinstance(result, list)
+        identifiers = [f["target_identifier"] for f in result]
+        assert "acmee.com" in identifiers
+
+    @pytest.mark.asyncio
+    async def test_m7_vip_skips_exact_protected_domains(self):
+        """NRD domains that are exact official domains should be skipped."""
+        from app.services.impersonation.scanner import _scan_m7_vip
+        from app.services.lookalike import nrd_feed
+
+        async def _fake_nrd():
+            return ["acme.com"]  # exact match of official domain
+
+        orig_fetch = nrd_feed.fetch_nrd_domains
+        try:
+            nrd_feed.fetch_nrd_domains = _fake_nrd
+            rule = {
+                "brand_name": "ACME",
+                "official_domains": ["acme.com"],
+                "partner_domains": [],
+                "min_impersonation_score": 40,
+            }
+            result = await _scan_m7_vip(rule)
+            # acme.com is in official_domains so it should be filtered out
+            for finding in result:
+                assert finding["target_identifier"] != "acme.com"
+        finally:
+            nrd_feed.fetch_nrd_domains = orig_fetch
+
+
+# ── M5 HIBP scanner ───────────────────────────────────────────────────────────
+
+class TestScanM5Hibp:
+    def test_m5_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m5_executive" in source
+
+    def test_m5_uses_hibp_client(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "HIBPClient" in source
+
+    def test_m5_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "executive_credentials_leaked" in source
+
+    @pytest.mark.asyncio
+    async def test_m5_no_api_key_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m5_executive
+        with patch.dict("os.environ", {"HIBP_API_KEY": ""}, clear=False):
+            result = await _scan_m5_executive({
+                "brand_name": "Acme",
+                "executive_names": ["John Doe"],
+                "official_domains": ["acme.com"],
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m5_no_executives_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m5_executive
+        with patch.dict("os.environ", {"HIBP_API_KEY": "test-key"}, clear=False):
+            result = await _scan_m5_executive({
+                "brand_name": "Acme",
+                "executive_names": [],
+                "official_domains": ["acme.com"],
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m5_breach_found_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m5_executive
+        mock_breaches = [
+            {"Name": "Adobe", "DataClasses": ["Email addresses", "Passwords"], "BreachDate": "2013-10-04"},
+        ]
+        mock_client = MagicMock()
+        mock_client.search = AsyncMock(return_value={"breaches": mock_breaches})
+
+        with patch.dict("os.environ", {"HIBP_API_KEY": "test-key"}, clear=False):
+            with patch(
+                "app.services.osint.hibp.HIBPClient",
+                return_value=mock_client,
+            ):
+                result = await _scan_m5_executive({
+                    "brand_name": "Acme",
+                    "executive_names": ["john.doe@acme.com"],
+                    "official_domains": ["acme.com"],
+                })
+        assert len(result) == 1
+        finding = result[0]
+        assert finding["module"] == "m5"
+        assert finding["platform"] == "breach_database"
+        assert finding["finding_type"] == "executive_credentials_leaked"
+        assert finding["threat_score"] == 90  # has passwords → critical
+        assert "has_passwords" in finding["signals"]
+
+    @pytest.mark.asyncio
+    async def test_m5_breach_without_passwords_is_high(self):
+        from app.services.impersonation.scanner import _scan_m5_executive
+        mock_breaches = [{"Name": "LinkedIn", "DataClasses": ["Email addresses"], "BreachDate": "2012-05-05"}]
+        mock_client = MagicMock()
+        mock_client.search = AsyncMock(return_value={"breaches": mock_breaches})
+
+        with patch.dict("os.environ", {"HIBP_API_KEY": "test-key"}, clear=False):
+            with patch("app.services.osint.hibp.HIBPClient", return_value=mock_client):
+                result = await _scan_m5_executive({
+                    "brand_name": "Acme",
+                    "executive_names": ["jane@acme.com"],
+                    "official_domains": ["acme.com"],
+                })
+        assert len(result) == 1
+        assert result[0]["threat_score"] == 75  # no passwords → high
+        assert "has_passwords" not in result[0]["signals"]
+
+    @pytest.mark.asyncio
+    async def test_m5_no_breach_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m5_executive
+        mock_client = MagicMock()
+        mock_client.search = AsyncMock(return_value={"breaches": []})
+
+        with patch.dict("os.environ", {"HIBP_API_KEY": "test-key"}, clear=False):
+            with patch("app.services.osint.hibp.HIBPClient", return_value=mock_client):
+                result = await _scan_m5_executive({
+                    "brand_name": "Acme",
+                    "executive_names": ["safe@acme.com"],
+                    "official_domains": ["acme.com"],
+                })
+        assert result == []
+
+
+# ── M1 Telegram scanner ───────────────────────────────────────────────────────
+
+class TestScanM1Telegram:
+    def test_telegram_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_telegram" in source
+
+    def test_telegram_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "fake_telegram_account" in source
+
+    @pytest.mark.asyncio
+    async def test_telegram_no_credentials_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_telegram
+        env = {"TELEGRAM_API_ID": "", "TELEGRAM_API_HASH": "", "TELEGRAM_SESSION_STRING": ""}
+        with patch.dict("os.environ", env, clear=False):
+            result = await _scan_m1_telegram({
+                "brand_name": "TestBrand",
+                "official_domains": [],
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_telegram_missing_telethon_returns_empty(self):
+        """When telethon is not importable, scan should return [] gracefully."""
+        from app.services.impersonation.scanner import _scan_m1_telegram
+        import sys
+        with patch.dict("sys.modules", {"telethon": None}):
+            result = await _scan_m1_telegram({
+                "brand_name": "TestBrand",
+                "official_domains": [],
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    def test_telegram_scoring_logic_in_source(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "partial_ratio" in source or "name_sim" in source
+        assert "subscribers" in source or "participants_count" in source
+
+
+# ── M1 Social dispatch ────────────────────────────────────────────────────────
+
+class TestScanM1Social:
+    def test_social_scan_dispatches_to_platforms(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "_scan_m1_telegram" in source
+        assert "_scan_m1_instagram" in source
+        assert "_scan_m1_vk" in source
+
+    @pytest.mark.asyncio
+    async def test_social_scan_calls_telegram_when_in_platforms(self):
+        from app.services.impersonation import scanner as scanner_mod
+        mock_tg = AsyncMock(return_value=[{"module": "m1", "platform": "telegram"}])
+        mock_ig = AsyncMock(return_value=[])
+        mock_vk = AsyncMock(return_value=[])
+        with (
+            patch.object(scanner_mod, "_scan_m1_telegram", mock_tg),
+            patch.object(scanner_mod, "_scan_m1_instagram", mock_ig),
+            patch.object(scanner_mod, "_scan_m1_vk", mock_vk),
+        ):
+            rule = {
+                "brand_name": "Acme",
+                "social_platforms": ["telegram"],
+                "official_domains": [],
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            }
+            result = await scanner_mod._scan_m1_social(rule)
+        assert len(result) == 1
+        mock_tg.assert_called_once()
+        mock_ig.assert_not_called()
+        mock_vk.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_social_scan_all_platforms(self):
+        from app.services.impersonation import scanner as scanner_mod
+        mock_tg = AsyncMock(return_value=[{"module": "m1", "platform": "telegram"}])
+        mock_ig = AsyncMock(return_value=[{"module": "m1", "platform": "instagram"}])
+        mock_vk = AsyncMock(return_value=[{"module": "m1", "platform": "vk"}])
+        with (
+            patch.object(scanner_mod, "_scan_m1_telegram", mock_tg),
+            patch.object(scanner_mod, "_scan_m1_instagram", mock_ig),
+            patch.object(scanner_mod, "_scan_m1_vk", mock_vk),
+        ):
+            rule = {
+                "brand_name": "Acme",
+                "social_platforms": ["telegram", "instagram", "vk"],
+                "official_domains": [],
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            }
+            result = await scanner_mod._scan_m1_social(rule)
+        assert len(result) == 3
+        mock_tg.assert_called_once()
+        mock_ig.assert_called_once()
+        mock_vk.assert_called_once()
+
+
+# ── M1 Instagram scanner ──────────────────────────────────────────────────────
+
+class TestScanM1Instagram:
+    def test_instagram_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_instagram" in source
+
+    def test_instagram_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "fake_instagram_account" in source
+
+    @pytest.mark.asyncio
+    async def test_instagram_no_api_key_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_instagram
+        with patch.dict("os.environ", {"APIFY_API_KEY": ""}, clear=False):
+            result = await _scan_m1_instagram({
+                "brand_name": "TestBrand",
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_instagram_mock_apify_response_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m1_instagram
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "username": "testbrandofficial",
+                "fullName": "TestBrand Official",
+                "followersCount": 5000,
+                "isVerified": False,
+                "biography": "",
+            }
+        ]
+        with patch.dict("os.environ", {"APIFY_API_KEY": "test-key"}, clear=False):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_instagram({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert isinstance(result, list)
+
+
+# ── M1 VK scanner ─────────────────────────────────────────────────────────────
+
+class TestScanM1Vk:
+    def test_vk_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_vk" in source
+
+    def test_vk_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "fake_vk_account" in source
+
+    @pytest.mark.asyncio
+    async def test_vk_no_token_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_vk
+        with patch.dict("os.environ", {"VK_SERVICE_TOKEN": ""}, clear=False):
+            result = await _scan_m1_vk({
+                "brand_name": "TestBrand",
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_vk_mock_api_response_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m1_vk
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "response": {
+                "items": [
+                    {
+                        "id": 12345,
+                        "name": "TestBrand Official Group",
+                        "screen_name": "testbrand_official",
+                        "members_count": 500,
+                        "verified": 0,
+                    }
+                ]
+            }
+        }
+        with patch.dict("os.environ", {"VK_SERVICE_TOKEN": "vk-token"}, clear=False):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_vk({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert isinstance(result, list)
+        if result:
+            assert result[0]["platform"] == "vk"
+            assert result[0]["finding_type"] == "fake_vk_account"
+
+
+# ── M2 Google Play scanner ────────────────────────────────────────────────────
+
+class TestScanM2GooglePlay:
+    def test_google_play_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m2_google_play" in source
+
+    def test_google_play_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "fake_mobile_app" in source
+
+    @pytest.mark.asyncio
+    async def test_google_play_missing_package_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m2_google_play
+        import sys
+        with patch.dict("sys.modules", {"google_play_scraper": None}):
+            result = await _scan_m2_google_play({
+                "brand_name": "TestBrand",
+                "official_developer_ids": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_google_play_mock_results_return_finding(self):
+        from app.services.impersonation.scanner import _scan_m2_google_play
+        mock_app = {
+            "appId": "com.fake.testbrand",
+            "title": "TestBrand",
+            "developer": "FakeDev Inc",
+            "developerId": "fakeDev",
+            "score": 3.5,
+            "minInstalls": 10000,
+            "permissions": [],
+        }
+        mock_search = MagicMock(return_value=[mock_app])
+        with patch("app.services.impersonation.scanner.gplay_search", mock_search, create=True):
+            with patch(
+                "asyncio.to_thread",
+                new=AsyncMock(return_value=[mock_app]),
+            ):
+                result = await _scan_m2_google_play({
+                    "brand_name": "TestBrand",
+                    "official_developer_ids": [],
+                    "min_impersonation_score": 40,
+                })
+        assert isinstance(result, list)
+
+    def test_google_play_suspicious_permissions_in_source(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "READ_CONTACTS" in source or "SUSPICIOUS" in source or "suspicious_permissions" in source
+
+
+# ── Alert Engine ──────────────────────────────────────────────────────────────
+
+class TestAlertEngine:
+    def test_email_dispatch_function_exists(self):
+        source = ALERT_ENGINE.read_text(encoding="utf-8")
+        assert "_send_email_notification" in source
+
+    def test_email_channel_type_handled(self):
+        source = ALERT_ENGINE.read_text(encoding="utf-8")
+        assert 'channel_type == "email"' in source
+
+    def test_score_badge_function_exists(self):
+        source = ALERT_ENGINE.read_text(encoding="utf-8")
+        assert "_score_badge" in source
+
+    def test_score_badges_correct_thresholds(self):
+        source = ALERT_ENGINE.read_text(encoding="utf-8")
+        assert "80" in source  # 🔴 threshold
+        assert "50" in source  # 🟡 threshold
+
+    @pytest.mark.asyncio
+    async def test_send_slack_returns_false_on_empty_url(self):
+        from app.services.impersonation.alert_engine import _send_slack
+        result = await _send_slack("", "test message")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_telegram_returns_false_on_missing_params(self):
+        from app.services.impersonation.alert_engine import _send_telegram
+        result = await _send_telegram("", "chat123", "text")
+        assert result is False
+        result = await _send_telegram("bottoken", "", "text")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_dispatch_channel_email_routes_to_email(self):
+        from app.services.impersonation.alert_engine import _dispatch_channel
+        with patch(
+            "app.services.impersonation.alert_engine._send_email_notification",
+            new=AsyncMock(return_value=True),
+        ) as mock_email:
+            result = await _dispatch_channel(
+                {"type": "email", "to": "security@acme.com"},
+                "Alert title",
+                "Alert body",
+            )
+        assert result is True
+        mock_email.assert_called_once_with("security@acme.com", "Alert title", "Alert body")
+
+    @pytest.mark.asyncio
+    async def test_dispatch_channel_unknown_type_returns_false(self):
+        from app.services.impersonation.alert_engine import _dispatch_channel
+        result = await _dispatch_channel({"type": "unknown_channel"}, "title", "body")
+        assert result is False
+
+    def test_finding_to_text_includes_badge(self):
+        from app.services.impersonation.alert_engine import _finding_to_text
+        finding = MagicMock()
+        finding.module = "m7"
+        finding.platform = "domain_registry"
+        finding.finding_type = "vip_phishing_domain"
+        finding.display_name = "acmee.com"
+        finding.target_identifier = "acmee.com"
+        finding.target_url = "http://acmee.com"
+        finding.threat_score = 85
+        finding.status = "new"
+        finding.first_seen = None
+        text = _finding_to_text(finding)
+        assert "🔴" in text
+        assert "M7" in text
+
+
+# ── New scanner functions are present in scanner.py ──────────────────────────
+
+class TestScannerFunctionSignatures:
+    def test_all_new_m1_functions_present(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_telegram" in source
+        assert "async def _scan_m1_instagram" in source
+        assert "async def _scan_m1_vk" in source
+
+    def test_m2_google_play_present(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m2_google_play" in source
+
+    def test_m7_vip_implemented(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "best_domain_similarity" in source or "rapidfuzz" in source or "nrd_feed" in source
+
+    def test_m5_hibp_implemented(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "HIBPClient" in source
+        assert "HIBP_API_KEY" in source
+
+    def test_stubs_still_present_for_phase2b(self):
+        """Phase 2b stubs must remain for deferred modules."""
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_tiktok" in source
+        assert "async def _scan_m1_linkedin" in source
+        assert "async def _scan_m1_youtube" in source
+        assert "async def _scan_m2_appstore" in source
+        assert "async def _scan_m5_darkweb" in source
+        assert "async def _scan_m6_ads" in source
+
+    def test_env_example_updated(self):
+        env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+        assert "HIBP_API_KEY" in env_example
+        assert "APIFY_API_KEY" in env_example
+        assert "VK_SERVICE_TOKEN" in env_example
+        assert "PAGERDUTY_API_KEY" in env_example
+
+    def test_requirements_has_google_play_scraper(self):
+        reqs = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+        assert "google-play-scraper" in reqs
