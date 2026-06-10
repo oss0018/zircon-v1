@@ -437,6 +437,40 @@ def _migrate_ds_source_credentials(conn) -> None:
         logger.warning("Could not migrate ds_sources credentials: %s", exc)
 
 
+def _migrate_deep_search_schema(conn) -> None:
+    """Ensure Deep Search file/chunk tables have the Phase 1 ingestion columns."""
+    from sqlalchemy import inspect, text
+
+    DS_FILE_COLS: dict[str, str] = {
+        "size_bytes": "BIGINT DEFAULT 0",
+        "mtime": "DATETIME",
+        "etag": "VARCHAR(256) DEFAULT ''",
+        "content_sha256": "VARCHAR(64) DEFAULT ''",
+        "indexed_at": "DATETIME",
+        "last_seen_at": "DATETIME",
+    }
+    DS_CHUNK_COLS: dict[str, str] = {
+        "start_offset": "INTEGER DEFAULT 0",
+        "end_offset": "INTEGER DEFAULT 0",
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = set(inspector.get_table_names())
+        if "ds_files" in tables:
+            existing = {c["name"] for c in inspector.get_columns("ds_files")}
+            for col_name, col_type in DS_FILE_COLS.items():
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE ds_files ADD COLUMN {col_name} {col_type}"))
+        if "ds_chunks" in tables:
+            existing = {c["name"] for c in inspector.get_columns("ds_chunks")}
+            for col_name, col_type in DS_CHUNK_COLS.items():
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE ds_chunks ADD COLUMN {col_name} {col_type}"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate Deep Search schema: %s", exc)
+
+
 def _migrate_sl_rules(conn) -> None:
     """Add alert_email and alert_telegram columns to sl_rules if missing."""
     from sqlalchemy import inspect, text
@@ -486,5 +520,7 @@ async def init_db():
         await conn.run_sync(_migrate_cti_schema)
         # Encrypt existing ds_sources credentials (if ds_sources already exists)
         await conn.run_sync(_migrate_ds_source_credentials)
+        # Ensure Deep Search ingestion columns exist on upgrades
+        await conn.run_sync(_migrate_deep_search_schema)
         # Add alert_email / alert_telegram to sl_rules if upgrading from older version
         await conn.run_sync(_migrate_sl_rules)
