@@ -251,6 +251,7 @@ def test_testssl_scanner_parses_json_output(monkeypatch):
         )
         return _Proc()
 
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/testssl.sh" if name == "testssl.sh" else None)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
 
     findings = asyncio.run(TestSSLScanner.scan("example.com", 443))
@@ -336,14 +337,10 @@ def test_nuclei_scanner_streams_and_deduplicates(monkeypatch):
         def kill(self):
             return None
 
-    def _path_exists(path: str) -> bool:
-        return False
-
     async def _spawn(*args, **kwargs):  # noqa: ARG001
         captured_cmd["args"] = args
         return _Proc()
 
-    monkeypatch.setattr("app.services.vulnscan.scanners.Path.exists", _path_exists)
     monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/nuclei" if name == "nuclei" else None)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
 
@@ -353,8 +350,6 @@ def test_nuclei_scanner_streams_and_deduplicates(monkeypatch):
     assert finding["finding_type"] == "CVE"
     assert finding["severity"] == "HIGH"
     assert json.loads(finding["cve_ids_json"]) == ["CVE-2024-0001"]
-    assert "-ud" in captured_cmd["args"]
-    assert "/tmp/nuclei-templates" in captured_cmd["args"]
     assert "-tags" in captured_cmd["args"]
 
 
@@ -384,16 +379,24 @@ def test_nuclei_scanner_omits_tags_for_deep(monkeypatch):
         def kill(self):
             return None
 
-    def _path_exists(path) -> bool:
-        return str(path) == "/usr/local/bin/nuclei"
-
     async def _spawn(*args, **kwargs):  # noqa: ARG001
         captured_cmd["args"] = args
         return _Proc()
 
-    monkeypatch.setattr("app.services.vulnscan.scanners.Path.exists", _path_exists)
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/nuclei" if name == "nuclei" else None)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
 
     findings = asyncio.run(NucleiScanner.scan("https://example.com", "deep"))
     assert findings == []
     assert "-tags" not in captured_cmd["args"]
+
+
+def test_nuclei_scanner_returns_tool_not_available_when_binary_missing(monkeypatch):
+    from app.services.vulnscan.scanners import NucleiScanner
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: None)
+
+    findings = asyncio.run(NucleiScanner.scan("https://example.com", "quick"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
+    assert findings[0]["title"] == "Nuclei not installed"

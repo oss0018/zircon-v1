@@ -835,8 +835,16 @@ class NucleiScanner:
                     if isinstance(info.get("classification"), dict)
                     else {}
                 )
-                cve_ids = classification.get("cve-id", []) or []
-                cwe_ids = classification.get("cwe-id", []) or []
+                raw_cve_ids = classification.get("cve-id", []) or []
+                raw_cwe_ids = classification.get("cwe-id", []) or []
+                cve_ids = raw_cve_ids if isinstance(raw_cve_ids, list) else [str(raw_cve_ids)]
+                cwe_ids = raw_cwe_ids if isinstance(raw_cwe_ids, list) else [str(raw_cwe_ids)]
+                raw_references = info.get("reference", []) or []
+                references = (
+                    raw_references
+                    if isinstance(raw_references, list)
+                    else [str(raw_references)]
+                )
 
                 findings.append(
                     {
@@ -851,10 +859,10 @@ class NucleiScanner:
                             host,
                             port,
                         ),
-                        "cve_ids_json": json.dumps(cve_ids if isinstance(cve_ids, list) else []),
-                        "cwe_ids_json": json.dumps(cwe_ids if isinstance(cwe_ids, list) else []),
+                        "cve_ids_json": json.dumps(cve_ids),
+                        "cwe_ids_json": json.dumps(cwe_ids),
                         "cvss_score": classification.get("cvss-score"),
-                        "references_json": json.dumps(info.get("reference", []) or []),
+                        "references_json": json.dumps(references),
                     }
                 )
 
