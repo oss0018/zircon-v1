@@ -62,6 +62,17 @@ Key settings:
 - `ZIRCON_SMTP_*` — Email notification settings
 - `ZIRCON_TELEGRAM_BOT_TOKEN` — Telegram bot for alerts
 
+### Docker runtime for vuln scanners
+`/home/runner/work/zircon-v1/zircon-v1/oss0018/zircon-v1/Dockerfile` is now the root image used by `/home/runner/work/zircon-v1/zircon-v1/oss0018/zircon-v1/docker-compose.yml`. It installs `testssl.sh`, `nikto`, and `nuclei`, and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
+
+To verify the scanner tooling inside the built image:
+
+```bash
+docker compose run --rm app verify-vuln-tools
+```
+
+If you manage Nuclei templates separately, set `ZIRCON_NUCLEI_UPDATE_TEMPLATES=0` to skip the first-run template download.
+
 ### Architecture
 ```
 FastAPI (HTTPS) ─── SQLite (SQLAlchemy async)
