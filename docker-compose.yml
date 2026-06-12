@@ -1,11 +1,11 @@
-version: "3.9"
-
 services:
   app:
     build: .
     command: python start.py
     env_file:
       - .env
+    volumes:
+      - nuclei_templates:/opt/nuclei-templates
     ports:
       - "8181:8181"
       - "8443:8443"
@@ -47,6 +47,8 @@ services:
     command: celery -A app.services.cti.tasks.celery_app worker --loglevel=info -Q cti
     env_file:
       - .env
+    volumes:
+      - nuclei_templates:/opt/nuclei-templates
     depends_on:
       - redis
 
@@ -58,6 +60,7 @@ services:
     depends_on:
       - redis
     volumes:
+      - nuclei_templates:/opt/nuclei-templates
       - ${DEEP_SEARCH_LOCAL_MOUNT:-/mnt/local_dumps}:/mnt/local_dumps:ro
       - staging_tmp:/tmp/ds_staging
 
@@ -66,6 +69,8 @@ services:
     command: celery -A app.services.cti.tasks.celery_app beat --loglevel=info
     env_file:
       - .env
+    volumes:
+      - nuclei_templates:/opt/nuclei-templates
     depends_on:
       - redis
 
@@ -74,9 +79,12 @@ services:
     command: celery -A app.services.cti.tasks.celery_app worker --loglevel=info -Q cti_telegram
     env_file:
       - .env
+    volumes:
+      - nuclei_templates:/opt/nuclei-templates
     depends_on:
       - redis
 
 volumes:
   es_data:
+  nuclei_templates:
   staging_tmp:
