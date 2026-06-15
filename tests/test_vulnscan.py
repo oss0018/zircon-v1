@@ -1,15 +1,29 @@
 import json
 import asyncio
+import os
+import tempfile
 from pathlib import Path
 
 import dns.exception
 import dns.rdatatype
 import dns.resolver
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_HTML = REPO_ROOT / "app" / "static" / "index.html"
 VULNSCAN_JS = REPO_ROOT / "app" / "static" / "js" / "vulnscan.js"
+
+
+async def _build_temp_session_factory(base):
+    fd, db_path = tempfile.mkstemp(suffix=".sqlite3")
+    os.close(fd)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    async with engine.begin() as conn:
+        await conn.run_sync(base.metadata.create_all)
+    return engine, async_sessionmaker(engine, expire_on_commit=False), db_path
 
 
 def test_vulnscan_models_importable():
@@ -400,3 +414,154 @@ def test_nuclei_scanner_returns_tool_not_available_when_binary_missing(monkeypat
     assert len(findings) == 1
     assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
     assert findings[0]["title"] == "Nuclei not installed"
+
+
+@pytest.mark.asyncio
+async def test_resync_vulnscan_scheduled_jobs_schedules_active_valid_targets(monkeypatch, caplog):
+    from app import database
+    from app.database import Base
+    from app.models import VSScanTarget
+    from app.services import scheduler
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _Job:
+        def __init__(self, job_id):
+            self.id = job_id
+
+    try:
+        async with session_factory() as db:
+            db.add_all(
+                [
+                    VSScanTarget(
+                        name="valid",
+                        target_value="https://example.com",
+                        schedule_cron="*/20 * * * *",
+                        active=True,
+                    ),
+                    VSScanTarget(
+                        name="invalid",
+                        target_value="https://bad.example",
+                        schedule_cron="bad cron",
+                        active=True,
+                    ),
+                    VSScanTarget(
+                        name="inactive",
+                        target_value="https://inactive.example",
+                        schedule_cron="*/15 * * * *",
+                        active=False,
+                    ),
+                ]
+            )
+            await db.commit()
+
+        monkeypatch.setattr(database, "AsyncSessionLocal", session_factory)
+        added_jobs = {}
+        removed_jobs = []
+        existing_jobs = [_Job("vulnscan_target_999"), _Job("scan_monitored")]
+
+        def _add_job(func, trigger, *args, **kwargs):
+            added_jobs[kwargs["id"]] = {"func": func, "trigger": trigger, "kwargs": kwargs}
+
+        monkeypatch.setattr(scheduler._scheduler, "add_job", _add_job)
+        monkeypatch.setattr(scheduler._scheduler, "get_jobs", lambda: existing_jobs)
+        monkeypatch.setattr(scheduler._scheduler, "remove_job", lambda job_id: removed_jobs.append(job_id))
+
+        with caplog.at_level("WARNING"):
+            await scheduler.resync_vulnscan_scheduled_jobs()
+
+        assert set(added_jobs) == {"vulnscan_target_1"}
+        assert added_jobs["vulnscan_target_1"]["kwargs"]["replace_existing"] is True
+        assert removed_jobs == ["vulnscan_target_999"]
+        assert "invalid cron" in caplog.text
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_run_vulnscan_target_scan_creates_scan_and_invokes_orchestrator(monkeypatch):
+    from app import database
+    from app.database import Base
+    from app.models import VSScan, VSScanTarget
+    from app.services import scheduler
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    called_scan_ids = []
+
+    class _FakeOrchestrator:
+        async def run(self, scan_id: int):
+            called_scan_ids.append(scan_id)
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(
+                name="scheduled",
+                target_value="https://example.com",
+                default_profile="unsupported",
+                schedule_cron="*/10 * * * *",
+                active=True,
+            )
+            db.add(target)
+            await db.commit()
+            await db.refresh(target)
+            target_id = target.id
+
+        monkeypatch.setattr(database, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr("app.services.vulnscan.VulnScanOrchestrator", _FakeOrchestrator)
+
+        await scheduler._run_vulnscan_target_scan(target_id)
+
+        async with session_factory() as db:
+            scans = list((await db.execute(select(VSScan))).scalars().all())
+
+        assert len(scans) == 1
+        assert scans[0].target_id == target_id
+        assert scans[0].profile == "standard"
+        assert scans[0].comment == "Scheduled scan"
+        assert called_scan_ids == [scans[0].id]
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_run_vulnscan_target_scan_uses_valid_default_profile(monkeypatch):
+    from app import database
+    from app.database import Base
+    from app.models import VSScan, VSScanTarget
+    from app.services import scheduler
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _FakeOrchestrator:
+        async def run(self, _scan_id: int):
+            pass
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(
+                name="scheduled-quick",
+                target_value="https://example.com",
+                default_profile="quick",
+                schedule_cron="*/10 * * * *",
+                active=True,
+            )
+            db.add(target)
+            await db.commit()
+            await db.refresh(target)
+            target_id = target.id
+
+        monkeypatch.setattr(database, "AsyncSessionLocal", session_factory)
+        monkeypatch.setattr("app.services.vulnscan.VulnScanOrchestrator", _FakeOrchestrator)
+
+        await scheduler._run_vulnscan_target_scan(target_id)
+
+        async with session_factory() as db:
+            scan = (await db.execute(select(VSScan))).scalar_one()
+
+        assert scan.profile == "quick"
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
