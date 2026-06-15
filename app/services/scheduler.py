@@ -1,10 +1,130 @@
 """
 APScheduler background task scheduler.
 """
+import asyncio
+import logging
+from datetime import datetime, timezone
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 _scheduler = AsyncIOScheduler()
+logger = logging.getLogger(__name__)
+
+_VULNSCAN_JOB_PREFIX = "vulnscan_target_"
+_VALID_VULNSCAN_PROFILES = {"quick", "standard", "deep"}
+_DEFAULT_VULNSCAN_SCOPE = "SELF"
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _vulnscan_job_id(target_id: int) -> str:
+    return f"{_VULNSCAN_JOB_PREFIX}{target_id}"
+
+
+def _track_background_task(task: asyncio.Task) -> None:
+    _background_tasks.add(task)
+
+    def _done(done_task: asyncio.Task) -> None:
+        _background_tasks.discard(done_task)
+        try:
+            done_task.result()
+        except Exception:
+            logger.exception("Background scheduler task failed")
+
+    task.add_done_callback(_done)
+
+
+async def _run_vulnscan_target_scan(target_id: int) -> None:
+    """Create and run a scheduled vulnerability scan for a target."""
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import VSScan, VSScanTarget
+    from app.services.vulnscan import VulnScanOrchestrator
+
+    scan_id: int | None = None
+    try:
+        async with AsyncSessionLocal() as db:
+            target_result = await db.execute(
+                select(VSScanTarget).where(
+                    VSScanTarget.id == target_id,
+                    VSScanTarget.active.is_(True),
+                )
+            )
+            target = target_result.scalar_one_or_none()
+            if target is None:
+                logger.info("Skipping scheduled vulnscan: target %s is missing or inactive", target_id)
+                return
+
+            profile = target.default_profile if target.default_profile in _VALID_VULNSCAN_PROFILES else "standard"
+            scan = VSScan(
+                target_id=target.id,
+                profile=profile,
+                scope=target.scope or _DEFAULT_VULNSCAN_SCOPE,
+                status="pending",
+                scanners_used_json="[]",
+                initiated_by=target.created_by,
+                comment="Scheduled scan",
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(scan)
+            await db.commit()
+            await db.refresh(scan)
+            scan_id = scan.id
+
+        if scan_id is not None:
+            await VulnScanOrchestrator().run(scan_id)
+    except Exception:
+        logger.exception("Scheduled vulnscan run failed for target %s", target_id)
+
+
+async def resync_vulnscan_scheduled_jobs() -> None:
+    """Sync APScheduler vulnscan cron jobs with active DB targets."""
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import VSScanTarget
+
+    configured_job_ids: set[str] = set()
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(VSScanTarget).where(VSScanTarget.active.is_(True)))
+            targets = result.scalars().all()
+
+        for target in targets:
+            cron_expr = (target.schedule_cron or "").strip()
+            if not cron_expr:
+                continue
+
+            job_id = _vulnscan_job_id(target.id)
+            try:
+                trigger = CronTrigger.from_crontab(cron_expr)
+            except ValueError as exc:
+                logger.warning(
+                    "Skipping vulnscan schedule for target %s (invalid cron '%s'): %s",
+                    target.id,
+                    cron_expr,
+                    exc,
+                )
+                continue
+
+            _scheduler.add_job(
+                _run_vulnscan_target_scan,
+                trigger,
+                id=job_id,
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                kwargs={"target_id": target.id},
+            )
+            configured_job_ids.add(job_id)
+
+        for job in _scheduler.get_jobs():
+            if job.id.startswith(_VULNSCAN_JOB_PREFIX) and job.id not in configured_job_ids:
+                _scheduler.remove_job(job.id)
+    except Exception:
+        logger.exception("Failed to resync vulnscan scheduled jobs")
 
 
 def start_scheduler():
@@ -282,6 +402,11 @@ def start_scheduler():
         misfire_grace_time=300,
     )
     _scheduler.start()
+    try:
+        task = asyncio.get_running_loop().create_task(resync_vulnscan_scheduled_jobs())
+        _track_background_task(task)
+    except RuntimeError as exc:
+        logger.warning("Unable to schedule immediate vulnscan startup sync: %s", exc)
     print("[scheduler] Started. Monitored dir scan every 15 minutes. Watched folder scan every 8 minutes. Storage sources are evaluated every 11 minutes. Monitoring jobs are evaluated every 6 minutes. Social listening rules are evaluated every 15 minutes.")
 
 
