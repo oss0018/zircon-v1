@@ -56,6 +56,7 @@ def test_vulnscan_scan_columns():
     assert "status" in cols
     assert "scanners_used_json" in cols
     assert "progress_pct" in cols
+    assert "severe_alert_processed_at" in cols
 
 
 def test_vulnscan_orchestrator_importable():
@@ -563,5 +564,208 @@ async def test_run_vulnscan_target_scan_uses_valid_default_profile(monkeypatch):
 
         assert scan.profile == "quick"
     finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_vulnscan_run_dispatches_severe_alert_once(monkeypatch):
+    from app.models import VSScan, VSScanTarget
+    from app.database import Base
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator, PROFILE_SCANNERS
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    notifications = []
+
+    async def _fake_notify(title, message, email, telegram):
+        notifications.append(
+            {"title": title, "message": message, "email": email, "telegram": telegram}
+        )
+
+    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+        return [
+            {
+                "scanner_source": "nuclei",
+                "scanner_finding_id": "CVE-2026-0001",
+                "title": "Remote code execution",
+                "description": "Critical issue",
+                "finding_type": "CVE",
+                "severity": "CRITICAL",
+                "target_host": "example.com",
+                "target_port": 443,
+                "cve_ids_json": json.dumps(["CVE-2026-0001"]),
+            }
+        ]
+
+    original_scanners = PROFILE_SCANNERS["quick"]
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(
+                name="Example target",
+                target_value="https://example.com",
+                notify_channels_json=json.dumps(["email", "telegram"]),
+            )
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="quick", status="pending")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+        monkeypatch.setattr("app.services.vulnscan.orchestrator.AsyncSessionLocal", session_factory)
+        monkeypatch.setattr("app.services.vulnscan.alerts.notify", _fake_notify)
+        monkeypatch.setenv("CTI_ALERT_EMAIL", "alerts@example.com")
+        monkeypatch.setenv("CTI_ALERT_TELEGRAM", "@zircon-alerts")
+        monkeypatch.setattr("app.services.vulnscan.alerts.settings.smtp_host", "smtp.example.com")
+        monkeypatch.setattr("app.services.vulnscan.alerts.settings.telegram_bot_token", "token")
+        monkeypatch.setattr(VulnScanOrchestrator, "_run_scanner", _fake_run_scanner)
+        PROFILE_SCANNERS["quick"] = ["nuclei"]
+
+        await VulnScanOrchestrator().run(scan_id)
+        await VulnScanOrchestrator().run(scan_id)
+
+        async with session_factory() as db:
+            scan = (await db.execute(select(VSScan).where(VSScan.id == scan_id))).scalar_one()
+
+        assert scan.status == "completed"
+        assert scan.findings_critical == 1
+        assert scan.severe_alert_processed_at is not None
+        assert len(notifications) == 1
+        assert notifications[0]["email"] == "alerts@example.com"
+        assert notifications[0]["telegram"] == "@zircon-alerts"
+        assert "Target: Example target" in notifications[0]["message"]
+        assert f"Scan ID: {scan_id}" in notifications[0]["message"]
+        assert "Scan profile: quick" in notifications[0]["message"]
+        assert "critical=1" in notifications[0]["message"]
+        assert "Remote code execution" in notifications[0]["message"]
+    finally:
+        PROFILE_SCANNERS["quick"] = original_scanners
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_vulnscan_run_skips_alert_for_non_severe_findings(monkeypatch):
+    from app.models import VSScan, VSScanTarget
+    from app.database import Base
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator, PROFILE_SCANNERS
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    notifications = []
+
+    async def _fake_notify(title, message, email, telegram):  # noqa: ARG001
+        notifications.append((title, message, email, telegram))
+
+    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+        return [
+            {
+                "scanner_source": "headers",
+                "scanner_finding_id": "headers-medium",
+                "title": "Missing CSP",
+                "description": "Medium issue",
+                "finding_type": "MISSING_HEADER",
+                "severity": "MEDIUM",
+                "target_host": "example.com",
+                "target_port": 443,
+            }
+        ]
+
+    original_scanners = PROFILE_SCANNERS["quick"]
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(
+                name="Example target",
+                target_value="https://example.com",
+                notify_channels_json=json.dumps(["email"]),
+            )
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="quick", status="pending")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+        monkeypatch.setattr("app.services.vulnscan.orchestrator.AsyncSessionLocal", session_factory)
+        monkeypatch.setattr("app.services.vulnscan.alerts.notify", _fake_notify)
+        monkeypatch.setattr(VulnScanOrchestrator, "_run_scanner", _fake_run_scanner)
+        PROFILE_SCANNERS["quick"] = ["headers"]
+
+        await VulnScanOrchestrator().run(scan_id)
+
+        async with session_factory() as db:
+            scan = (await db.execute(select(VSScan).where(VSScan.id == scan_id))).scalar_one()
+
+        assert scan.status == "completed"
+        assert scan.findings_medium == 1
+        assert scan.severe_alert_processed_at is None
+        assert notifications == []
+    finally:
+        PROFILE_SCANNERS["quick"] = original_scanners
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_vulnscan_run_handles_missing_notification_config(monkeypatch, caplog):
+    from app.models import VSScan, VSScanTarget
+    from app.database import Base
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator, PROFILE_SCANNERS
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+        return [
+            {
+                "scanner_source": "nikto",
+                "scanner_finding_id": "nikto-high",
+                "title": "Outdated component",
+                "description": "High issue",
+                "finding_type": "EXPOSURE",
+                "severity": "HIGH",
+                "target_host": "example.com",
+                "target_port": 443,
+            }
+        ]
+
+    original_scanners = PROFILE_SCANNERS["quick"]
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(
+                name="No config target",
+                target_value="https://example.com",
+                notify_channels_json=json.dumps(["email", "telegram"]),
+            )
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="quick", status="pending")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+        monkeypatch.setattr("app.services.vulnscan.orchestrator.AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(VulnScanOrchestrator, "_run_scanner", _fake_run_scanner)
+        monkeypatch.delenv("VULNSCAN_ALERT_EMAIL", raising=False)
+        monkeypatch.delenv("VULNSCAN_ALERT_TELEGRAM", raising=False)
+        monkeypatch.delenv("CTI_ALERT_EMAIL", raising=False)
+        monkeypatch.delenv("CTI_ALERT_TELEGRAM", raising=False)
+        monkeypatch.setattr("app.services.vulnscan.alerts.settings.smtp_host", "")
+        monkeypatch.setattr("app.services.vulnscan.alerts.settings.telegram_bot_token", "")
+        PROFILE_SCANNERS["quick"] = ["nikto"]
+
+        with caplog.at_level("INFO"):
+            await VulnScanOrchestrator().run(scan_id)
+
+        async with session_factory() as db:
+            scan = (await db.execute(select(VSScan).where(VSScan.id == scan_id))).scalar_one()
+
+        assert scan.status == "completed"
+        assert scan.findings_high == 1
+        assert scan.severe_alert_processed_at is not None
+        assert "no notification destination is configured" in caplog.text
+    finally:
+        PROFILE_SCANNERS["quick"] = original_scanners
         await engine.dispose()
         os.remove(db_path)

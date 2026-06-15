@@ -495,6 +495,27 @@ def _migrate_sl_rules(conn) -> None:
         logger.warning("Could not migrate sl_rules: %s", exc)
 
 
+def _migrate_vulnscan(conn) -> None:
+    """Add alert bookkeeping columns to vuln scanner tables if missing."""
+    from sqlalchemy import inspect, text
+
+    allowed_new_cols: dict[str, str] = {
+        "severe_alert_processed_at": "DATETIME",
+    }
+
+    try:
+        inspector = inspect(conn)
+        tables = inspector.get_table_names()
+        if "vs_scans" not in tables:
+            return
+        existing_cols = {c["name"] for c in inspector.get_columns("vs_scans")}
+        for col_name, col_type in allowed_new_cols.items():
+            if col_name not in existing_cols:
+                conn.execute(text(f"ALTER TABLE vs_scans ADD COLUMN {col_name} {col_type}"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not migrate vulnscan schema: %s", exc)
+
+
 async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
@@ -524,3 +545,5 @@ async def init_db():
         await conn.run_sync(_migrate_deep_search_schema)
         # Add alert_email / alert_telegram to sl_rules if upgrading from older version
         await conn.run_sync(_migrate_sl_rules)
+        # Add vulnscan alert bookkeeping columns if upgrading from older version
+        await conn.run_sync(_migrate_vulnscan)

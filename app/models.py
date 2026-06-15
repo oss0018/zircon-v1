@@ -795,6 +795,7 @@ class VSScan(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     duration_ms = Column(Integer, nullable=True)
+    severe_alert_processed_at = Column(DateTime, nullable=True)
     error_message = Column(Text, default="")
     initiated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     comment = Column(Text, default="")
