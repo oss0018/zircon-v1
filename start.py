@@ -221,6 +221,8 @@ SENTINEL_SHARED_KEY=
 SENTINEL_LOG_TYPE=ZirconCTI
 CTI_ALERT_EMAIL=
 CTI_ALERT_TELEGRAM=
+VULNSCAN_ALERT_EMAIL=
+VULNSCAN_ALERT_TELEGRAM=
 """
         env_file.write_text(template_content)
         logger.info("✅ .env created with Phase 2 defaults")

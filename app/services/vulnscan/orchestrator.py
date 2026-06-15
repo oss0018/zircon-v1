@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models import VSScan, VSScanTarget, VSFinding
+from app.services.vulnscan.alerts import dispatch_severe_scan_alert
 from app.services.vulnscan.normalizer import FindingDeduplicator, FindingNormalizer
 from app.services.vulnscan.remediation import RemediationEngine
 from app.services.vulnscan.scanners import (
@@ -141,7 +142,17 @@ class VulnScanOrchestrator:
                 scan.progress_pct = 100
                 scan.completed_at = completed_at
                 scan.duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+                should_dispatch_severe_alert = False
+                if (scan.findings_critical or scan.findings_high) and scan.severe_alert_processed_at is None:
+                    scan.severe_alert_processed_at = completed_at
+                    should_dispatch_severe_alert = True
                 await db.commit()
+
+                if should_dispatch_severe_alert:
+                    try:
+                        await dispatch_severe_scan_alert(scan, target, persisted)
+                    except Exception:
+                        logger.exception("Vulnerability scan severe alert failed for scan %s", scan_id)
 
             except Exception as exc:
                 logger.exception("Vulnerability scan %s failed", scan_id)
