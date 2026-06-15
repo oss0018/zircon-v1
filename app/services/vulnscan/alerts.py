@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 _SUPPORTED_NOTIFY_CHANNELS = {"email", "telegram"}
 _SEVERE_SEVERITIES = {"CRITICAL", "HIGH"}
 _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+_UNKNOWN_SEVERITY_RANK = 99
 
 
 def _selected_channels(target: VSScanTarget) -> set[str]:
@@ -51,7 +52,12 @@ def _format_top_findings(findings: list[VSFinding], limit: int = 5) -> str:
         for finding in findings
         if (finding.severity or "").upper() in _SEVERE_SEVERITIES
     ]
-    severe_findings.sort(key=lambda finding: (_SEVERITY_RANK.get(finding.severity or "INFO", 99), finding.id or 0))
+    severe_findings.sort(
+        key=lambda finding: (
+            _SEVERITY_RANK.get(finding.severity or "INFO", _UNKNOWN_SEVERITY_RANK),
+            finding.id or 0,
+        )
+    )
     if not severe_findings:
         return "None"
 
