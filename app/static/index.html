@@ -3796,17 +3796,21 @@
             <div x-show="page === 'deep-search'" x-data="deepSearchPage" x-init="init()">
 
               <!-- Tab switcher -->
-              <div class="flex gap-2 mb-4" style="border-bottom:1px solid var(--border-color);padding-bottom:10px;">
-                <button x-show="isAdminUser" class="btn btn-sm" :class="activeTab==='tree' ? 'btn-primary' : 'btn-secondary'"
+              <div class="flex gap-2 mb-4 items-center" style="border-bottom:1px solid var(--border-color);padding-bottom:10px;flex-wrap:wrap;">
+                <button x-show="!useApiMode && isAdminUser" class="btn btn-sm" :class="activeTab==='tree' ? 'btn-primary' : 'btn-secondary'"
                         @click="activeTab='tree'">📁 Folder File Tree</button>
                 <button class="btn btn-sm" :class="activeTab==='search' ? 'btn-primary' : 'btn-secondary'"
-                        @click="activeTab='search'">🔍 Deep Search</button>
-                <button class="btn btn-sm" :class="activeTab==='viewer' ? 'btn-primary' : 'btn-secondary'"
+                        @click="activeTab='search'" x-text="useApiMode ? '🔎 Search' : '🔍 Deep Search'"></button>
+                <button x-show="useApiMode" class="btn btn-sm" :class="activeTab==='leaks' ? 'btn-primary' : 'btn-secondary'"
+                        @click="activeTab='leaks'; if (leaks.length === 0) loadLeaks()">🧪 Leaks</button>
+                <button x-show="useApiMode" class="btn btn-sm" :class="activeTab==='file' ? 'btn-primary' : 'btn-secondary'"
+                        @click="activeTab='file'">📄 File</button>
+                <button x-show="!useApiMode" class="btn btn-sm" :class="activeTab==='viewer' ? 'btn-primary' : 'btn-secondary'"
                         @click="activeTab='viewer'">📄 File Viewer</button>
               </div>
 
               <!-- ── TAB: File Tree ── -->
-              <div x-show="activeTab==='tree'">
+              <div x-show="!useApiMode && activeTab==='tree'">
 
                 <!-- Upload toolbar -->
                 <div class="card mb-4" x-show="isAdminUser">
@@ -3970,8 +3974,351 @@
                 </div>
               </div><!-- /tree tab -->
 
-              <!-- ── TAB: Deep Search ── -->
-              <div x-show="activeTab==='search'">
+              <template x-if="useApiMode">
+                <div class="mb-4">
+                  <template x-if="error">
+                    <div class="card mb-3" style="border:1px solid rgba(255,0,0,.25);padding:12px 14px;color:var(--danger);">
+                      <strong>Error:</strong> <span x-text="error"></span>
+                    </div>
+                  </template>
+                  <template x-if="loading">
+                    <div class="card mb-3 text-muted text-sm" style="padding:12px 14px;">Loading Deep Search data…</div>
+                  </template>
+                </div>
+              </template>
+
+              <!-- ── TAB: Deep Search (API mode) ── -->
+              <div x-show="useApiMode && activeTab==='search'">
+                <div class="card mb-4">
+                  <div class="card-title flex items-center gap-2">
+                    Deep Search Query
+                    <span x-show="loading" class="spinner" style="width:14px;height:14px;"></span>
+                  </div>
+                  <div class="flex gap-2 flex-wrap mb-3">
+                    <input class="form-input" type="text" x-model="query"
+                           placeholder="Search ingested chunks..."
+                           style="flex:2;min-width:220px;"
+                           maxlength="512"
+                           @keyup.enter="runQuery()" />
+                    <button class="btn btn-primary" @click="runQuery()" :disabled="loading">
+                      <span x-text="loading ? 'Searching…' : 'Run query'"></span>
+                    </button>
+                    <button class="btn btn-secondary" @click="resetSearchFilters()">Reset filters</button>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+                    <div class="form-group">
+                      <label class="form-label">Severity min</label>
+                      <input class="form-input" type="number" min="0" max="100" x-model="filterSeverityMin" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Severity max</label>
+                      <input class="form-input" type="number" min="0" max="100" x-model="filterSeverityMax" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Has credentials</label>
+                      <select class="form-select" x-model="filterHasCredentials">
+                        <option value="">Any</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Has PII</label>
+                      <select class="form-select" x-model="filterHasPii">
+                        <option value="">Any</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Has API keys</label>
+                      <select class="form-select" x-model="filterHasApiKeys">
+                        <option value="">Any</option>
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Parse mode</label>
+                      <input class="form-input" x-model="filterParseMode" placeholder="ocr, plaintext" />
+                    </div>
+                    <div class="form-group" style="grid-column:span 2;">
+                      <label class="form-label">Pattern names</label>
+                      <input class="form-input" x-model="filterPatternNames" placeholder="aws_access_key_id, email_address" />
+                    </div>
+                    <div class="form-group" style="grid-column:span 2;">
+                      <label class="form-label">File path prefix</label>
+                      <input class="form-input" x-model="filterFilePathPrefix" placeholder="/exports/" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card" style="padding:0;">
+                  <div class="flex justify-between items-center" style="padding:16px 16px 0;gap:8px;flex-wrap:wrap;">
+                    <div class="card-title" style="margin-bottom:0;">Results</div>
+                    <div class="text-muted text-sm" x-text="resultsTotal ? `Page ${resultsPage} • ${resultsTotal} hits` : 'Run a query to see results'"></div>
+                  </div>
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Snippet</th>
+                          <th>File path</th>
+                          <th>Source</th>
+                          <th>Chunk</th>
+                          <th>Rank</th>
+                          <th>Severity</th>
+                          <th>Flags</th>
+                          <th>Indexed</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-if="!loading && results.length === 0 && query.trim()">
+                          <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted);">No search results found.</td></tr>
+                        </template>
+                        <template x-if="!loading && results.length === 0 && !query.trim()">
+                          <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted);">Enter a query to search indexed chunks.</td></tr>
+                        </template>
+                        <template x-for="result in results" :key="`${result.chunk_id}-${result.file_id}`">
+                          <tr>
+                            <td style="max-width:340px;word-break:break-word;">
+                              <div class="font-mono text-sm" x-text="result.snippet"></div>
+                            </td>
+                            <td style="max-width:220px;word-break:break-word;" x-text="result.file_path"></td>
+                            <td x-text="result.source_id"></td>
+                            <td x-text="result.chunk_index"></td>
+                            <td x-text="Number(result.rank || 0).toFixed(3)"></td>
+                            <td><span :class="severityBadgeClass(result.file_severity_max)" x-text="result.file_severity_max ?? '—'"></span></td>
+                            <td>
+                              <div class="flex gap-1" style="flex-wrap:wrap;">
+                                <span :class="boolBadgeClass(result.file_has_credentials)" x-text="result.file_has_credentials ? 'Credentials' : 'No creds'"></span>
+                                <span :class="boolBadgeClass(result.file_has_pii)" x-text="result.file_has_pii ? 'PII' : 'No PII'"></span>
+                                <span :class="boolBadgeClass(result.file_has_api_keys)" x-text="result.file_has_api_keys ? 'API keys' : 'No keys'"></span>
+                              </div>
+                            </td>
+                            <td x-text="formatDateTime(result.file_indexed_at)"></td>
+                            <td>
+                              <div class="flex gap-2">
+                                <button class="btn btn-sm btn-primary" @click="openFile(result.file_id)">Open file</button>
+                                <button class="btn btn-sm btn-secondary" @click="copySnippet(result.snippet)">Copy</button>
+                              </div>
+                            </td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="flex justify-between items-center" style="padding:12px 16px;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-sm btn-secondary" @click="runQuery(resultsPage - 1)" :disabled="loading || resultsPage <= 1">Previous</button>
+                    <div class="text-muted text-sm" x-text="resultsTotal ? `Showing page ${resultsPage}` : 'No pages yet'"></div>
+                    <button class="btn btn-sm btn-secondary" @click="runQuery(resultsPage + 1)" :disabled="loading || !resultsHasNext">Next</button>
+                  </div>
+                </div>
+              </div><!-- /search tab api -->
+
+              <!-- ── TAB: Leaks (API mode) ── -->
+              <div x-show="useApiMode && activeTab==='leaks'">
+                <div class="card mb-4">
+                  <div class="card-title flex items-center gap-2">
+                    Leak Listing
+                    <span x-show="loading" class="spinner" style="width:14px;height:14px;"></span>
+                  </div>
+                  <div class="flex gap-2 flex-wrap mb-3">
+                    <button class="btn btn-primary" @click="loadLeaks()" :disabled="loading">
+                      <span x-text="loading ? 'Loading…' : 'Load leaks'"></span>
+                    </button>
+                    <button class="btn btn-secondary" @click="resetLeakFilters()">Reset filters</button>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+                    <div class="form-group">
+                      <label class="form-label">Category</label>
+                      <input class="form-input" x-model="leakCategory" placeholder="api_keys" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Severity min</label>
+                      <input class="form-input" type="number" min="0" max="100" x-model="filterSeverityMin" />
+                    </div>
+                    <div class="form-group" style="grid-column:span 2;">
+                      <label class="form-label">File path prefix</label>
+                      <input class="form-input" x-model="filterFilePathPrefix" placeholder="/exports/" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Detected after</label>
+                      <input class="form-input" type="datetime-local" x-model="leakDetectedAfter" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Detected before</label>
+                      <input class="form-input" type="datetime-local" x-model="leakDetectedBefore" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card" style="padding:0;">
+                  <div class="flex justify-between items-center" style="padding:16px 16px 0;gap:8px;flex-wrap:wrap;">
+                    <div class="card-title" style="margin-bottom:0;">Leaks</div>
+                    <div class="text-muted text-sm" x-text="leaksTotal ? `Page ${leaksPage} • ${leaksTotal} records` : 'No leaks loaded yet'"></div>
+                  </div>
+                  <div class="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Pattern</th>
+                          <th>Category</th>
+                          <th>Severity</th>
+                          <th>Masked value</th>
+                          <th>File path</th>
+                          <th>Source</th>
+                          <th>Line</th>
+                          <th>Detected</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <template x-if="!loading && leaks.length === 0">
+                          <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted);">No leaks found for the current filters.</td></tr>
+                        </template>
+                        <template x-for="leak in leaks" :key="leak.leak_id">
+                          <tr>
+                            <td x-text="leak.pattern_name"></td>
+                            <td x-text="leak.category"></td>
+                            <td><span :class="severityBadgeClass(leak.severity)" x-text="leak.severity"></span></td>
+                            <td style="max-width:220px;word-break:break-word;" x-text="leak.matched_value_masked"></td>
+                            <td style="max-width:220px;word-break:break-word;" x-text="leak.file_path"></td>
+                            <td x-text="leak.source_id"></td>
+                            <td x-text="leak.line_number ?? '—'"></td>
+                            <td x-text="formatDateTime(leak.detected_at)"></td>
+                            <td>
+                              <div class="flex gap-2">
+                                <button class="btn btn-sm btn-primary" @click="openFile(leak.file_id)">Open file</button>
+                                <button class="btn btn-sm btn-secondary" @click="copyMaskedValue(leak.matched_value_masked)">Copy</button>
+                              </div>
+                            </td>
+                          </tr>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="flex justify-between items-center" style="padding:12px 16px;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-sm btn-secondary" @click="loadLeaks(leaksPage - 1)" :disabled="loading || leaksPage <= 1">Previous</button>
+                    <div class="text-muted text-sm" x-text="leaksTotal ? `Showing page ${leaksPage}` : 'No pages yet'"></div>
+                    <button class="btn btn-sm btn-secondary" @click="loadLeaks(leaksPage + 1)" :disabled="loading || !leaksHasNext">Next</button>
+                  </div>
+                </div>
+              </div><!-- /leaks tab api -->
+
+              <!-- ── TAB: File (API mode) ── -->
+              <div x-show="useApiMode && activeTab==='file'">
+                <template x-if="!selectedFile && !loading">
+                  <div class="card text-muted text-sm text-center" style="padding:40px;">
+                    <div style="font-size:32px;margin-bottom:12px;">📄</div>
+                    <div>Open a file from search results or leaks to view file details.</div>
+                  </div>
+                </template>
+                <template x-if="selectedFile">
+                  <div>
+                    <div class="card mb-3">
+                      <div class="card-title">File metadata</div>
+                      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+                        <div><span class="text-muted">Path:</span> <span x-text="selectedFile.file.file_path || '—'"></span></div>
+                        <div><span class="text-muted">Source ID:</span> <span x-text="selectedFile.file.source_id ?? '—'"></span></div>
+                        <div><span class="text-muted">Parse mode:</span> <span x-text="selectedFile.file.parse_mode || '—'"></span></div>
+                        <div><span class="text-muted">Indexed:</span> <span x-text="formatDateTime(selectedFile.file.indexed_at)"></span></div>
+                        <div><span class="text-muted">Severity max:</span> <span :class="severityBadgeClass(selectedFile.file.severity_max)" x-text="selectedFile.file.severity_max ?? '—'"></span></div>
+                        <div><span class="text-muted">Patterns:</span> <span x-text="(selectedFile.file.pattern_names || []).join(', ') || '—'"></span></div>
+                      </div>
+                    </div>
+
+                    <div class="card mb-3">
+                      <div class="card-title">Leak summary</div>
+                      <div class="flex gap-2 mb-3" style="flex-wrap:wrap;">
+                        <span class="badge badge-blue" x-text="`Total ${selectedFile.leak_summary.total || 0}`"></span>
+                        <span :class="severityBadgeClass(selectedFile.leak_summary.severity_max)" x-text="`Severity ${selectedFile.leak_summary.severity_max ?? '—'}`"></span>
+                      </div>
+                      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+                        <div>
+                          <div class="text-muted text-sm" style="margin-bottom:6px;">By pattern</div>
+                          <template x-if="Object.keys(selectedFile.leak_summary.by_pattern || {}).length === 0">
+                            <div class="text-muted text-sm">No leak patterns.</div>
+                          </template>
+                          <template x-for="[name, count] in Object.entries(selectedFile.leak_summary.by_pattern || {})" :key="name">
+                            <div class="text-sm"><span x-text="name"></span>: <span x-text="count"></span></div>
+                          </template>
+                        </div>
+                        <div>
+                          <div class="text-muted text-sm" style="margin-bottom:6px;">By category</div>
+                          <template x-if="Object.keys(selectedFile.leak_summary.by_category || {}).length === 0">
+                            <div class="text-muted text-sm">No leak categories.</div>
+                          </template>
+                          <template x-for="[name, count] in Object.entries(selectedFile.leak_summary.by_category || {})" :key="name">
+                            <div class="text-sm"><span x-text="name"></span>: <span x-text="count"></span></div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="card mb-3">
+                      <div class="card-title">Chunk preview</div>
+                      <template x-if="(selectedFile.chunks_preview || []).length === 0">
+                        <div class="text-muted text-sm">No preview chunks available.</div>
+                      </template>
+                      <div class="flex flex-col gap-2">
+                        <template x-for="chunk in (selectedFile.chunks_preview || [])" :key="chunk.chunk_id">
+                          <div style="border:1px solid var(--border-color);border-radius:10px;padding:10px 12px;">
+                            <div class="flex justify-between items-center gap-2 mb-2">
+                              <span class="badge badge-gray" x-text="`Chunk ${chunk.chunk_index}`"></span>
+                              <button class="btn btn-sm btn-secondary" @click="copySnippet(chunk.snippet)">Copy</button>
+                            </div>
+                            <div class="font-mono text-sm" style="white-space:pre-wrap;word-break:break-word;" x-text="chunk.snippet"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <div class="card" style="padding:0;">
+                      <div class="flex justify-between items-center" style="padding:16px 16px 0;gap:8px;flex-wrap:wrap;">
+                        <div class="card-title" style="margin-bottom:0;">All chunks</div>
+                        <div class="text-muted text-sm" x-text="selectedFileChunksTotal ? `${selectedFileChunks.length} of ${selectedFileChunksTotal} loaded` : 'No chunks loaded'"></div>
+                      </div>
+                      <div class="table-wrapper">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Chunk</th>
+                              <th>Offsets</th>
+                              <th>Content</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-if="selectedFileChunks.length === 0">
+                              <tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted);">No chunks available for this file.</td></tr>
+                            </template>
+                            <template x-for="chunk in selectedFileChunks" :key="chunk.chunk_id">
+                              <tr>
+                                <td x-text="chunk.chunk_index"></td>
+                                <td x-text="`${chunk.start_offset} - ${chunk.end_offset}`"></td>
+                                <td style="max-width:520px;word-break:break-word;"><div class="font-mono text-sm" style="white-space:pre-wrap;" x-text="chunk.content"></div></td>
+                                <td><button class="btn btn-sm btn-secondary" @click="copySnippet(chunk.content)">Copy</button></td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div class="flex justify-end" style="padding:12px 16px;">
+                        <button class="btn btn-sm btn-secondary"
+                                @click="loadFileChunks(selectedFile.file.id, selectedFileChunks.length)"
+                                :disabled="loading || !selectedFileChunksHasNext">
+                          <span x-text="selectedFileChunksHasNext ? 'Load more chunks' : 'All chunks loaded'"></span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div><!-- /file tab api -->
+
+              <!-- ── TAB: Deep Search (legacy mode) ── -->
+              <div x-show="!useApiMode && activeTab==='search'">
                 <div class="card mb-4">
                   <div class="card-title flex items-center gap-2">
                     Search in Files
@@ -4065,7 +4412,7 @@
               </div><!-- /search tab -->
 
               <!-- ── TAB: File Viewer ── -->
-              <div x-show="activeTab==='viewer'">
+              <div x-show="!useApiMode && activeTab==='viewer'">
                 <template x-if="viewerLoading">
                   <div class="card text-muted text-sm text-center" style="padding:40px;">Loading file...</div>
                 </template>
