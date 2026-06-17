@@ -400,3 +400,235 @@ async def _index_uploaded_folder(folder_path: str, folder_name: str) -> None:
         logger.info("Indexed deep-search folder '%s': %s files", folder_name, indexed)
     except Exception:
         logger.exception("Failed to index uploaded deep-search folder '%s'", folder_name)
+
+
+# ── TS-DS-001 Phase 1 — Query API (PR 3/4) ────────────────────────────────────
+# New read-only endpoints that query ds_chunks / ds_files / ds_leak_records.
+# Mounted on the same router (already at /api/v1/deep-search in main.py).
+
+import sqlalchemy.exc
+from datetime import datetime as _dt
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.models import DSFile, User
+from app.schemas import (
+    ChunkListSchema,
+    FileDetailSchema,
+    LeakListSchema,
+    SearchResponseSchema,
+)
+from app.services import deep_search_search as _svc
+from app.services.deep_search_audit import DeepSearchAuditEvent, audit_log
+from app.services.deep_search_rbac import require_role
+
+_ds_logger = logging.getLogger(__name__)
+
+
+@router.get("/query", response_model=SearchResponseSchema, tags=["deep-search-query"])
+async def query_endpoint(
+    q: str = Query(..., min_length=1, max_length=512),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    source_id: Optional[List[int]] = Query(None),
+    severity_min: Optional[int] = Query(None, ge=0, le=100),
+    severity_max: Optional[int] = Query(None, ge=0, le=100),
+    has_credentials: Optional[bool] = Query(None),
+    has_pii: Optional[bool] = Query(None),
+    has_api_keys: Optional[bool] = Query(None),
+    pattern_names: Optional[List[str]] = Query(None),
+    parse_mode: Optional[List[str]] = Query(None),
+    indexed_after: Optional[_dt] = Query(None),
+    indexed_before: Optional[_dt] = Query(None),
+    file_path_prefix: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("sec_engineer", "admin", "ti_analyst")),
+) -> SearchResponseSchema:
+    filters = _svc.SearchFilters(
+        source_ids=source_id,
+        severity_min=severity_min,
+        severity_max=severity_max,
+        has_credentials=has_credentials,
+        has_pii=has_pii,
+        has_api_keys=has_api_keys,
+        pattern_names=pattern_names,
+        parse_mode=parse_mode,
+        indexed_after=indexed_after,
+        indexed_before=indexed_before,
+        file_path_prefix=file_path_prefix,
+    )
+    active_filters = [
+        k for k, v in {
+            "source_id": source_id,
+            "severity_min": severity_min,
+            "severity_max": severity_max,
+            "has_credentials": has_credentials,
+            "has_pii": has_pii,
+            "has_api_keys": has_api_keys,
+            "pattern_names": pattern_names,
+            "parse_mode": parse_mode,
+            "indexed_after": indexed_after,
+            "indexed_before": indexed_before,
+            "file_path_prefix": file_path_prefix,
+        }.items()
+        if v is not None
+    ]
+    try:
+        result = await _svc.search(db, q, filters=filters, page=page, page_size=page_size)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sqlalchemy.exc.OperationalError as exc:
+        _ds_logger.exception("Search backend error")
+        raise HTTPException(status_code=500, detail="search backend error") from exc
+
+    await audit_log(
+        DeepSearchAuditEvent.SEARCH_QUERY,
+        current_user.id,
+        {
+            "q": q[:128],
+            "filter_keys": active_filters,
+            "result_count": result.total,
+            "page": page,
+            "page_size": page_size,
+        },
+        db,
+    )
+    await db.commit()
+
+    return SearchResponseSchema(
+        items=[
+            {
+                "chunk_id": h.chunk_id,
+                "file_id": h.file_id,
+                "source_id": h.source_id,
+                "file_path": h.file_path,
+                "chunk_index": h.chunk_index,
+                "snippet": h.snippet,
+                "rank": h.rank,
+                "file_severity_max": h.file_severity_max,
+                "file_has_credentials": h.file_has_credentials,
+                "file_has_pii": h.file_has_pii,
+                "file_has_api_keys": h.file_has_api_keys,
+                "file_pattern_names": h.file_pattern_names,
+                "file_indexed_at": h.file_indexed_at,
+            }
+            for h in result.items
+        ],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+        has_next=result.has_next,
+    )
+
+
+@router.get("/files/{file_id}", response_model=FileDetailSchema, tags=["deep-search-query"])
+async def file_detail_endpoint(
+    file_id: int,
+    chunk_preview: int = Query(5, ge=0, le=20),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("sec_engineer", "admin", "ti_analyst")),
+) -> FileDetailSchema:
+    detail = await _svc.get_file_detail(db, file_id, chunk_preview=chunk_preview)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    await audit_log(
+        DeepSearchAuditEvent.SEARCH_FILE_READ,
+        current_user.id,
+        {"file_id": file_id},
+        db,
+    )
+    await db.commit()
+    return FileDetailSchema(**detail)
+
+
+@router.get("/files/{file_id}/chunks", response_model=ChunkListSchema, tags=["deep-search-query"])
+async def file_chunks_endpoint(
+    file_id: int,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("sec_engineer", "admin", "ti_analyst")),
+) -> ChunkListSchema:
+    result = await _svc.list_chunks_for_file(db, file_id, offset=offset, limit=limit)
+    # 404 if the parent file does not exist (total==0 and items==[])
+    file_row = await db.get(DSFile, file_id)
+    if file_row is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    await audit_log(
+        DeepSearchAuditEvent.SEARCH_FILE_READ,
+        current_user.id,
+        {"file_id": file_id, "via": "chunks"},
+        db,
+    )
+    await db.commit()
+    return ChunkListSchema(**result)
+
+
+@router.get("/leaks", response_model=LeakListSchema, tags=["deep-search-query"])
+async def leak_list_endpoint(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    source_id: Optional[List[int]] = Query(None),
+    pattern_names: Optional[List[str]] = Query(None),
+    category: Optional[str] = Query(None),
+    severity_min: Optional[int] = Query(None, ge=0, le=100),
+    has_credentials: Optional[bool] = Query(None),
+    has_pii: Optional[bool] = Query(None),
+    has_api_keys: Optional[bool] = Query(None),
+    file_path_prefix: Optional[str] = Query(None),
+    detected_after: Optional[_dt] = Query(None),
+    detected_before: Optional[_dt] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("sec_engineer", "admin", "ti_analyst")),
+) -> LeakListSchema:
+    filters = _svc.SearchFilters(
+        source_ids=source_id,
+        has_credentials=has_credentials,
+        has_pii=has_pii,
+        has_api_keys=has_api_keys,
+        file_path_prefix=file_path_prefix,
+        pattern_names=pattern_names,
+    )
+    active_filters = [
+        k for k, v in {
+            "source_id": source_id,
+            "pattern_names": pattern_names,
+            "category": category,
+            "severity_min": severity_min,
+            "has_credentials": has_credentials,
+            "has_pii": has_pii,
+            "has_api_keys": has_api_keys,
+            "file_path_prefix": file_path_prefix,
+            "detected_after": detected_after,
+            "detected_before": detected_before,
+        }.items()
+        if v is not None
+    ]
+
+    result = await _svc.list_leaks(
+        db,
+        filters=filters,
+        page=page,
+        page_size=page_size,
+        category=category,
+        severity_min=severity_min,
+        detected_after=detected_after,
+        detected_before=detected_before,
+    )
+
+    await audit_log(
+        DeepSearchAuditEvent.SEARCH_LEAK_LIST_READ,
+        current_user.id,
+        {
+            "filter_keys": active_filters,
+            "result_count": result["total"],
+            "page": page,
+            "page_size": page_size,
+        },
+        db,
+    )
+    await db.commit()
+    return LeakListSchema(**result)

@@ -52,3 +52,18 @@ The original TS-DS-001 v1.0 specification was supplied with the issue request. T
 - Relevant env vars:
   - `DS_CREDENTIAL_KEK` for vault decryption/encryption
   - `INGEST_MAX_RUN_SECONDS` for per-run wall-clock timeout (default `1800`)
+
+### Phase 1 — Search engine (PR 3/4)
+
+- Backend selection: Postgres FTS is preferred (`ds_chunks.fts_vector @@ websearch_to_tsquery('simple', ...)`). SQLite `LIKE`-based fallback is used for dev/CI. Detection is lazy-cached in `app/services/deep_search_search._dialect`.
+- Entry point: `app/services/deep_search_search.py` — `search()`, `get_file_detail()`, `list_chunks_for_file()`, `list_leaks()`.
+- Endpoints (all require role `sec_engineer`, `admin`, or `ti_analyst`):
+  - `GET /api/v1/deep-search/query` — FTS search across ds_chunks; ranked results with snippet highlighting.
+  - `GET /api/v1/deep-search/files/{file_id}` — File detail + leak roll-up + chunk preview.
+  - `GET /api/v1/deep-search/files/{file_id}/chunks` — Paginated chunk listing for a file.
+  - `GET /api/v1/deep-search/leaks` — Flat leak record listing with file-level and leak-level filters.
+- Supported filters: `source_ids`, `severity_min`, `severity_max`, `has_credentials`, `has_pii`, `has_api_keys`, `pattern_names`, `parse_mode`, `indexed_after`, `indexed_before`, `file_path_prefix`.
+- Audit events added: `search.query` (SEARCH_QUERY), `search.file_read` (SEARCH_FILE_READ), `search.leak_list_read` (SEARCH_LEAK_LIST_READ). Audit payloads never log raw filter values or full query strings (truncated to 128 chars).
+- Elasticsearch wiring is deferred to a possible post-Phase-1 spike — `ZIRCON_ELASTICSEARCH_URL` env var is read but not yet consumed by this PR.
+- Pydantic response schemas are defined in `app/schemas.py`: `SearchResponseSchema`, `FileDetailSchema`, `ChunkListSchema`, `LeakListSchema`.
+- PR 4/4 will add the UI that consumes these endpoints; the legacy Whoosh `search_engine.search()` and `deep_search_service.search_deep_data()` paths remain for the existing CSINT Deep Search UI and will be deprecated by PR 4/4.
