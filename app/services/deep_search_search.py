@@ -34,12 +34,11 @@ def _get_dialect(db: AsyncSession) -> str:
     if _dialect is not None:
         return _dialect
     try:
-        _dialect = db.sync_session.get_bind().dialect.name
+        # AsyncSession.sync_session is the underlying Session; get_bind() returns
+        # the engine bound to the session, which exposes dialect.name.
+        _dialect = db.sync_session.get_bind().dialect.name  # type: ignore[union-attr]
     except Exception:
-        try:
-            _dialect = db.bind.dialect.name  # type: ignore[union-attr]
-        except Exception:
-            _dialect = "sqlite"
+        _dialect = "sqlite"
     return _dialect
 
 

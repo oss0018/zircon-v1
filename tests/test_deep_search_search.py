@@ -595,8 +595,8 @@ def test_audit_event_payload_shapes(monkeypatch):
             client = TestClient(app, raise_server_exceptions=False)
 
             # 1. SEARCH_QUERY audit
-            long_q = "a" * 200
-            resp = client.get(f"/api/v1/deep-search/query?q={long_q}&has_credentials=true")
+            long_query = "a" * 200
+            resp = client.get(f"/api/v1/deep-search/query?q={long_query}&has_credentials=true")
             assert resp.status_code == 200, resp.text
 
             async with sf() as db:

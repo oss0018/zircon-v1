@@ -572,7 +572,7 @@ async def leak_list_endpoint(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     source_id: Optional[List[int]] = Query(None),
-    pattern_names: Optional[List[str]] = Query(None, alias="pattern_names"),
+    pattern_names: Optional[List[str]] = Query(None),
     category: Optional[str] = Query(None),
     severity_min: Optional[int] = Query(None, ge=0, le=100),
     has_credentials: Optional[bool] = Query(None),
