@@ -1352,3 +1352,91 @@ class EvidencePackageRequest(BaseModel):
     include_dns: bool = True
     include_archive: bool = True
     narrative: str = ""
+
+
+# ── Deep Search Query API — TS-DS-001 Phase 1 (PR 3/4) ──────────────────────
+
+class SearchHitSchema(BaseModel):
+    chunk_id: int
+    file_id: int
+    source_id: int
+    file_path: str
+    chunk_index: int
+    snippet: str
+    rank: float
+    file_severity_max: Optional[int]
+    file_has_credentials: bool
+    file_has_pii: bool
+    file_has_api_keys: bool
+    file_pattern_names: List[str]
+    file_indexed_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class SearchResponseSchema(BaseModel):
+    items: List[SearchHitSchema]
+    total: int
+    page: int
+    page_size: int
+    has_next: bool
+
+
+class LeakSummarySchema(BaseModel):
+    total: int
+    severity_max: Optional[int]
+    by_pattern: Dict[str, int]
+    by_category: Dict[str, int]
+
+
+class ChunkPreviewSchema(BaseModel):
+    chunk_id: int
+    chunk_index: int
+    snippet: str
+    start_offset: int
+    end_offset: int
+
+
+class FileDetailSchema(BaseModel):
+    file: Dict[str, Any]
+    leak_summary: LeakSummarySchema
+    chunks_preview: List[ChunkPreviewSchema]
+
+
+class ChunkItemSchema(BaseModel):
+    chunk_id: int
+    chunk_index: int
+    content: str
+    start_offset: int
+    end_offset: int
+
+
+class ChunkListSchema(BaseModel):
+    items: List[ChunkItemSchema]
+    total: int
+    has_next: bool
+
+
+class LeakItemSchema(BaseModel):
+    leak_id: int
+    file_id: int
+    file_path: str
+    source_id: int
+    pattern_name: str
+    category: str
+    severity: int
+    matched_value_masked: str
+    line_number: Optional[int]
+    context_before: str
+    context_after: str
+    email: str
+    email_domain: str
+    detected_at: Optional[datetime]
+
+
+class LeakListSchema(BaseModel):
+    items: List[LeakItemSchema]
+    total: int
+    page: int
+    page_size: int
+    has_next: bool

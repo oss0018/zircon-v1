@@ -22,6 +22,8 @@ class DeepSearchAuditEvent(str, Enum):
     SOURCE_INGEST_START = "source.ingest_start"
     SOURCE_INGEST_COMPLETE = "source.ingest_complete"
     SOURCE_INGEST_CREDENTIALS_ERROR = "source.ingest_credentials_error"
+    SEARCH_FILE_READ = "search.file_read"
+    SEARCH_LEAK_LIST_READ = "search.leak_list_read"
 
 
 async def audit_log(event: DeepSearchAuditEvent, user_id, details: dict, db: AsyncSession):
