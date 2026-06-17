@@ -38,7 +38,8 @@ def test_open_file_switches_tabs_and_loads_file_endpoints():
     assert "await api.get(`/deep-search/files/${fileId}`)" in js
     assert "await this.loadFileChunks(fileId, 0);" in js
     assert "async loadFileChunks(fileId, offset = 0)" in js
-    assert "api.get(" in js and "/deep-search/files/${numericFileId}/chunks?" in js
+    assert "api.get(" in js
+    assert "/deep-search/files/${numericFileId}/chunks?" in js
 
 
 def test_index_renders_new_deep_search_tabs_and_actions():

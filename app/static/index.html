@@ -3800,7 +3800,7 @@
                 <button x-show="!useApiMode && isAdminUser" class="btn btn-sm" :class="activeTab==='tree' ? 'btn-primary' : 'btn-secondary'"
                         @click="activeTab='tree'">📁 Folder File Tree</button>
                 <button class="btn btn-sm" :class="activeTab==='search' ? 'btn-primary' : 'btn-secondary'"
-                        @click="activeTab='search'" x-text="useApiMode ? '🔎 Search' : '🔍 Deep Search'"></button>
+                        @click="activeTab='search'" x-text="useApiMode ? '🔍 Search' : '🔍 Deep Search'"></button>
                 <button x-show="useApiMode" class="btn btn-sm" :class="activeTab==='leaks' ? 'btn-primary' : 'btn-secondary'"
                         @click="activeTab='leaks'; if (leaks.length === 0) loadLeaks()">🧪 Leaks</button>
                 <button x-show="useApiMode" class="btn btn-sm" :class="activeTab==='file' ? 'btn-primary' : 'btn-secondary'"
@@ -4307,7 +4307,7 @@
                       </div>
                       <div class="flex justify-end" style="padding:12px 16px;">
                         <button class="btn btn-sm btn-secondary"
-                                @click="loadFileChunks(selectedFile.file.id, selectedFileChunks.length)"
+                                @click="loadFileChunks(selectedFile.file.id, selectedFileChunksOffset)"
                                 :disabled="loading || !selectedFileChunksHasNext">
                           <span x-text="selectedFileChunksHasNext ? 'Load more chunks' : 'All chunks loaded'"></span>
                         </button>

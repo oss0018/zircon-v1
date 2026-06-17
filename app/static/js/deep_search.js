@@ -102,7 +102,8 @@ document.addEventListener('alpine:init', () => {
 
     async init() {
       this.isAdminUser = window._currentUser?.role === 'admin';
-      this.useApiMode = localStorage.getItem('deep_search_use_api_mode') !== 'false';
+      const storedApiMode = localStorage.getItem('deep_search_use_api_mode');
+      this.useApiMode = storedApiMode === null || storedApiMode === 'true';
       this.foldersCollapsed = localStorage.getItem('dsf_collapsed') === 'true';
       this.folderTreeCollapsed = localStorage.getItem('dstree_collapsed') === 'true';
       if (this.useApiMode || !this.isAdminUser) {
@@ -219,7 +220,7 @@ document.addEventListener('alpine:init', () => {
       if (this.useApiMode || typeof fileRef === 'number') {
         const fileId = Number(fileRef);
         if (!Number.isFinite(fileId)) {
-          this.error = 'Invalid file id';
+          this.error = 'Invalid file ID';
           showToast(this.error, 'error');
           return;
         }
@@ -323,8 +324,8 @@ document.addEventListener('alpine:init', () => {
 
     _normalizeDateTimeFilter(value) {
       if (!value) return '';
-      const dt = new Date(value);
-      return Number.isNaN(dt.getTime()) ? String(value) : dt.toISOString();
+      const parsedDate = new Date(value);
+      return Number.isNaN(parsedDate.getTime()) ? String(value) : parsedDate.toISOString();
     },
 
     _normalizeBooleanFilter(value) {
@@ -453,7 +454,7 @@ document.addEventListener('alpine:init', () => {
         const items = Array.isArray(data.items) ? data.items : [];
         this.selectedFileChunks = offset > 0 ? [...this.selectedFileChunks, ...items] : items;
         this.selectedFileChunksTotal = Number(data.total || 0);
-        this.selectedFileChunksOffset = offset;
+        this.selectedFileChunksOffset = offset + items.length;
         this.selectedFileChunksHasNext = !!data.has_next;
       } catch (e) {
         this.error = e.message || 'Failed to load file chunks';
