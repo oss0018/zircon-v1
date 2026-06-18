@@ -164,6 +164,27 @@ class SelfSignedCertAnalyzer:
                 findings.append(self._classify_finding(cert_data))
         return findings
 
+    async def analyze_endpoint(self, ip: str, port: int) -> list[dict]:
+        """Run TLS analysis for a specific discovered endpoint."""
+        cert_data = await self._fetch_cert(ip, port)
+        if cert_data is None:
+            return []
+        return [self._classify_finding(cert_data)]
+
+    async def analyze_endpoints(self, endpoints: list[tuple[str, int]]) -> list[dict]:
+        """Run TLS analysis for specific discovered endpoints."""
+        sem = asyncio.Semaphore(MAX_CONCURRENT)
+
+        async def _probe(ip: str, port: int) -> list[dict]:
+            async with sem:
+                return await self.analyze_endpoint(ip, port)
+
+        results = await asyncio.gather(*[_probe(ip, port) for ip, port in endpoints])
+        findings: list[dict] = []
+        for result in results:
+            findings.extend(result)
+        return findings
+
     async def analyze_targets(self, targets: list[str]) -> list[dict]:
         """Run analyze_ip for each target with bounded outer concurrency."""
         outer_sem = asyncio.Semaphore(5)
