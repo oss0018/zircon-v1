@@ -123,9 +123,10 @@ class InfraOrchestrator:
                     logger.error("Module tech_stack failed: %s", exc)
 
             # Post-gather: run self-signed cert analysis on unique IPs from
-            # network findings when cert module is requested and target is not
-            # a domain (for domains the parallel gather already handled it).
-            if "cert" in modules and target_type != "domain":
+            # network findings when cert module is requested. For domain
+            # investigations the parallel cert module only queries CT logs, so
+            # we still need TLS-handshake analysis against discovered IPs.
+            if "cert" in modules:
                 unique_ips: set[str] = set()
                 for f in all_findings:
                     if f.get("module") != "network":
