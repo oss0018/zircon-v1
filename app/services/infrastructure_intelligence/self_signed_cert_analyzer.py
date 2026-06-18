@@ -17,7 +17,67 @@ MAX_CONCURRENT = 10
 
 
 class SelfSignedCertAnalyzer:
-    async def _fetch_cert(self, ip: str, port: int) -> dict | None:
+    async def _verify_connection(
+        self,
+        ip: str,
+        port: int,
+        server_hostname: str | None = None,
+    ) -> dict:
+        """Attempt a verified TLS connection and capture verification results."""
+        result = {
+            "server_hostname": server_hostname or "",
+            "hostname_valid": None,
+            "chain_valid": None,
+            "tls_verified": False,
+            "verification_error": "",
+        }
+
+        if not server_hostname:
+            return result
+
+        try:
+            verify_ctx = ssl.create_default_context()
+            verify_ctx.check_hostname = True
+            verify_ctx.verify_mode = ssl.CERT_REQUIRED
+
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, port, ssl=verify_ctx, server_hostname=server_hostname),
+                timeout=CONNECT_TIMEOUT,
+            )
+            try:
+                result["hostname_valid"] = True
+                result["chain_valid"] = True
+                result["tls_verified"] = True
+            finally:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+        except ssl.SSLCertVerificationError as exc:
+            message = str(exc)
+            result["tls_verified"] = False
+            result["verification_error"] = message
+            lower_message = message.lower()
+            if "hostname" in lower_message or "match" in lower_message:
+                result["hostname_valid"] = False
+            if any(term in lower_message for term in ("self signed", "unable to get local issuer", "certificate verify failed", "issuer")):
+                result["chain_valid"] = False
+        except ssl.SSLError as exc:
+            result["tls_verified"] = False
+            result["verification_error"] = str(exc)
+        except Exception as exc:
+            result["tls_verified"] = False
+            result["verification_error"] = str(exc)
+
+        return result
+
+    async def _fetch_cert(
+        self,
+        ip: str,
+        port: int,
+        server_hostname: str | None = None,
+    ) -> dict | None:
         """Open a TLS connection and retrieve certificate details."""
         try:
             ctx = ssl.create_default_context()
@@ -25,7 +85,12 @@ class SelfSignedCertAnalyzer:
             ctx.verify_mode = ssl.CERT_NONE
 
             reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, port, ssl=ctx),
+                asyncio.open_connection(
+                    ip,
+                    port,
+                    ssl=ctx,
+                    server_hostname=server_hostname or None,
+                ),
                 timeout=CONNECT_TIMEOUT,
             )
 
@@ -134,9 +199,12 @@ class SelfSignedCertAnalyzer:
                 except Exception:
                     pass
 
+                verification = await self._verify_connection(ip, port, server_hostname)
+
                 return {
                     "ip": ip,
                     "port": port,
+                    "server_hostname": verification.get("server_hostname", ""),
                     "subject": subject,
                     "issuer": issuer,
                     "common_name": common_name,
@@ -155,6 +223,10 @@ class SelfSignedCertAnalyzer:
                     "version": version,
                     "public_key_type": public_key_type,
                     "public_key_size": public_key_size,
+                    "hostname_valid": verification.get("hostname_valid"),
+                    "chain_valid": verification.get("chain_valid"),
+                    "tls_verified": verification.get("tls_verified", False),
+                    "verification_error": verification.get("verification_error", ""),
                 }
             finally:
                 writer.close()
@@ -176,10 +248,21 @@ class SelfSignedCertAnalyzer:
         is_self_signed = cert_data.get("is_self_signed", False)
         is_expired = cert_data.get("is_expired", False)
         days_until_expiry = cert_data.get("days_until_expiry", 9999)
+        hostname_valid = cert_data.get("hostname_valid")
+        chain_valid = cert_data.get("chain_valid")
         ip = cert_data.get("ip", "")
         port = cert_data.get("port", 0)
 
-        if is_self_signed and is_expired:
+        if hostname_valid is False:
+            severity = 4
+            finding_type = "hostname_mismatch_cert"
+        elif chain_valid is False and is_self_signed:
+            severity = 4
+            finding_type = "self_signed_cert"
+        elif chain_valid is False:
+            severity = 4
+            finding_type = "untrusted_issuer_cert"
+        elif is_self_signed and is_expired:
             severity = 4
             finding_type = "self_signed_cert"
         elif is_expired:
@@ -222,22 +305,35 @@ class SelfSignedCertAnalyzer:
                 findings.append(self._classify_finding(cert_data))
         return findings
 
-    async def analyze_endpoint(self, ip: str, port: int) -> list[dict]:
+    async def analyze_endpoint(
+        self,
+        ip: str,
+        port: int,
+        server_hostname: str | None = None,
+    ) -> list[dict]:
         """Run TLS analysis for a specific discovered endpoint."""
-        cert_data = await self._fetch_cert(ip, port)
+        cert_data = await self._fetch_cert(ip, port, server_hostname=server_hostname)
         if cert_data is None:
             return []
         return [self._classify_finding(cert_data)]
 
-    async def analyze_endpoints(self, endpoints: list[tuple[str, int]]) -> list[dict]:
+    async def analyze_endpoints(
+        self,
+        endpoints: list[tuple[str, int] | tuple[str, int, str]],
+    ) -> list[dict]:
         """Run TLS analysis for specific discovered endpoints."""
         sem = asyncio.Semaphore(MAX_CONCURRENT)
 
-        async def _probe(ip: str, port: int) -> list[dict]:
+        async def _probe(endpoint: tuple[str, int] | tuple[str, int, str]) -> list[dict]:
             async with sem:
-                return await self.analyze_endpoint(ip, port)
+                if len(endpoint) == 3:
+                    ip, port, server_hostname = endpoint
+                else:
+                    ip, port = endpoint
+                    server_hostname = None
+                return await self.analyze_endpoint(ip, port, server_hostname=server_hostname)
 
-        results = await asyncio.gather(*[_probe(ip, port) for ip, port in endpoints])
+        results = await asyncio.gather(*[_probe(endpoint) for endpoint in endpoints])
         findings: list[dict] = []
         for result in results:
             findings.extend(result)
