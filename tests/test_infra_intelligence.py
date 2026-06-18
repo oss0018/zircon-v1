@@ -8,7 +8,7 @@ import pytest
 import base64
 
 
-# ── Model presence ────────────────────────────────────────────────────────────
+# ── Model presence ─────────────────────────────────────────────────────────────
 
 def test_infra_models_importable():
     from app.models import InfraInvestigation, InfraFinding
@@ -218,6 +218,105 @@ def test_cert_run_non_domain_returns_empty():
     mod = CertIntelligenceModule({})
     result = asyncio.run(mod.run("1.2.3.4", "ip"))
     assert result == []
+
+
+def test_orchestrator_domain_runs_post_gather_cert_analysis():
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.infrastructure_intelligence.orchestrator import InfraOrchestrator
+
+    class FakeResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._value
+
+    class FakeDB:
+        def __init__(self):
+            self.investigation = SimpleNamespace(
+                id=1,
+                status="pending",
+                started_at=None,
+                completed_at=None,
+                summary_json=None,
+                error_message=None,
+            )
+            self.added = []
+            self.execute_calls = 0
+            self.commit = AsyncMock()
+            self.flush = AsyncMock()
+
+        async def execute(self, _query):
+            self.execute_calls += 1
+            if self.execute_calls == 1:
+                return FakeResult(self.investigation)
+            return FakeResult([])
+
+        def add(self, obj):
+            self.added.append(obj)
+
+    network_finding = {
+        "entity": "1.2.3.4:443",
+        "module": "network",
+        "finding_type": "open_port",
+        "severity": 2,
+        "source": "censys",
+        "data_json": {"ip": "1.2.3.4", "port": 443},
+    }
+    cert_finding = {
+        "entity": "1.2.3.4:443",
+        "module": "cert",
+        "finding_type": "self_signed_cert",
+        "severity": 3,
+        "source": "tls_handshake",
+        "data_json": {"ip": "1.2.3.4", "port": 443, "is_self_signed": True},
+    }
+
+    fake_network_instance = SimpleNamespace(run=AsyncMock(return_value=[network_finding]))
+    fake_cert_instance = SimpleNamespace(
+        run=AsyncMock(return_value=[]),
+        analyze_self_signed=AsyncMock(return_value=[cert_finding]),
+    )
+
+    def fake_import_class(path):
+        if path.endswith("network_intelligence.DNSIntelligenceModule"):
+            return lambda keys: SimpleNamespace(run=AsyncMock(return_value=[]))
+        if path.endswith("network_intelligence.NetworkIntelligenceModule"):
+            return lambda keys: fake_network_instance
+        if path.endswith("cert_intelligence.CertIntelligenceModule"):
+            return lambda keys: fake_cert_instance
+        if path.endswith("cloud_osint.CloudOSINTModule"):
+            return lambda keys: SimpleNamespace(run=AsyncMock(return_value=[]))
+        return lambda keys: SimpleNamespace(run=AsyncMock(return_value=[]))
+
+    orch = InfraOrchestrator()
+    db = FakeDB()
+
+    with patch.object(orch, "_load_keys", new=AsyncMock(return_value={})), \
+         patch("app.services.infrastructure_intelligence.orchestrator._import_class", side_effect=fake_import_class):
+        summary = asyncio.run(
+            orch.run_investigation(
+                investigation_id=1,
+                target="example.com",
+                target_type="domain",
+                modules=["network", "cert"],
+                db=db,
+            )
+        )
+
+    fake_cert_instance.analyze_self_signed.assert_awaited_once_with(["1.2.3.4"])
+    assert summary["cert"] == 1
+    assert any(getattr(obj, "module", None) == "cert" for obj in db.added)
+    assert any(getattr(obj, "finding_type", None) == "self_signed_cert" for obj in db.added)
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
