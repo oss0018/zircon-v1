@@ -74,6 +74,11 @@ class CertIntelligenceModule:
         analyzer = SelfSignedCertAnalyzer()
         return await analyzer.analyze_targets(ips)
 
+    async def analyze_endpoints(self, endpoints: list[tuple[str, int]]) -> list[dict]:
+        """Run self-signed/expired certificate analysis against discovered endpoints."""
+        analyzer = SelfSignedCertAnalyzer()
+        return await analyzer.analyze_endpoints(endpoints)
+
     async def run(self, target: str, target_type: str) -> list[dict]:
         if target_type == "domain":
             return await self.search_ct_logs(target)
