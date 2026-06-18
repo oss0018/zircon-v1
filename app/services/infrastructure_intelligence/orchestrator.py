@@ -127,7 +127,7 @@ class InfraOrchestrator:
             # investigations the parallel cert module only queries CT logs, so
             # we still need TLS-handshake analysis against discovered services.
             if "cert" in modules:
-                endpoints: set[tuple[str, int]] = set()
+                endpoints: set[tuple[str, int] | tuple[str, int, str]] = set()
                 unique_ips: set[str] = set()
 
                 for f in all_findings:
@@ -156,7 +156,10 @@ class InfraOrchestrator:
                     try:
                         ipaddress.ip_address(str(ip))
                         if port:
-                            endpoints.add((str(ip), int(port)))
+                            if target_type == "domain":
+                                endpoints.add((str(ip), int(port), target))
+                            else:
+                                endpoints.add((str(ip), int(port)))
                         else:
                             unique_ips.add(str(ip))
                     except ValueError:
