@@ -43,8 +43,19 @@ class SelfSignedCertAnalyzer:
                             parts.append(f"{attr}={val}")
                     return ", ".join(parts)
 
-                subject = _parse_name(raw_cert.get("subject", ()))
-                issuer = _parse_name(raw_cert.get("issuer", ()))
+                def _extract_name_value(tuples_of_tuples, key: str) -> str:
+                    for rdn in (tuples_of_tuples or ()):
+                        for attr, val in rdn:
+                            if str(attr).lower() == key.lower():
+                                return str(val)
+                    return ""
+
+                subject_raw = raw_cert.get("subject", ())
+                issuer_raw = raw_cert.get("issuer", ())
+                subject = _parse_name(subject_raw)
+                issuer = _parse_name(issuer_raw)
+                common_name = _extract_name_value(subject_raw, "commonName")
+                issuer_common_name = _extract_name_value(issuer_raw, "commonName")
 
                 def _parse_dt(s: str) -> datetime:
                     return datetime.strptime(s, "%b %d %H:%M:%S %Y %Z").replace(
@@ -64,23 +75,62 @@ class SelfSignedCertAnalyzer:
 
                 # SANs
                 san_list: list[str] = []
+                dns_names: list[str] = []
+                ip_addresses: list[str] = []
                 for san_type, san_value in raw_cert.get("subjectAltName", ()):
-                    san_list.append(f"{san_type}:{san_value}")
+                    san_entry = f"{san_type}:{san_value}"
+                    san_list.append(san_entry)
+                    if str(san_type).lower() == "dns":
+                        dns_names.append(str(san_value))
+                    elif str(san_type).lower() == "ip address":
+                        ip_addresses.append(str(san_value))
 
                 # Serial
                 serial_raw = raw_cert.get("serialNumber")
-                serial_number = hex(serial_raw) if serial_raw else ""
+                serial_number = str(serial_raw) if serial_raw else ""
 
-                # SHA-256 fingerprint via cryptography lib
+                # Extra parsed certificate details via cryptography lib
                 sha256_fingerprint = ""
+                signature_algorithm = ""
+                version = ""
+                public_key_type = ""
+                public_key_size = None
                 try:
                     from cryptography import x509
                     from cryptography.hazmat.primitives import hashes
+                    from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, ed448, rsa
+
                     der = ssl_obj.getpeercert(binary_form=True)
                     if der:
                         cert_obj = x509.load_der_x509_certificate(der)
                         fp = cert_obj.fingerprint(hashes.SHA256())
                         sha256_fingerprint = fp.hex(":")
+                        try:
+                            signature_algorithm = cert_obj.signature_hash_algorithm.name
+                        except Exception:
+                            signature_algorithm = ""
+                        try:
+                            version = cert_obj.version.name
+                        except Exception:
+                            version = ""
+                        try:
+                            public_key = cert_obj.public_key()
+                            public_key_size = getattr(public_key, "key_size", None)
+                            if isinstance(public_key, rsa.RSAPublicKey):
+                                public_key_type = "RSA"
+                            elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                                public_key_type = "EC"
+                            elif isinstance(public_key, dsa.DSAPublicKey):
+                                public_key_type = "DSA"
+                            elif isinstance(public_key, ed25519.Ed25519PublicKey):
+                                public_key_type = "Ed25519"
+                            elif isinstance(public_key, ed448.Ed448PublicKey):
+                                public_key_type = "Ed448"
+                            else:
+                                public_key_type = public_key.__class__.__name__
+                        except Exception:
+                            public_key_type = ""
+                            public_key_size = None
                 except Exception:
                     pass
 
@@ -89,6 +139,8 @@ class SelfSignedCertAnalyzer:
                     "port": port,
                     "subject": subject,
                     "issuer": issuer,
+                    "common_name": common_name,
+                    "issuer_common_name": issuer_common_name,
                     "not_before": not_before.isoformat() if not_before else "",
                     "not_after": not_after.isoformat() if not_after else "",
                     "serial_number": serial_number,
@@ -96,7 +148,13 @@ class SelfSignedCertAnalyzer:
                     "is_expired": is_expired,
                     "days_until_expiry": days_until_expiry,
                     "san_list": san_list,
+                    "dns_names": dns_names,
+                    "ip_addresses": ip_addresses,
                     "sha256_fingerprint": sha256_fingerprint,
+                    "signature_algorithm": signature_algorithm,
+                    "version": version,
+                    "public_key_type": public_key_type,
+                    "public_key_size": public_key_size,
                 }
             finally:
                 writer.close()
