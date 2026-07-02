@@ -67,3 +67,17 @@ The original TS-DS-001 v1.0 specification was supplied with the issue request. T
 - Elasticsearch wiring is deferred to a possible post-Phase-1 spike — `ZIRCON_ELASTICSEARCH_URL` env var is read but not yet consumed by this PR.
 - Pydantic response schemas are defined in `app/schemas.py`: `SearchResponseSchema`, `FileDetailSchema`, `ChunkListSchema`, `LeakListSchema`.
 - PR 4/4 will add the UI that consumes these endpoints; the legacy Whoosh `search_engine.search()` and `deep_search_service.search_deep_data()` paths remain for the existing CSINT Deep Search UI and will be deprecated by PR 4/4.
+
+### Phase 1 — UI (PR 4/4)
+
+- The SPA Deep Search page now consumes:
+  - `/api/v1/deep-search/query`
+  - `/api/v1/deep-search/files/{file_id}`
+  - `/api/v1/deep-search/files/{file_id}/chunks`
+  - `/api/v1/deep-search/leaks`
+- The new Alpine-driven UI adds three API-backed tabs:
+  - **Search** — full-text query over indexed chunks with compact file-level filters
+  - **Leaks** — filtered leak record listing with masked values and file drill-down
+  - **File** — file metadata, leak roll-up, chunk preview, and paginated chunk browsing
+- The existing legacy Whoosh/tree/viewer path remains available behind the Deep Search component fallback mode for backward compatibility during rollout.
+- Phase 1 MVP is complete after this PR: ingestion/storage (PR 2/4), query engine/API (PR 3/4), and frontend UI (PR 4/4) are all wired end-to-end.
