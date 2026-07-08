@@ -312,19 +312,146 @@ async def _scan_m1_linkedin(rule: dict) -> list:
 
 
 async def _scan_m1_youtube(rule: dict) -> list:
-    """M1 Phase 2: YouTube Channel Impersonation Detection — stub.
+    """M1: YouTube — detect fake brand channels via the YouTube Data API v3.
 
-    Searches by brand name in channel titles/descriptions. Checks for phishing
-    links in channel homepage/about section.
+    Issues a single ``search.list`` call for the brand name. Unlike the
+    Instagram/Facebook scanners this does *not* fan out into "<brand>
+    official"/"<brand> support"/executive-name query variants, because
+    ``search.list`` costs 100 quota units per call against the default
+    10,000-unit/day quota — a handful of extra queries per scan would burn
+    through a day's quota in a few runs. Subscriber counts for every
+    discovered channel are then fetched in a single batched ``channels.list``
+    call, which costs only 1 quota unit regardless of how many channel IDs
+    are requested.
 
-    Integration: YouTube Data API v3.
+    The Data API does not expose a channel's verified-checkmark status
+    anywhere (confirmed against Google's own API discovery document — the
+    ``ChannelStatus`` resource has no ``verified`` field), so — unlike the
+    Instagram/Facebook scanners — this cannot automatically skip verified
+    official channels. Findings should be treated as candidates for manual
+    review rather than confirmed impersonation.
+
     Required env vars: YOUTUBE_API_KEY
+    Output type: ``fake_youtube_channel``
     """
-    logger.info(
-        "[IMP M1] YouTube scan stub for '%s'. Configure YouTube Data API integration to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
+    if not api_key:
+        logger.info(
+            "[IMP M1] YOUTUBE_API_KEY not configured; YouTube scan skipped for '%s'.",
+            rule["brand_name"],
+        )
+        return []
+
+    brand = (rule.get("brand_name") or "").strip()
+    if not brand:
+        return []
+
+    try:
+        from rapidfuzz import fuzz as _fuzz  # type: ignore
+    except ImportError:
+        _fuzz = None
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            search_resp = await client.get(
+                "https://www.googleapis.com/youtube/v3/search",
+                params={
+                    "part": "snippet",
+                    "q": brand,
+                    "type": "channel",
+                    "maxResults": 10,
+                    "key": api_key,
+                },
+            )
+            search_data = search_resp.json()
+
+            channel_ids: list[str] = []
+            for item in (search_data.get("items") or []):
+                channel_id = ((item or {}).get("id") or {}).get("channelId")
+                if channel_id and channel_id not in channel_ids:
+                    channel_ids.append(channel_id)
+
+            if not channel_ids:
+                return []
+
+            channels_resp = await client.get(
+                "https://www.googleapis.com/youtube/v3/channels",
+                params={
+                    "part": "snippet,statistics",
+                    "id": ",".join(channel_ids[:50]),
+                    "key": api_key,
+                },
+            )
+            channels_data = channels_resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M1] YouTube scan error for '%s': %s", brand, exc)
+        return []
+
+    findings: list[dict] = []
+    brand_lower = brand.lower()
+
+    for channel in (channels_data.get("items") or []):
+        if not isinstance(channel, dict):
+            continue
+
+        channel_id = str(channel.get("id") or "")
+        snippet = channel.get("snippet") or {}
+        statistics = channel.get("statistics") or {}
+
+        title = str(snippet.get("title") or "")
+        description = str(snippet.get("description") or "")
+        custom_url = str(snippet.get("customUrl") or "")
+        if not channel_id or not title:
+            continue
+
+        try:
+            subscriber_count = int(statistics.get("subscriberCount") or 0)
+        except (TypeError, ValueError):
+            subscriber_count = 0
+
+        # Scoring
+        score = 0
+        title_lower = title.lower()
+        if _fuzz:
+            score += min(int(_fuzz.partial_ratio(brand_lower, title_lower) * 0.5), 50)
+        elif brand_lower in title_lower:
+            score += 40
+
+        # Official/support keywords — 10 pts each
+        for kw in ("official", "support", "service", "help"):
+            if kw in title_lower or kw in custom_url.lower():
+                score += 10
+
+        # Phishing description keywords — 5 pts each
+        for kw in ("login", "verify", "click", "free", "giveaway"):
+            if kw in description.lower():
+                score += 5
+
+        min_score = int(rule.get("min_impersonation_score") or 40)
+        if score < min_score:
+            continue
+
+        channel_url = f"https://www.youtube.com/channel/{channel_id}"
+        findings.append(
+            {
+                "module": "m1",
+                "platform": "youtube",
+                "finding_type": "fake_youtube_channel",
+                "target_url": channel_url,
+                "target_identifier": channel_id,
+                "display_name": title,
+                "description": (
+                    f"YouTube channel '{title}' ({channel_url}) may be impersonating "
+                    f"'{brand}' (score {score}). Subscribers: {subscriber_count}."
+                ),
+                "threat_score": min(score, 95),
+                "subscriber_count": subscriber_count,
+                "signals": ["youtube_impersonation", f"score:{score}"],
+                "evidence": {"snippet": snippet, "statistics": statistics},
+            }
+        )
+
+    return findings
 
 
 async def _scan_m2_apps(rule: dict) -> list:

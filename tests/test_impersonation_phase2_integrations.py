@@ -536,6 +536,103 @@ class TestScanM1Facebook:
             assert result[0]["finding_type"] == "fake_facebook_page"
 
 
+# ── M1 YouTube scanner ────────────────────────────────────────────────────────
+
+class TestScanM1YouTube:
+    def test_youtube_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_youtube" in source
+
+    def test_youtube_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "fake_youtube_channel" in source
+
+    @pytest.mark.asyncio
+    async def test_youtube_no_api_key_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_youtube
+        with patch.dict("os.environ", {"YOUTUBE_API_KEY": ""}, clear=False):
+            result = await _scan_m1_youtube({
+                "brand_name": "TestBrand",
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_youtube_no_brand_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_youtube
+        with patch.dict("os.environ", {"YOUTUBE_API_KEY": "test-key"}, clear=False):
+            result = await _scan_m1_youtube({
+                "brand_name": "",
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_youtube_mock_response_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m1_youtube
+
+        search_response = MagicMock()
+        search_response.json.return_value = {
+            "items": [{"id": {"kind": "youtube#channel", "channelId": "UC_fake_123"}}]
+        }
+        channels_response = MagicMock()
+        channels_response.json.return_value = {
+            "items": [
+                {
+                    "id": "UC_fake_123",
+                    "snippet": {
+                        "title": "TestBrand Official",
+                        "description": "Official support channel, click to verify your account",
+                        "customUrl": "@testbrandofficial",
+                    },
+                    "statistics": {"subscriberCount": "12345"},
+                }
+            ]
+        }
+
+        with patch.dict("os.environ", {"YOUTUBE_API_KEY": "test-key"}, clear=False):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.get = AsyncMock(side_effect=[search_response, channels_response])
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_youtube({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert isinstance(result, list)
+        if result:
+            assert result[0]["platform"] == "youtube"
+            assert result[0]["finding_type"] == "fake_youtube_channel"
+            assert result[0]["subscriber_count"] == 12345
+
+    @pytest.mark.asyncio
+    async def test_youtube_no_search_results_skips_channels_call(self):
+        from app.services.impersonation.scanner import _scan_m1_youtube
+
+        search_response = MagicMock()
+        search_response.json.return_value = {"items": []}
+
+        with patch.dict("os.environ", {"YOUTUBE_API_KEY": "test-key"}, clear=False):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.get = AsyncMock(return_value=search_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_youtube({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert result == []
+        assert mock_client.get.call_count == 1
+
+
 # ── M2 Google Play scanner ────────────────────────────────────────────────────
 
 class TestScanM2GooglePlay:
@@ -998,6 +1095,12 @@ class TestScannerFunctionSignatures:
         source = SCANNER.read_text(encoding="utf-8")
         assert "async def _scan_m2_google_play" in source
 
+    def test_m1_youtube_implemented(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_youtube" in source
+        assert "youtube/v3/search" in source
+        assert "youtube/v3/channels" in source
+
     def test_m7_vip_implemented(self):
         source = SCANNER.read_text(encoding="utf-8")
         assert "best_domain_similarity" in source or "rapidfuzz" in source or "nrd_feed" in source
@@ -1012,7 +1115,6 @@ class TestScannerFunctionSignatures:
         source = SCANNER.read_text(encoding="utf-8")
         assert "async def _scan_m1_tiktok" in source
         assert "async def _scan_m1_linkedin" in source
-        assert "async def _scan_m1_youtube" in source
         assert "async def _scan_m2_appstore" in source
         assert "async def _scan_m5_darkweb" in source
         assert "async def _scan_m6_ads" in source
@@ -1023,6 +1125,7 @@ class TestScannerFunctionSignatures:
         assert "APIFY_API_KEY" in env_example
         assert "FACEBOOK_APIFY_ACTOR" in env_example
         assert "VK_SERVICE_TOKEN" in env_example
+        assert "YOUTUBE_API_KEY" in env_example
         assert "PAGERDUTY_API_KEY" in env_example
         assert "PAGERDUTY_SERVICE_ID" in env_example
 

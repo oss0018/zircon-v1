@@ -122,6 +122,10 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("VK_SERVICE_TOKEN", "ZIRCON_VK_SERVICE_TOKEN"),
     )
+    youtube_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("YOUTUBE_API_KEY", "ZIRCON_YOUTUBE_API_KEY"),
+    )
     pagerduty_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("PAGERDUTY_API_KEY", "ZIRCON_PAGERDUTY_API_KEY"),
