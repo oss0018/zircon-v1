@@ -589,6 +589,95 @@ class TestScanM2GooglePlay:
         assert "READ_CONTACTS" in source or "SUSPICIOUS" in source or "suspicious_permissions" in source
 
 
+# ── M2 Apple App Store scanner ────────────────────────────────────────────────
+
+class TestScanM2AppStore:
+    def test_appstore_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m2_appstore" in source
+
+    def test_appstore_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "fake_mobile_app" in source
+
+    @pytest.mark.asyncio
+    async def test_appstore_no_brand_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m2_appstore
+        result = await _scan_m2_appstore({
+            "brand_name": "",
+            "official_developer_ids": [],
+            "min_impersonation_score": 40,
+        })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_appstore_mock_itunes_response_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m2_appstore
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "resultCount": 1,
+            "results": [
+                {
+                    "trackId": 999888777,
+                    "trackName": "TestBrand",
+                    "bundleId": "com.fake.testbrand",
+                    "sellerName": "Fake Dev LLC",
+                    "artistId": 111222333,
+                    "trackViewUrl": "https://apps.apple.com/us/app/testbrand/id999888777",
+                    "userRatingCount": 12,
+                    "averageUserRating": 3.1,
+                }
+            ],
+        }
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+            result = await _scan_m2_appstore({
+                "brand_name": "TestBrand",
+                "official_developer_ids": [],
+                "min_impersonation_score": 40,
+            })
+        assert isinstance(result, list)
+        if result:
+            assert result[0]["platform"] == "app_store"
+            assert result[0]["finding_type"] == "fake_mobile_app"
+
+    @pytest.mark.asyncio
+    async def test_appstore_skips_known_official_developer(self):
+        from app.services.impersonation.scanner import _scan_m2_appstore
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "resultCount": 1,
+            "results": [
+                {
+                    "trackId": 284882215,
+                    "trackName": "TestBrand",
+                    "bundleId": "com.testbrand.official",
+                    "sellerName": "TestBrand Inc",
+                    "artistId": 284882218,
+                    "trackViewUrl": "https://apps.apple.com/us/app/testbrand/id284882215",
+                    "userRatingCount": 500000,
+                    "averageUserRating": 4.7,
+                }
+            ],
+        }
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+            result = await _scan_m2_appstore({
+                "brand_name": "TestBrand",
+                "official_developer_ids": ["testbrand inc"],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+
 # ── Alert Engine ──────────────────────────────────────────────────────────────
 
 class TestAlertEngine:
@@ -998,6 +1087,11 @@ class TestScannerFunctionSignatures:
         source = SCANNER.read_text(encoding="utf-8")
         assert "async def _scan_m2_google_play" in source
 
+    def test_m2_appstore_implemented(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m2_appstore" in source
+        assert "itunes.apple.com" in source
+
     def test_m7_vip_implemented(self):
         source = SCANNER.read_text(encoding="utf-8")
         assert "best_domain_similarity" in source or "rapidfuzz" in source or "nrd_feed" in source
@@ -1013,7 +1107,6 @@ class TestScannerFunctionSignatures:
         assert "async def _scan_m1_tiktok" in source
         assert "async def _scan_m1_linkedin" in source
         assert "async def _scan_m1_youtube" in source
-        assert "async def _scan_m2_appstore" in source
         assert "async def _scan_m5_darkweb" in source
         assert "async def _scan_m6_ads" in source
 
