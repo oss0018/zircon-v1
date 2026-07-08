@@ -294,6 +294,7 @@ class TestScanM1Social:
         assert "_scan_m1_telegram" in source
         assert "_scan_m1_instagram" in source
         assert "_scan_m1_vk" in source
+        assert "_scan_m1_facebook" in source
 
     @pytest.mark.asyncio
     async def test_social_scan_calls_telegram_when_in_platforms(self):
@@ -301,10 +302,12 @@ class TestScanM1Social:
         mock_tg = AsyncMock(return_value=[{"module": "m1", "platform": "telegram"}])
         mock_ig = AsyncMock(return_value=[])
         mock_vk = AsyncMock(return_value=[])
+        mock_fb = AsyncMock(return_value=[])
         with (
             patch.object(scanner_mod, "_scan_m1_telegram", mock_tg),
             patch.object(scanner_mod, "_scan_m1_instagram", mock_ig),
             patch.object(scanner_mod, "_scan_m1_vk", mock_vk),
+            patch.object(scanner_mod, "_scan_m1_facebook", mock_fb),
         ):
             rule = {
                 "brand_name": "Acme",
@@ -318,6 +321,7 @@ class TestScanM1Social:
         mock_tg.assert_called_once()
         mock_ig.assert_not_called()
         mock_vk.assert_not_called()
+        mock_fb.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_social_scan_all_platforms(self):
@@ -325,23 +329,26 @@ class TestScanM1Social:
         mock_tg = AsyncMock(return_value=[{"module": "m1", "platform": "telegram"}])
         mock_ig = AsyncMock(return_value=[{"module": "m1", "platform": "instagram"}])
         mock_vk = AsyncMock(return_value=[{"module": "m1", "platform": "vk"}])
+        mock_fb = AsyncMock(return_value=[{"module": "m1", "platform": "facebook"}])
         with (
             patch.object(scanner_mod, "_scan_m1_telegram", mock_tg),
             patch.object(scanner_mod, "_scan_m1_instagram", mock_ig),
             patch.object(scanner_mod, "_scan_m1_vk", mock_vk),
+            patch.object(scanner_mod, "_scan_m1_facebook", mock_fb),
         ):
             rule = {
                 "brand_name": "Acme",
-                "social_platforms": ["telegram", "instagram", "vk"],
+                "social_platforms": ["telegram", "instagram", "vk", "facebook"],
                 "official_domains": [],
                 "executive_names": [],
                 "min_impersonation_score": 40,
             }
             result = await scanner_mod._scan_m1_social(rule)
-        assert len(result) == 3
+        assert len(result) == 4
         mock_tg.assert_called_once()
         mock_ig.assert_called_once()
         mock_vk.assert_called_once()
+        mock_fb.assert_called_once()
 
 
 # ── M1 Instagram scanner ──────────────────────────────────────────────────────
@@ -450,6 +457,83 @@ class TestScanM1Vk:
         if result:
             assert result[0]["platform"] == "vk"
             assert result[0]["finding_type"] == "fake_vk_account"
+
+
+# ── M1 Facebook scanner ───────────────────────────────────────────────────────
+
+class TestScanM1Facebook:
+    def test_facebook_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_facebook" in source
+
+    def test_facebook_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "fake_facebook_page" in source
+
+    @pytest.mark.asyncio
+    async def test_facebook_no_api_key_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_facebook
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "", "FACEBOOK_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            result = await _scan_m1_facebook({
+                "brand_name": "TestBrand",
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_facebook_no_actor_configured_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_facebook
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "FACEBOOK_APIFY_ACTOR": ""},
+            clear=False,
+        ):
+            result = await _scan_m1_facebook({
+                "brand_name": "TestBrand",
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_facebook_mock_apify_response_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m1_facebook
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "pageName": "TestBrand Official",
+                "pageUsername": "testbrandofficial",
+                "pageUrl": "https://www.facebook.com/testbrandofficial",
+                "followers": 5000,
+                "verified": False,
+            }
+        ]
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "FACEBOOK_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_facebook({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert isinstance(result, list)
+        if result:
+            assert result[0]["platform"] == "facebook"
+            assert result[0]["finding_type"] == "fake_facebook_page"
 
 
 # ── M2 Google Play scanner ────────────────────────────────────────────────────
@@ -908,6 +992,7 @@ class TestScannerFunctionSignatures:
         assert "async def _scan_m1_telegram" in source
         assert "async def _scan_m1_instagram" in source
         assert "async def _scan_m1_vk" in source
+        assert "async def _scan_m1_facebook" in source
 
     def test_m2_google_play_present(self):
         source = SCANNER.read_text(encoding="utf-8")
@@ -936,6 +1021,7 @@ class TestScannerFunctionSignatures:
         env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
         assert "HIBP_API_KEY" in env_example
         assert "APIFY_API_KEY" in env_example
+        assert "FACEBOOK_APIFY_ACTOR" in env_example
         assert "VK_SERVICE_TOKEN" in env_example
         assert "PAGERDUTY_API_KEY" in env_example
         assert "PAGERDUTY_SERVICE_ID" in env_example
