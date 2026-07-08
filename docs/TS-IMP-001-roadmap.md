@@ -303,7 +303,7 @@ The Impersonation Monitoring backbone is **fully scaffolded and functional as an
 
 Two of the eight scanner modules have **real implementations** (M3 DMARC/SPF and M8 NRD fuzzy domains). The remaining six (M1 Social, M2 Apps, M5 Executive, M6 Ads, M7 VIP, and the domain-registrar path of M8) are **working stubs** that log a message and return empty results — the exact integration points and environment variables they need are documented in this report.
 
-There are **no immediate blockers**: the system starts, tables auto-create, scans can be triggered, and findings are stored and reviewed through the UI. The next phase of work is plugging in the real API calls for the stubbed modules.
+There are **no immediate blockers**: the system starts, tables auto-create, scans can be triggered, and findings are stored and reviewed through the UI. Alert rules are now operational on finding create/update paths with durable `(finding, rule)` dispatch history to suppress duplicate notifications and gracefully skip unconfigured channels. The next phase of work is plugging in the real API calls for the stubbed modules.
 
 ---
 

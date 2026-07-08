@@ -15,10 +15,16 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCANNER = REPO_ROOT / "app" / "services" / "impersonation" / "scanner.py"
@@ -569,6 +575,329 @@ class TestAlertEngine:
         text = _finding_to_text(finding)
         assert "🔴" in text
         assert "M7" in text
+
+
+async def _build_temp_session_factory(base):
+    temp_dir = tempfile.mkdtemp(prefix="imp-alert-tests-")
+    db_path = os.path.join(temp_dir, "test.sqlite3")
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    async with engine.begin() as conn:
+        await conn.run_sync(base.metadata.create_all)
+    return engine, async_sessionmaker(engine, expire_on_commit=False), db_path
+
+
+def _cleanup_temp_db(db_path: str) -> None:
+    shutil.rmtree(os.path.dirname(db_path), ignore_errors=True)
+
+
+TEST_REVIEW_USER_ID_1 = 7
+TEST_REVIEW_USER_ID_2 = 8
+
+
+class TestAlertDispatchLifecycle:
+    @pytest.mark.asyncio
+    async def test_dispatch_once_and_idempotent_for_same_finding_rule(self):
+        from app.database import Base
+        from app.models import AlertDispatchHistory, AlertRule, ImpersonationFinding, ImpersonationRule
+        from app.services.impersonation.alert_engine import dispatch_alerts
+
+        engine, session_factory, db_path = await _build_temp_session_factory(Base)
+        try:
+            async with session_factory() as db:
+                rule = ImpersonationRule(name="Rule", brand_name="Acme")
+                db.add(rule)
+                await db.flush()
+                finding = ImpersonationFinding(
+                    rule_id=rule.id,
+                    module="m1",
+                    platform="telegram",
+                    finding_type="fake_account",
+                    target_identifier="@acme_helpdesk",
+                    threat_score=90,
+                    status="new",
+                    fingerprint="f001",
+                )
+                alert_rule = AlertRule(
+                    name="Critical M1",
+                    match_module="m1",
+                    match_finding_type="fake_account",
+                    min_threat_score=80,
+                    channels_json='[{"type":"email","to":"security@acme.com"}]',
+                    active=True,
+                )
+                db.add_all([finding, alert_rule])
+                await db.commit()
+
+                with patch(
+                    "app.services.impersonation.alert_engine._dispatch_channel",
+                    new=AsyncMock(return_value=True),
+                ) as dispatch_mock:
+                    first = await dispatch_alerts(finding.id, db)
+                    await db.commit()
+                    second = await dispatch_alerts(finding.id, db)
+                    await db.commit()
+
+                rows = (
+                    await db.execute(
+                        select(AlertDispatchHistory).where(
+                            AlertDispatchHistory.finding_id == finding.id,
+                            AlertDispatchHistory.alert_rule_id == alert_rule.id,
+                        )
+                    )
+                ).scalars().all()
+
+                assert first["rules_matched"] == 1
+                assert first["notifications_sent"] == 1
+                assert second["rules_already_dispatched"] == 1
+                assert dispatch_mock.await_count == 1
+                assert len(rows) == 1
+        finally:
+            await engine.dispose()
+            _cleanup_temp_db(db_path)
+
+    @pytest.mark.asyncio
+    async def test_inactive_or_non_matching_rules_do_not_dispatch(self):
+        from app.database import Base
+        from app.models import AlertRule, ImpersonationFinding, ImpersonationRule
+        from app.services.impersonation.alert_engine import dispatch_alerts
+
+        engine, session_factory, db_path = await _build_temp_session_factory(Base)
+        try:
+            async with session_factory() as db:
+                rule = ImpersonationRule(name="Rule", brand_name="Acme")
+                db.add(rule)
+                await db.flush()
+                finding = ImpersonationFinding(
+                    rule_id=rule.id,
+                    module="m1",
+                    platform="telegram",
+                    finding_type="fake_account",
+                    target_identifier="@acme_helpdesk",
+                    threat_score=90,
+                    status="new",
+                    fingerprint="f002",
+                )
+                db.add_all(
+                    [
+                        finding,
+                        AlertRule(
+                            name="Inactive Rule",
+                            match_module="m1",
+                            match_finding_type="fake_account",
+                            min_threat_score=80,
+                            channels_json='[{"type":"email","to":"security@acme.com"}]',
+                            active=False,
+                        ),
+                        AlertRule(
+                            name="Wrong module",
+                            match_module="m8",
+                            match_finding_type="fake_account",
+                            min_threat_score=80,
+                            channels_json='[{"type":"email","to":"security@acme.com"}]',
+                            active=True,
+                        ),
+                    ]
+                )
+                await db.commit()
+
+                with patch(
+                    "app.services.impersonation.alert_engine._dispatch_channel",
+                    new=AsyncMock(return_value=True),
+                ) as dispatch_mock:
+                    stats = await dispatch_alerts(finding.id, db)
+
+                assert stats["rules_checked"] == 1
+                assert stats["rules_matched"] == 0
+                dispatch_mock.assert_not_awaited()
+        finally:
+            await engine.dispose()
+            _cleanup_temp_db(db_path)
+
+    @pytest.mark.asyncio
+    async def test_missing_notification_config_is_non_fatal_and_recorded(self):
+        from app.database import Base
+        from app.models import AlertDispatchHistory, AlertRule, ImpersonationFinding, ImpersonationRule
+        from app.services.impersonation.alert_engine import dispatch_alerts
+
+        engine, session_factory, db_path = await _build_temp_session_factory(Base)
+        try:
+            async with session_factory() as db:
+                rule = ImpersonationRule(name="Rule", brand_name="Acme")
+                db.add(rule)
+                await db.flush()
+                finding = ImpersonationFinding(
+                    rule_id=rule.id,
+                    module="m1",
+                    platform="telegram",
+                    finding_type="fake_account",
+                    target_identifier="@acme_helpdesk",
+                    threat_score=90,
+                    status="new",
+                    fingerprint="f003",
+                )
+                alert_rule = AlertRule(
+                    name="No channels",
+                    match_module="m1",
+                    match_finding_type="fake_account",
+                    min_threat_score=80,
+                    channels_json="[]",
+                    active=True,
+                )
+                db.add_all([finding, alert_rule])
+                await db.commit()
+
+                stats = await dispatch_alerts(finding.id, db)
+                await db.commit()
+
+                history = (
+                    await db.execute(
+                        select(AlertDispatchHistory).where(
+                            AlertDispatchHistory.finding_id == finding.id,
+                            AlertDispatchHistory.alert_rule_id == alert_rule.id,
+                        )
+                    )
+                ).scalar_one_or_none()
+
+                assert stats["rules_matched"] == 1
+                assert stats["notifications_sent"] == 0
+                assert stats["notifications_failed"] == 0
+                assert stats["rules_skipped_no_channels"] == 1
+                assert history is not None
+                assert history.outcome == "skipped_no_channels"
+        finally:
+            await engine.dispose()
+            _cleanup_temp_db(db_path)
+
+    @pytest.mark.asyncio
+    async def test_scanner_path_dispatches_once_across_reruns(self, monkeypatch):
+        from app import database
+        from app.database import Base
+        from app.models import AlertDispatchHistory, AlertRule, ImpersonationRule
+        from app.services.impersonation.scanner import run_scan_for_rule
+
+        engine, session_factory, db_path = await _build_temp_session_factory(Base)
+        try:
+            monkeypatch.setattr(database, "AsyncSessionLocal", session_factory)
+
+            async with session_factory() as db:
+                imp_rule = ImpersonationRule(
+                    name="Scan Rule",
+                    brand_name="Acme",
+                    m1_social_enabled=True,
+                    m2_apps_enabled=False,
+                    m3_email_enabled=False,
+                    m5_exec_enabled=False,
+                    m6_ads_enabled=False,
+                    m7_vip_enabled=False,
+                    m8_domain_enabled=False,
+                    social_platforms='["telegram"]',
+                )
+                alert_rule = AlertRule(
+                    name="M1 Alerts",
+                    match_module="m1",
+                    match_finding_type="fake_account",
+                    min_threat_score=80,
+                    channels_json='[{"type":"email","to":"security@acme.com"}]',
+                    active=True,
+                )
+                db.add_all([imp_rule, alert_rule])
+                await db.commit()
+                await db.refresh(imp_rule)
+
+            async def _fake_scan_m1(_rule_data):
+                return [
+                    {
+                        "module": "m1",
+                        "platform": "telegram",
+                        "finding_type": "fake_account",
+                        "target_url": "https://t.me/acme_helpdesk",
+                        "target_identifier": "@acme_helpdesk",
+                        "display_name": "Acme Helpdesk",
+                        "description": "fake support account",
+                        "threat_score": 91,
+                        "signals": ["impersonation"],
+                        "evidence": {},
+                    }
+                ]
+
+            monkeypatch.setattr("app.services.impersonation.scanner._scan_m1_social", _fake_scan_m1)
+            with patch(
+                "app.services.impersonation.alert_engine._dispatch_channel",
+                new=AsyncMock(return_value=True),
+            ) as dispatch_mock:
+                await run_scan_for_rule(imp_rule.id)
+                await run_scan_for_rule(imp_rule.id)
+
+            async with session_factory() as db:
+                history_rows = (
+                    await db.execute(select(AlertDispatchHistory))
+                ).scalars().all()
+                assert len(history_rows) == 1
+                assert dispatch_mock.await_count == 1
+        finally:
+            await engine.dispose()
+            _cleanup_temp_db(db_path)
+
+    @pytest.mark.asyncio
+    async def test_manual_update_path_triggers_alert_evaluation(self):
+        from app.database import Base
+        from app.models import AlertDispatchHistory, AlertRule, ImpersonationFinding, ImpersonationRule
+        from app.schemas import ImpersonationFindingStatusUpdate
+        from app.api.impersonation import update_finding_status
+
+        engine, session_factory, db_path = await _build_temp_session_factory(Base)
+        try:
+            async with session_factory() as db:
+                rule = ImpersonationRule(name="Rule", brand_name="Acme")
+                db.add(rule)
+                await db.flush()
+                finding = ImpersonationFinding(
+                    rule_id=rule.id,
+                    module="m1",
+                    platform="telegram",
+                    finding_type="fake_account",
+                    target_identifier="@acme_helpdesk",
+                    threat_score=92,
+                    status="resolved",
+                    fingerprint="f004",
+                )
+                alert_rule = AlertRule(
+                    name="M1 Alerts",
+                    match_module="m1",
+                    match_finding_type="fake_account",
+                    min_threat_score=80,
+                    channels_json='[{"type":"email","to":"security@acme.com"}]',
+                    active=True,
+                )
+                db.add_all([finding, alert_rule])
+                await db.commit()
+                await db.refresh(finding)
+
+                with patch(
+                    "app.services.impersonation.alert_engine._dispatch_channel",
+                    new=AsyncMock(return_value=True),
+                ) as dispatch_mock:
+                    await update_finding_status(
+                        finding.id,
+                        ImpersonationFindingStatusUpdate(status="new"),
+                        db,
+                        SimpleNamespace(id=TEST_REVIEW_USER_ID_1),
+                    )
+                    await update_finding_status(
+                        finding.id,
+                        ImpersonationFindingStatusUpdate(status="under_review"),
+                        db,
+                        SimpleNamespace(id=TEST_REVIEW_USER_ID_2),
+                    )
+
+                history_rows = (
+                    await db.execute(select(AlertDispatchHistory))
+                ).scalars().all()
+                assert len(history_rows) == 1
+                assert dispatch_mock.await_count == 1
+        finally:
+            await engine.dispose()
+            _cleanup_temp_db(db_path)
 
 
 # ── New scanner functions are present in scanner.py ──────────────────────────

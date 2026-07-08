@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AlertRule, ImpersonationFinding
 from app.services.impersonation.alert_engine import dispatch_alerts
+
+logger = logging.getLogger(__name__)
+
+_ALERTABLE_FINDING_STATUSES = {"new", "under_review", "takedown_requested"}
 
 
 async def list_alert_rules(db: AsyncSession) -> list[AlertRule]:
@@ -33,4 +39,20 @@ async def delete_alert_rule(db: AsyncSession, rule_id: int) -> None:
 
 
 async def dispatch_for_finding(db: AsyncSession, finding: ImpersonationFinding) -> dict:
-    return await dispatch_alerts(db, finding)
+    if not finding.id:
+        return {"skipped": True, "reason": "missing_finding_id"}
+    if finding.status not in _ALERTABLE_FINDING_STATUSES:
+        return {"skipped": True, "reason": f"status:{finding.status}"}
+    try:
+        stats = await dispatch_alerts(finding_id=finding.id, db=db)
+        await db.commit()
+        return stats
+    except Exception as exc:
+        # Intentional broad catch: alert dispatch must never break finding create/update flows.
+        await db.rollback()
+        logger.exception(
+            "[ImpersonationAlertService] Dispatch failed for finding=%s: %s",
+            finding.id,
+            exc,
+        )
+        return {"skipped": True, "reason": "dispatch_error", "error": str(exc)}

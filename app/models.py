@@ -1000,6 +1000,20 @@ class AlertRule(Base):
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+class AlertDispatchHistory(Base):
+    """Durable idempotency log for impersonation alert dispatch attempts."""
+    __tablename__ = "impersonation_alert_dispatch_history"
+    __table_args__ = (UniqueConstraint("finding_id", "alert_rule_id"),)
+
+    id = Column(Integer, primary_key=True)
+    finding_id = Column(Integer, ForeignKey("impersonation_findings.id"), nullable=False)
+    alert_rule_id = Column(Integer, ForeignKey("impersonation_alert_rules.id"), nullable=False)
+    outcome = Column(String(30), nullable=False, default="sent")  # sent | partial | failed | skipped_no_channels
+    notifications_sent = Column(Integer, default=0)
+    notifications_failed = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class LegalTask(Base):
     """Legal workflow item: UDRP submission, C&D letter, trademark filing, etc."""
     __tablename__ = "impersonation_legal_tasks"
