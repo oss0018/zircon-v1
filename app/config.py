@@ -114,6 +114,10 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("APIFY_API_KEY", "ZIRCON_APIFY_API_KEY"),
     )
+    facebook_apify_actor: str = Field(
+        default="",
+        validation_alias=AliasChoices("FACEBOOK_APIFY_ACTOR", "ZIRCON_FACEBOOK_APIFY_ACTOR"),
+    )
     vk_service_token: str = Field(
         default="",
         validation_alias=AliasChoices("VK_SERVICE_TOKEN", "ZIRCON_VK_SERVICE_TOKEN"),

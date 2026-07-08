@@ -245,8 +245,8 @@ async def run_scan_for_rule(rule_id: int) -> dict:
 async def _scan_m1_social(rule: dict) -> list:
     """M1: Fake Social Media Account Detection.
 
-    Dispatches to platform-specific sub-scanners (Telegram, Instagram, VK)
-    based on ``rule["social_platforms"]``.
+    Dispatches to platform-specific sub-scanners (Telegram, Instagram, VK,
+    Facebook) based on ``rule["social_platforms"]``.
     """
     platforms = [str(p).lower() for p in (rule.get("social_platforms") or [])]
     findings: list[dict] = []
@@ -268,6 +268,12 @@ async def _scan_m1_social(rule: dict) -> list:
             findings.extend(await _scan_m1_vk(rule))
         except Exception as exc:  # noqa: BLE001
             logger.error("[IMP M1] VK sub-scan error: %s", exc)
+
+    if "facebook" in platforms:
+        try:
+            findings.extend(await _scan_m1_facebook(rule))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[IMP M1] Facebook sub-scan error: %s", exc)
 
     return findings
 
@@ -1082,6 +1088,162 @@ async def _scan_m1_vk(rule: dict) -> list:
                     "subscriber_count": members,
                     "signals": ["vk_impersonation", f"score:{score}"],
                     "evidence": group,
+                }
+            )
+
+    return findings
+
+
+async def _scan_m1_facebook(rule: dict) -> list:
+    """M1: Facebook — detect fake brand Pages via a configurable Apify actor.
+
+    Meta's Graph API no longer permits arbitrary keyword search of public
+    Pages for third-party apps (that requires Meta's "Page Public Content
+    Access" feature review), and unlike Instagram there is no single official
+    Apify actor for Facebook Page search. Operators must point this scanner at
+    an Apify actor of their choosing via ``FACEBOOK_APIFY_ACTOR`` (browse
+    options at https://apify.com/store?search=facebook). The actor's input
+    field name for the search keyword defaults to ``keyword`` and can be
+    overridden with ``FACEBOOK_APIFY_SEARCH_FIELD`` for actors that expect a
+    different field name.
+
+    Required env vars: APIFY_API_KEY (shared with Instagram), FACEBOOK_APIFY_ACTOR
+    Optional env vars: FACEBOOK_APIFY_SEARCH_FIELD (default: "keyword")
+    Output type: ``fake_facebook_page``
+    """
+    apify_key = os.getenv("APIFY_API_KEY", "").strip()
+    if not apify_key:
+        logger.info(
+            "[IMP M1] APIFY_API_KEY not configured; Facebook scan skipped for '%s'.",
+            rule["brand_name"],
+        )
+        return []
+
+    actor = os.getenv("FACEBOOK_APIFY_ACTOR", "").strip()
+    if not actor:
+        logger.info(
+            "[IMP M1] FACEBOOK_APIFY_ACTOR not configured; Facebook scan skipped for '%s'. "
+            "No single official Apify actor exists for Facebook Page search — set "
+            "FACEBOOK_APIFY_ACTOR to an actor id from https://apify.com/store?search=facebook.",
+            rule["brand_name"],
+        )
+        return []
+
+    brand = (rule.get("brand_name") or "").strip()
+    if not brand:
+        return []
+
+    search_field = os.getenv("FACEBOOK_APIFY_SEARCH_FIELD", "keyword").strip() or "keyword"
+
+    try:
+        from rapidfuzz import fuzz as _fuzz  # type: ignore
+    except ImportError:
+        _fuzz = None
+
+    findings: list[dict] = []
+    seen_ids: set[str] = set()
+    search_queries = [brand, f"{brand} official", f"{brand} support"]
+    for exec_name in (rule.get("executive_names") or [])[:_MAX_EXEC_SEARCH_TERMS]:
+        parts = str(exec_name).split()
+        if parts:
+            search_queries.append(f"{brand} {parts[0]}")
+
+    actor_url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
+
+    for query in search_queries:
+        payload = {search_field: query, "maxItems": 10}
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    actor_url,
+                    json=payload,
+                    headers={"Authorization": "Bearer " + apify_key},
+                )
+                if resp.status_code not in (200, 201):
+                    logger.debug(
+                        "[IMP M1] Apify Facebook returned %s for '%s'",
+                        resp.status_code,
+                        query,
+                    )
+                    continue
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[IMP M1] Apify Facebook error for '%s': %s", query, exc)
+            continue
+
+        if not isinstance(data, list):
+            data = [data] if data else []
+
+        for page in data:
+            if not isinstance(page, dict):
+                continue
+
+            page_id = str(page.get("pageId") or page.get("id") or page.get("facebookId") or "")
+            username = str(page.get("pageUsername") or page.get("username") or "")
+            identifier = username or page_id
+            if not identifier or identifier in seen_ids:
+                continue
+            seen_ids.add(identifier)
+
+            page_name = str(page.get("pageName") or page.get("name") or page.get("title") or "")
+            page_url = str(
+                page.get("pageUrl")
+                or page.get("url")
+                or page.get("link")
+                or f"https://www.facebook.com/{identifier}"
+            )
+            followers = int(
+                page.get("followers")
+                or page.get("likes")
+                or page.get("fan_count")
+                or page.get("followersCount")
+                or 0
+            )
+            is_verified = bool(page.get("verified") or page.get("isVerified"))
+
+            if not page_name or is_verified:
+                continue
+
+            # Scoring
+            score = 0
+            brand_lower = brand.lower()
+            name_lower = page_name.lower()
+            username_lower = username.lower()
+
+            if _fuzz:
+                name_sim = max(
+                    _fuzz.partial_ratio(brand_lower, name_lower),
+                    _fuzz.partial_ratio(brand_lower, username_lower) if username_lower else 0,
+                )
+                score += min(int(name_sim * 0.5), 50)
+            elif brand_lower in name_lower or (username_lower and brand_lower in username_lower):
+                score += 40
+
+            # Official/support keywords — 10 pts each
+            for kw in ("official", "support", "service", "help"):
+                if kw in name_lower or kw in username_lower:
+                    score += 10
+
+            min_score = int(rule.get("min_impersonation_score") or 40)
+            if score < min_score:
+                continue
+
+            findings.append(
+                {
+                    "module": "m1",
+                    "platform": "facebook",
+                    "finding_type": "fake_facebook_page",
+                    "target_url": page_url,
+                    "target_identifier": identifier,
+                    "display_name": page_name,
+                    "description": (
+                        f"Facebook Page '{page_name}' ({page_url}) may be impersonating "
+                        f"'{brand}' (score {score}). Followers: {followers}."
+                    ),
+                    "threat_score": min(score, 95),
+                    "subscriber_count": followers,
+                    "signals": ["facebook_impersonation", f"score:{score}"],
+                    "evidence": page,
                 }
             )
 
