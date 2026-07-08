@@ -677,6 +677,31 @@ class TestScanM2AppStore:
             })
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_appstore_logs_and_skips_non_200_response(self, caplog):
+        from app.services.impersonation.scanner import _scan_m2_appstore
+
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client_cls.return_value = mock_client
+
+            with caplog.at_level("WARNING"):
+                result = await _scan_m2_appstore({
+                    "brand_name": "TestBrand",
+                    "official_developer_ids": [],
+                    "min_impersonation_score": 40,
+                })
+
+        assert result == []
+        mock_response.json.assert_not_called()
+        assert "Apple App Store search returned 503 for 'TestBrand'" in caplog.text
+
 
 # ── Alert Engine ──────────────────────────────────────────────────────────────
 

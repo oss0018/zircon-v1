@@ -370,6 +370,13 @@ async def _scan_m2_appstore(rule: dict) -> list:
                 "https://itunes.apple.com/search",
                 params={"term": brand, "country": "us", "entity": "software", "limit": 20},
             )
+            if resp.status_code != 200:
+                logger.warning(
+                    "[IMP M2] Apple App Store search returned %s for '%s'",
+                    resp.status_code,
+                    brand,
+                )
+                return []
             data = resp.json()
     except Exception as exc:  # noqa: BLE001
         logger.warning("[IMP M2] Apple App Store search failed for '%s': %s", brand, exc)
