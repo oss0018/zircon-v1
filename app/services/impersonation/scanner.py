@@ -46,6 +46,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
     """
     from app.database import AsyncSessionLocal
     from app.models import ImpersonationFinding, ImpersonationRule
+    from app.services.impersonation.alert_service import dispatch_for_finding
 
     summary = {m: {"scanned": 0, "new_findings": 0, "errors": 0}
                for m in ["m1", "m2", "m3", "m5", "m6", "m7", "m8"]}
@@ -175,6 +176,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 logger.error("[IMP M8] Scan error for rule %s: %s", rule_id, exc)
                 summary["m8"]["errors"] += 1
 
+        findings_for_alert_evaluation: set[int] = set()
         for finding_payload in all_findings:
             fingerprint = _make_fingerprint(
                 finding_payload["module"],
@@ -188,6 +190,7 @@ async def run_scan_for_rule(rule_id: int) -> dict:
             if existing_row:
                 existing_row.last_seen = _utcnow()
                 existing_row.threat_score = finding_payload.get("threat_score", existing_row.threat_score)
+                findings_for_alert_evaluation.add(existing_row.id)
                 continue
 
             new_finding = ImpersonationFinding(
@@ -209,12 +212,32 @@ async def run_scan_for_rule(rule_id: int) -> dict:
                 async with db.begin_nested():
                     db.add(new_finding)
                     await db.flush()
+                    findings_for_alert_evaluation.add(new_finding.id)
                 summary[finding_payload["module"]]["new_findings"] += 1
             except IntegrityError:
                 logger.info("[IMP] Duplicate finding skipped for fingerprint %s", fingerprint)
 
         rule.last_scan_at = _utcnow()
         await db.commit()
+
+        finding_rows = []
+        if findings_for_alert_evaluation:
+            finding_rows = (
+                await db.execute(
+                    select(ImpersonationFinding).where(
+                        ImpersonationFinding.id.in_(findings_for_alert_evaluation)
+                    )
+                )
+            ).scalars().all()
+
+        for finding_row in finding_rows:
+            dispatch_result = await dispatch_for_finding(db, finding_row)
+            if dispatch_result.get("error"):
+                logger.warning(
+                    "[IMP] Alert dispatch failed for finding %s: %s",
+                    finding_row.id,
+                    dispatch_result.get("error"),
+                )
 
     return summary
 

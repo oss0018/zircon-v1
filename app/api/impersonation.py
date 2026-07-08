@@ -49,6 +49,7 @@ from app.schemas import (
     EvidencePackageRequest,
 )
 from app.services.impersonation.scanner import run_scan_for_rule
+from app.services.impersonation.alert_service import dispatch_for_finding
 from app.utils.sanitize import sanitize_string
 
 logger = logging.getLogger(__name__)
@@ -489,6 +490,13 @@ async def update_finding_status(
     finding.reviewed_by = current_user.id
     finding.reviewed_at = _utcnow()
     await db.commit()
+    dispatch_result = await dispatch_for_finding(db, finding)
+    if dispatch_result.get("error"):
+        logger.warning(
+            "[ImpersonationAPI] Alert dispatch failed for finding=%s: %s",
+            finding.id,
+            dispatch_result.get("error"),
+        )
     await db.refresh(finding)
     return _finding_to_out(finding)
 

@@ -21,6 +21,7 @@ from typing import Any
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,18 @@ def _rule_matches(alert_rule: Any, finding: Any) -> bool:
     return True
 
 
+def _parse_channels(channels_json: str | None) -> list[dict]:
+    if not channels_json:
+        return []
+    try:
+        parsed = json.loads(channels_json)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [channel for channel in parsed if isinstance(channel, dict)]
+
+
 async def dispatch_alerts(finding_id: int, db: AsyncSession | None = None) -> dict:
     """
     Check all active AlertRules against *finding_id* and dispatch notifications.
@@ -192,12 +205,16 @@ async def dispatch_alerts(finding_id: int, db: AsyncSession | None = None) -> di
     dict with keys ``rules_checked``, ``rules_matched``, ``notifications_sent``, ``notifications_failed``.
     """
     from app.models import AlertRule, ImpersonationFinding
+    from app.models import AlertDispatchHistory
 
     stats = {
         "rules_checked": 0,
         "rules_matched": 0,
+        "rules_already_dispatched": 0,
+        "rules_skipped_no_channels": 0,
         "notifications_sent": 0,
         "notifications_failed": 0,
+        "notifications_skipped": 0,
     }
 
     _own_session = db is None
@@ -232,19 +249,79 @@ async def dispatch_alerts(finding_id: int, db: AsyncSession | None = None) -> di
             if not _rule_matches(rule, finding_row):
                 continue
             stats["rules_matched"] += 1
-            channels: list[dict] = []
-            try:
-                channels = json.loads(rule.channels_json or "[]")
-            except Exception:  # noqa: BLE001
-                pass
-            for channel in channels:
-                if await _dispatch_channel(channel, title, body):
-                    stats["notifications_sent"] += 1
+            existing_dispatch = (
+                await db.execute(
+                    select(AlertDispatchHistory).where(
+                        AlertDispatchHistory.finding_id == finding_row.id,
+                        AlertDispatchHistory.alert_rule_id == rule.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_dispatch:
+                stats["rules_already_dispatched"] += 1
+                continue
+
+            channels = _parse_channels(rule.channels_json)
+            sent_count = 0
+            failed_count = 0
+            skipped_count = 0
+            outcome: str | None = None
+
+            if not channels:
+                logger.info(
+                    "[AlertEngine] Rule %s matched finding %s but has no configured channels. Skipping dispatch.",
+                    rule.id,
+                    finding_row.id,
+                )
+                stats["rules_skipped_no_channels"] += 1
+                skipped_count = 1
+                outcome = "skipped_no_channels"
+            else:
+                for channel in channels:
+                    if await _dispatch_channel(channel, title, body):
+                        sent_count += 1
+                    else:
+                        failed_count += 1
+                        logger.warning(
+                            "[AlertEngine] Channel dispatch failed for finding=%s rule=%s channel_type=%s",
+                            finding_row.id,
+                            rule.id,
+                            (channel.get("type") or "unknown"),
+                        )
+                if sent_count > 0 and failed_count > 0:
+                    outcome = "partial"
+                elif sent_count == 0:
+                    outcome = "failed"
                 else:
-                    stats["notifications_failed"] += 1
+                    outcome = "sent"
+
+            stats["notifications_sent"] += sent_count
+            stats["notifications_failed"] += failed_count
+            stats["notifications_skipped"] += skipped_count
+
+            try:
+                async with db.begin_nested():
+                    db.add(
+                        AlertDispatchHistory(
+                            finding_id=finding_row.id,
+                            alert_rule_id=rule.id,
+                            outcome=outcome,
+                            notifications_sent=sent_count,
+                            notifications_failed=failed_count,
+                        )
+                    )
+                    await db.flush()
+            except IntegrityError:
+                stats["rules_already_dispatched"] += 1
+                logger.info(
+                    "[AlertEngine] Duplicate dispatch history suppressed for finding=%s rule=%s",
+                    finding_row.id,
+                    rule.id,
+                )
 
     finally:
         if _own_session:
+            await db.commit()
             await db.close()
 
     return stats
