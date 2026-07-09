@@ -275,7 +275,7 @@ There are **no blockers** preventing the system from running. All Phase 2 additi
 | M3 | Inbound Headers | `MSGRAPH_CLIENT_ID`, `MSGRAPH_CLIENT_SECRET` | ❌ Phase 2 stub |
 | M5 | HIBP | `HIBP_API_KEY` | ✅ Integrations |
 | M5 | IntelX | `INTELX_API_KEY` | ✅ Integrations |
-| M5 | Dark Web (Tor) | `TOR_SOCKS_PROXY` | ❌ Phase 2 stub |
+| M5 | Dark Web (IntelX) | `INTELX_API_KEY` | ✅ live |
 | M6 | Google Ads Transparency | *(public API)* | N/A |
 | M6 | Yandex Direct | `YANDEX_OAUTH_TOKEN` | ❌ Not yet |
 | M7/M8 | NRD feed / lookalike | *(internal)* | ✅ live |

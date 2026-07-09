@@ -10,6 +10,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import httpx
 from sqlalchemy import select
@@ -28,6 +29,10 @@ _MIN_TELEGRAM_SESSION_LENGTH = 20
 
 # Maximum number of executive names converted to search terms per platform scan.
 _MAX_EXEC_SEARCH_TERMS = 2
+
+# Maximum number of official domains searched per dark-web scan. IntelX API
+# plans are metered per request, so this is kept small by default.
+_MAX_DARKWEB_DOMAIN_TERMS = 3
 
 
 def _utcnow():
@@ -570,19 +575,98 @@ async def _scan_m5_executive(rule: dict) -> list:
 
 
 async def _scan_m5_darkweb(rule: dict) -> list:
-    """M5 Phase 2: Dark Web Executive Monitoring — stub.
+    """M5 Phase 2: Dark Web / Paste Site Monitoring — Intelligence X search.
 
-    Monitors Tor-accessible paste sites and data breach forums for executive
-    credentials and bulk credential dumps.
+    Complements ``_scan_m5_executive`` (which checks HIBP's curated breach
+    corpus) by searching Intelligence X, a dark-web/paste-site/leak search
+    engine that crawls Tor-hidden services and clearnet paste sites itself —
+    no local Tor client or SOCKS proxy is needed to use it. This can surface
+    bulk credential dumps and paste-site leaks referencing the brand's
+    domains or executives that HIBP's known-breach corpus doesn't (yet)
+    include.
 
-    Integration: Tor network access (Stem library) + dark web monitoring service.
-    Required env vars: DARKWEB_API_KEY, TOR_SOCKS_PROXY
+    Uses the existing ``IntelXClient`` at ``app.services.osint.intelx``.
+    Requires ``INTELX_API_KEY`` — a paid Intelligence X API subscription
+    (see https://intelx.io/product); IntelX's free web tier does not include
+    API access. Search terms (official domains, executive names) are capped
+    since IntelX API plans are metered per request.
+
+    Required env vars: INTELX_API_KEY
+    Output type: ``darkweb_credential_leak``
     """
-    logger.info(
-        "[IMP M5] Dark web scan stub for '%s'. Configure Tor/dark-web service integration to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    api_key = os.getenv("INTELX_API_KEY", "").strip()
+    if not api_key:
+        logger.info(
+            "[IMP M5] INTELX_API_KEY not configured; dark web scan skipped for '%s'.",
+            rule.get("brand_name"),
+        )
+        return []
+
+    official_domains: list[str] = [
+        d.strip() for d in (rule.get("official_domains") or []) if d.strip()
+    ]
+    executive_names: list[str] = [
+        e.strip() for e in (rule.get("executive_names") or []) if e.strip()
+    ]
+
+    if not official_domains and not executive_names:
+        return []
+
+    from app.services.osint.intelx import IntelXClient  # local import to avoid circular refs
+
+    client = IntelXClient(api_key=api_key)
+    findings: list[dict] = []
+
+    search_terms: list[tuple[str, str]] = [
+        (domain, "domain") for domain in official_domains[:_MAX_DARKWEB_DOMAIN_TERMS]
+    ] + [
+        (name, "executive") for name in executive_names[:_MAX_EXEC_SEARCH_TERMS]
+    ]
+
+    for term, term_type in search_terms:
+        try:
+            result = await client.search(term, query_type=term_type)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[IMP M5] IntelX query failed for '%s': %s", term, exc)
+            continue
+
+        if result.get("error"):
+            logger.info("[IMP M5] IntelX returned error for '%s': %s", term, result["error"])
+            continue
+
+        records = result.get("records") or []
+        if not isinstance(records, list) or not records:
+            continue
+
+        record_names = [
+            str(rec.get("name", "record"))[:120] for rec in records[:5] if isinstance(rec, dict)
+        ]
+        record_types = [
+            str(rec.get("type")) for rec in records[:5] if isinstance(rec, dict) and rec.get("type")
+        ]
+        signals = [f"intelx_type:{t}" for t in dict.fromkeys(record_types)][:3] or [
+            f"intelx_term_type:{term_type}"
+        ]
+
+        findings.append(
+            {
+                "module": "m5",
+                "platform": "dark_web",
+                "finding_type": "darkweb_credential_leak",
+                "target_url": f"https://intelx.io/?s={quote(term)}",
+                "target_identifier": term,
+                "display_name": f"{term} ({term_type})",
+                "description": (
+                    f"Found {len(records)} dark web / paste-site record(s) referencing "
+                    f"'{term}': {', '.join(record_names)}."
+                ),
+                "threat_score": 70,
+                "signals": signals,
+                "evidence": {"records": records[:10], "term": term, "term_type": term_type},
+            }
+        )
+
+    return findings
 
 
 async def _scan_m6_ads(rule: dict) -> list:
