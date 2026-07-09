@@ -1407,17 +1407,28 @@ def _extract_email_body(msg) -> str:
         return ""
 
 
+def _decode_email_header_value(value) -> str:
+    """Best-effort RFC2047 decoding for email header values."""
+    if not value:
+        return ""
+    try:
+        from email.header import decode_header, make_header
+
+        return str(make_header(decode_header(str(value))))
+    except Exception:  # noqa: BLE001
+        return str(value)
+
+
 def _fetch_honeypot_messages(host: str, port: int, user: str, password: str) -> list:
     """Connect to the honeypot IMAP mailbox and return parsed unseen messages.
 
     Blocking (uses ``imaplib``); callers must run this via ``asyncio.to_thread``.
-    Marks fetched messages ``\\Seen`` so they are not re-processed on the next
-    scan. This is a best-effort optimisation only — the caller's fingerprint-
-    based dedup (keyed on Message-ID) is the authoritative safety net if
-    marking fails or another process also reads the mailbox.
+    Messages are returned with their IMAP sequence number so the caller can
+    mark only matched messages ``\\Seen`` after rule-specific filtering.
     """
     import email
     import imaplib
+    from email import policy
     from email.utils import getaddresses, parseaddr
 
     parsed: list[dict] = []
@@ -1433,31 +1444,55 @@ def _fetch_honeypot_messages(host: str, port: int, user: str, password: str) -> 
             if status != "OK" or not msg_data or not msg_data[0]:
                 continue
             raw = msg_data[0][1]
-            parsed_msg = email.message_from_bytes(raw)
-            from_display, from_address = parseaddr(parsed_msg.get("From", ""))
-            _, reply_to_address = parseaddr(parsed_msg.get("Reply-To", ""))
-            to_addresses = [addr for _, addr in getaddresses([parsed_msg.get("To", "")]) if addr]
+            parsed_msg = email.message_from_bytes(raw, policy=policy.default)
+            from_display, from_address = parseaddr(_decode_email_header_value(parsed_msg.get("From", "")))
+            _, reply_to_address = parseaddr(_decode_email_header_value(parsed_msg.get("Reply-To", "")))
+            to_headers = [_decode_email_header_value(value) for value in parsed_msg.get_all("To", [])]
+            cc_headers = [_decode_email_header_value(value) for value in parsed_msg.get_all("Cc", [])]
+            to_addresses = [addr.lower() for _, addr in getaddresses(to_headers) if addr]
+            cc_addresses = [addr.lower() for _, addr in getaddresses(cc_headers) if addr]
             parsed.append(
                 {
+                    "imap_num": num.decode() if isinstance(num, bytes) else str(num),
                     "message_id": (parsed_msg.get("Message-ID") or "").strip(),
                     "from_display": from_display or "",
                     "from_address": (from_address or "").lower(),
                     "reply_to": (reply_to_address or "").lower(),
                     "to_addresses": to_addresses,
-                    "subject": parsed_msg.get("Subject", "") or "",
+                    "cc_addresses": cc_addresses,
+                    "subject": _decode_email_header_value(parsed_msg.get("Subject", "")),
                     "body": _extract_email_body(parsed_msg),
                 }
             )
-            try:
-                conn.store(num, "+FLAGS", "\\Seen")
-            except Exception:  # noqa: BLE001
-                pass
     finally:
         try:
             conn.logout()
         except Exception:  # noqa: BLE001
             pass
     return parsed
+
+
+def _mark_honeypot_messages_seen(host: str, port: int, user: str, password: str, message_nums: list[str]) -> None:
+    """Best-effort IMAP ``\\Seen`` update for matched honeypot messages only."""
+    import imaplib
+
+    if not message_nums:
+        return
+
+    conn = imaplib.IMAP4_SSL(host, port)
+    try:
+        conn.login(user, password)
+        conn.select("INBOX")
+        for num in message_nums:
+            try:
+                conn.store(str(num), "+FLAGS", "\\Seen")
+            except Exception:  # noqa: BLE001
+                continue
+    finally:
+        try:
+            conn.logout()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _score_bec_message(msg: dict, official_domains: list, exec_first_names: set) -> tuple:
@@ -1516,6 +1551,9 @@ async def _scan_m3_honeypot(rule: dict) -> list:
     addressed to this rule's honeypot aliases (``{alias}@{domain}`` for each
     alias in HONEYPOT_MAILBOXES combined with each of the rule's
     official_domains, e.g. ceo-honeypot@{domain}, finance-honeypot@{domain}).
+    Messages are marked ``\\Seen`` only after they match this rule's To/Cc
+    honeypot addresses, so non-matching mail remains available for other rules
+    sharing the same mailbox.
 
     Reading received mail requires IMAP (or POP3), not SMTP — SMTP is
     send-only. This deliberately uses HONEYPOT_IMAP_* env vars rather than the
@@ -1580,16 +1618,27 @@ async def _scan_m3_honeypot(rule: dict) -> list:
     }
 
     findings: list[dict] = []
+    matched_imap_nums: list[str] = []
     for msg in messages:
-        recipients = {r.lower() for r in (msg.get("to_addresses") or [])}
-        if not (recipients & honeypot_addresses):
+        recipients = {
+            r.lower()
+            for r in ((msg.get("to_addresses") or []) + (msg.get("cc_addresses") or []))
+            if r
+        }
+        matched_honeypots = sorted(recipients & honeypot_addresses)
+        if not matched_honeypots:
             continue  # not addressed to one of this rule's honeypot aliases
+
+        imap_num = msg.get("imap_num")
+        if imap_num:
+            matched_imap_nums.append(str(imap_num))
 
         score, signals = _score_bec_message(msg, domains, exec_first_names)
         finding_type = "honeypot_bec_attempt" if "executive_spoof" in signals else "honeypot_suspicious_email"
-        identifier = msg.get("message_id") or _make_fingerprint(
-            "m3", "email-honeypot", f"{msg.get('from_address', '')}:{msg.get('subject', '')}"
+        message_key = msg.get("message_id") or _make_fingerprint(
+            "m3", "email-honeypot-message", f"{msg.get('from_address', '')}:{msg.get('subject', '')}"
         )
+        identifier = f"{matched_honeypots[0]}:{message_key}"
         findings.append(
             {
                 "module": "m3",
@@ -1605,13 +1654,22 @@ async def _scan_m3_honeypot(rule: dict) -> list:
                 "threat_score": score,
                 "signals": signals,
                 "evidence": {
+                    "message_id": msg.get("message_id"),
                     "from": msg.get("from_address"),
                     "reply_to": msg.get("reply_to"),
-                    "to": sorted(recipients),
+                    "to": sorted({r.lower() for r in (msg.get("to_addresses") or []) if r}),
+                    "cc": sorted({r.lower() for r in (msg.get("cc_addresses") or []) if r}),
+                    "matched_honeypot_addresses": matched_honeypots,
                     "subject": msg.get("subject"),
                 },
             }
         )
+
+    if matched_imap_nums:
+        try:
+            await asyncio.to_thread(_mark_honeypot_messages_seen, host, port, user, password, matched_imap_nums)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[IMP M3] Failed to mark matched honeypot messages seen for '%s': %s", rule["brand_name"], exc)
 
     return findings
 

@@ -639,11 +639,13 @@ class TestScanM3Honeypot:
     async def test_honeypot_mock_messages_returns_finding(self):
         from app.services.impersonation.scanner import _scan_m3_honeypot
         mock_message = {
+            "imap_num": "1",
             "message_id": "<spam1@random-marketer.example>",
             "from_display": "Random Marketer",
             "from_address": "sales@random-marketer.example",
             "reply_to": "",
             "to_addresses": ["ceo-honeypot@testbrand.com"],
+            "cc_addresses": [],
             "subject": "Great deals for you",
             "body": "Check out our catalog.",
         }
@@ -666,17 +668,20 @@ class TestScanM3Honeypot:
         assert len(result) == 1
         assert result[0]["platform"] == "email"
         assert result[0]["finding_type"] == "honeypot_suspicious_email"
-        assert result[0]["target_identifier"] == "<spam1@random-marketer.example>"
+        assert result[0]["target_identifier"] == "ceo-honeypot@testbrand.com:<spam1@random-marketer.example>"
+        assert result[0]["evidence"]["message_id"] == "<spam1@random-marketer.example>"
 
     @pytest.mark.asyncio
     async def test_honeypot_executive_impersonation_mock_response(self):
         from app.services.impersonation.scanner import _scan_m3_honeypot
         mock_message = {
+            "imap_num": "1",
             "message_id": "<fraud1@evil-lookalike.example>",
             "from_display": "Jordan CEO",
             "from_address": "jordan@evil-lookalike.example",
             "reply_to": "jordan.reply@another-domain.example",
             "to_addresses": ["ceo-honeypot@testbrand.com"],
+            "cc_addresses": [],
             "subject": "URGENT wire transfer needed",
             "body": "Please wire the funds immediately, this is confidential.",
         }
@@ -712,6 +717,7 @@ class TestScanM3Honeypot:
             "from_address": "someone@random.example",
             "reply_to": "",
             "to_addresses": ["not-a-honeypot@testbrand.com"],
+            "cc_addresses": [],
             "subject": "Hello",
             "body": "Not addressed to a honeypot alias.",
         }
@@ -724,13 +730,66 @@ class TestScanM3Honeypot:
             },
             clear=False,
         ):
-            with patch("asyncio.to_thread", new=AsyncMock(return_value=[mock_message])):
+            with patch("asyncio.to_thread", new=AsyncMock(return_value=[mock_message])) as mock_to_thread:
                 result = await _scan_m3_honeypot({
                     "brand_name": "TestBrand",
                     "official_domains": ["testbrand.com"],
                     "executive_names": [],
                 })
         assert result == []
+        assert mock_to_thread.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_honeypot_cc_recipient_matches_and_fingerprint_scopes_by_address(self):
+        from app.services.impersonation.scanner import _scan_m3_honeypot
+
+        mock_messages = [
+            {
+                "imap_num": "1",
+                "message_id": "<shared123@evil.example>",
+                "from_display": "Encoded CEO",
+                "from_address": "ceo@evil.example",
+                "reply_to": "",
+                "to_addresses": ["someoneelse@testbrand.com"],
+                "cc_addresses": ["finance-honeypot@testbrand.com"],
+                "subject": "Wire transfer",
+                "body": "Please pay this invoice.",
+            },
+            {
+                "imap_num": "2",
+                "message_id": "<shared123@evil.example>",
+                "from_display": "Encoded CEO",
+                "from_address": "ceo@evil.example",
+                "reply_to": "",
+                "to_addresses": ["ceo-honeypot@testbrand.com"],
+                "cc_addresses": [],
+                "subject": "Wire transfer",
+                "body": "Please pay this invoice.",
+            },
+        ]
+        with patch.dict(
+            "os.environ",
+            {
+                "HONEYPOT_IMAP_HOST": "mail.example.com",
+                "HONEYPOT_IMAP_USER": "honeypot@example.com",
+                "HONEYPOT_IMAP_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            with patch("asyncio.to_thread", new=AsyncMock(side_effect=[mock_messages, None])) as mock_to_thread:
+                result = await _scan_m3_honeypot({
+                    "brand_name": "TestBrand",
+                    "official_domains": ["testbrand.com"],
+                    "executive_names": [],
+                })
+        assert len(result) == 2
+        identifiers = {finding["target_identifier"] for finding in result}
+        assert identifiers == {
+            "ceo-honeypot@testbrand.com:<shared123@evil.example>",
+            "finance-honeypot@testbrand.com:<shared123@evil.example>",
+        }
+        assert result[0]["evidence"]["matched_honeypot_addresses"]
+        assert mock_to_thread.await_count == 2
 
     @pytest.mark.asyncio
     async def test_honeypot_imap_connection_failure_returns_empty(self):
@@ -754,12 +813,14 @@ class TestScanM3Honeypot:
 
     def test_fetch_honeypot_messages_parses_real_imap_response(self):
         import email.message
+        from email.header import Header
         from app.services.impersonation.scanner import _fetch_honeypot_messages
 
         msg = email.message.EmailMessage()
-        msg["From"] = "Jordan CEO <jordan@evil-lookalike.example>"
+        msg["From"] = f"{Header('Jörg CEO', 'utf-8').encode()} <jordan@evil-lookalike.example>"
         msg["To"] = "ceo-honeypot@testbrand.com"
-        msg["Subject"] = "Urgent wire transfer"
+        msg["Cc"] = "finance-honeypot@testbrand.com"
+        msg["Subject"] = Header("Urgent wire transfer for Jörg", "utf-8").encode()
         msg["Message-ID"] = "<abc123@evil-lookalike.example>"
         msg.set_content("Please wire funds immediately.")
         raw = msg.as_bytes()
@@ -777,10 +838,14 @@ class TestScanM3Honeypot:
 
         assert len(result) == 1
         assert result[0]["from_address"] == "jordan@evil-lookalike.example"
+        assert result[0]["from_display"] == "Jörg CEO"
+        assert result[0]["imap_num"] == "1"
         assert result[0]["to_addresses"] == ["ceo-honeypot@testbrand.com"]
+        assert result[0]["cc_addresses"] == ["finance-honeypot@testbrand.com"]
         assert result[0]["message_id"] == "<abc123@evil-lookalike.example>"
+        assert result[0]["subject"] == "Urgent wire transfer for Jörg"
         assert "wire funds" in result[0]["body"].lower()
-        mock_conn.store.assert_called_once()
+        mock_conn.store.assert_not_called()
 
 
 # ── Alert Engine ──────────────────────────────────────────────────────────────
