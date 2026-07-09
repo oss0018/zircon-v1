@@ -242,6 +242,144 @@ class TestScanM5Hibp:
         assert result == []
 
 
+# ── M6 Meta Ad Library scanner ─────────────────────────────────────────────────
+
+class TestScanM6Ads:
+    def test_m6_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m6_ads" in source
+
+    def test_m6_uses_meta_ad_library(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "ads_archive" in source
+        assert "META_AD_LIBRARY_ACCESS_TOKEN" in source
+
+    def test_m6_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "ad_fraud_unauthorized_ad" in source
+
+    @pytest.mark.asyncio
+    async def test_m6_no_access_token_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": ""}, clear=False):
+            result = await _scan_m6_ads({
+                "brand_name": "Acme",
+                "official_domains": ["acme.com"],
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m6_no_brand_name_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": "test-token"}, clear=False):
+            result = await _scan_m6_ads({"brand_name": "", "official_domains": ["acme.com"]})
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m6_unauthorized_ad_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "123",
+                    "page_id": "999",
+                    "page_name": "Totally Not A Scam",
+                    "ad_creative_bodies": ["Buy fake Acme products cheap!"],
+                    "ad_creative_link_captions": ["scam-site.example"],
+                    "ad_snapshot_url": "https://www.facebook.com/ads/library/?id=123",
+                }
+            ]
+        }
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": "test-token"}, clear=False):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _scan_m6_ads({
+                    "brand_name": "Acme",
+                    "official_domains": ["acme.com"],
+                })
+        assert len(result) == 1
+        finding = result[0]
+        assert finding["module"] == "m6"
+        assert finding["platform"] == "meta_ad_library"
+        assert finding["finding_type"] == "ad_fraud_unauthorized_ad"
+        assert finding["target_identifier"] == "Totally Not A Scam"
+
+    @pytest.mark.asyncio
+    async def test_m6_ad_linked_to_official_domain_is_excluded(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "123",
+                    "page_id": "999",
+                    "page_name": "Acme Official",
+                    "ad_creative_bodies": ["Check out our summer sale!"],
+                    "ad_creative_link_captions": ["acme.com"],
+                    "ad_snapshot_url": "https://www.facebook.com/ads/library/?id=123",
+                }
+            ]
+        }
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": "test-token"}, clear=False):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _scan_m6_ads({
+                    "brand_name": "Acme",
+                    "official_domains": ["acme.com"],
+                })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m6_non_200_status_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.text = '{"error": {"message": "Invalid OAuth access token"}}'
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": "bad-token"}, clear=False):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _scan_m6_ads({
+                    "brand_name": "Acme",
+                    "official_domains": ["acme.com"],
+                })
+        assert result == []
+        mock_response.json.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_m6_no_ads_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"data": []}
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": "test-token"}, clear=False):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _scan_m6_ads({
+                    "brand_name": "Acme",
+                    "official_domains": ["acme.com"],
+                })
+        assert result == []
+
+
 # ── M1 Telegram scanner ───────────────────────────────────────────────────────
 
 class TestScanM1Telegram:
@@ -1007,6 +1145,11 @@ class TestScannerFunctionSignatures:
         assert "HIBPClient" in source
         assert "HIBP_API_KEY" in source
 
+    def test_m6_ads_implemented(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "ads_archive" in source
+        assert "META_AD_LIBRARY_ACCESS_TOKEN" in source
+
     def test_stubs_still_present_for_phase2b(self):
         """Phase 2b stubs must remain for deferred modules."""
         source = SCANNER.read_text(encoding="utf-8")
@@ -1015,7 +1158,6 @@ class TestScannerFunctionSignatures:
         assert "async def _scan_m1_youtube" in source
         assert "async def _scan_m2_appstore" in source
         assert "async def _scan_m5_darkweb" in source
-        assert "async def _scan_m6_ads" in source
 
     def test_env_example_updated(self):
         env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
@@ -1023,6 +1165,7 @@ class TestScannerFunctionSignatures:
         assert "APIFY_API_KEY" in env_example
         assert "FACEBOOK_APIFY_ACTOR" in env_example
         assert "VK_SERVICE_TOKEN" in env_example
+        assert "META_AD_LIBRARY_ACCESS_TOKEN" in env_example
         assert "PAGERDUTY_API_KEY" in env_example
         assert "PAGERDUTY_SERVICE_ID" in env_example
 

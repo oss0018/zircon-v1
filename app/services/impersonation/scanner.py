@@ -29,6 +29,13 @@ _MIN_TELEGRAM_SESSION_LENGTH = 20
 # Maximum number of executive names converted to search terms per platform scan.
 _MAX_EXEC_SEARCH_TERMS = 2
 
+# Meta Graph API base used for the public Ad Library (ads_archive) endpoint.
+_META_AD_LIBRARY_BASE_URL = "https://graph.facebook.com/v21.0"
+
+# Maximum number of ads requested per Ad Library search — keeps responses
+# small and stays well within Meta's per-app rate limits (200 calls/hour).
+_MAX_AD_LIBRARY_RESULTS = 25
+
 
 def _utcnow():
     return datetime.now(timezone.utc)
@@ -586,12 +593,138 @@ async def _scan_m5_darkweb(rule: dict) -> list:
 
 
 async def _scan_m6_ads(rule: dict) -> list:
-    """M6: Ad Fraud Detection — stub."""
-    logger.info(
-        "[IMP M6] Ad fraud scan stub for '%s'. Configure Google Ads Transparency integration to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    """M6: Ad Fraud Detection — Meta Ad Library search.
+
+    Searches Meta's public Ad Library (Facebook + Instagram ads) for ads
+    referencing the brand name, flagging ads run by Pages whose creative
+    link doesn't reference one of the brand's official domains. Unauthorized
+    ads using a brand's name are a common vector for scam/counterfeit
+    product ads and phishing ads.
+
+    Google's Ads Transparency Center (this stub's original target) has no
+    general-purpose public API for arbitrary advertiser/keyword search -
+    only a political-ads-only BigQuery dataset - so it can't support this
+    use case. Meta's Ad Library API does support genuine keyword search and
+    is the dominant ad-fraud vector for brand impersonation in practice.
+
+    Requires ``META_AD_LIBRARY_ACCESS_TOKEN`` - a Graph API access token
+    from an app that has completed Meta's identity confirmation and App
+    Review for the ``ads_read`` permission (see
+    https://developers.facebook.com/docs/graph-api/reference/ads_archive/).
+    There is no free/unauthenticated path to this data.
+
+    Note: Meta's search matches ad creative text broadly, so results may
+    include legitimate resellers, affiliates, or unrelated mentions, not
+    just fraud. Findings should be treated as candidates for human review,
+    not confirmed fraud.
+
+    Required env vars: META_AD_LIBRARY_ACCESS_TOKEN
+    Output type: ``ad_fraud_unauthorized_ad``
+    """
+    access_token = os.getenv("META_AD_LIBRARY_ACCESS_TOKEN", "").strip()
+    if not access_token:
+        logger.info(
+            "[IMP M6] META_AD_LIBRARY_ACCESS_TOKEN not configured; ad fraud scan skipped for '%s'.",
+            rule["brand_name"],
+        )
+        return []
+
+    brand = (rule.get("brand_name") or "").strip()
+    if not brand:
+        return []
+
+    official_domains = {
+        str(d).strip().lower() for d in (rule.get("official_domains") or []) if str(d).strip()
+    }
+
+    params = {
+        "access_token": access_token,
+        "search_terms": brand,
+        "ad_reached_countries": json.dumps(["ALL"]),
+        "ad_type": "ALL",
+        "limit": _MAX_AD_LIBRARY_RESULTS,
+        "fields": (
+            "id,ad_creative_bodies,ad_creative_link_captions,"
+            "ad_creative_link_titles,ad_snapshot_url,page_id,page_name"
+        ),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{_META_AD_LIBRARY_BASE_URL}/ads_archive", params=params)
+            if resp.status_code != 200:
+                logger.warning(
+                    "[IMP M6] Meta Ad Library returned %s for '%s': %s",
+                    resp.status_code, brand, resp.text[:300],
+                )
+                return []
+            data = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M6] Meta Ad Library error for '%s': %s", brand, exc)
+        return []
+
+    if not isinstance(data, dict):
+        logger.info("[IMP M6] Meta Ad Library returned an unexpected payload for '%s'.", brand)
+        return []
+    if data.get("error"):
+        logger.info("[IMP M6] Meta Ad Library API error for '%s': %s", brand, data["error"])
+        return []
+
+    ads = data.get("data") or []
+    if not isinstance(ads, list):
+        return []
+
+    findings: list[dict] = []
+    seen_pages: set[str] = set()
+
+    for ad in ads:
+        if not isinstance(ad, dict):
+            continue
+        page_id = str(ad.get("page_id") or "").strip()
+        page_name = str(ad.get("page_name") or "").strip()
+        if not page_name or (page_id and page_id in seen_pages):
+            continue
+
+        link_captions = [
+            str(c).strip().lower() for c in (ad.get("ad_creative_link_captions") or []) if str(c).strip()
+        ]
+        if official_domains and link_captions and any(
+            domain in caption for domain in official_domains for caption in link_captions
+        ):
+            # The ad's own link caption references one of the brand's official
+            # domains — treat this as the brand's own legitimate ad, not fraud.
+            continue
+
+        if page_id:
+            seen_pages.add(page_id)
+
+        creative_snippets = [
+            str(b).strip()[:200] for b in (ad.get("ad_creative_bodies") or []) if str(b).strip()
+        ][:2]
+
+        findings.append(
+            {
+                "module": "m6",
+                "platform": "meta_ad_library",
+                "finding_type": "ad_fraud_unauthorized_ad",
+                "target_url": ad.get("ad_snapshot_url") or "",
+                "target_identifier": page_name,
+                "display_name": page_name,
+                "description": (
+                    f"Ad referencing '{brand}' run by Page '{page_name}', not linked to a "
+                    f"known official domain"
+                    + (f": {' | '.join(creative_snippets)}" if creative_snippets else ".")
+                ),
+                "threat_score": 65,
+                "signals": (
+                    ([f"meta_page_id:{page_id}"] if page_id else [])
+                    + ([f"link_caption:{c}" for c in link_captions[:2]] if link_captions else [])
+                ),
+                "evidence": {"ad": ad},
+            }
+        )
+
+    return findings
 
 
 async def _scan_m7_vip(rule: dict) -> list:
