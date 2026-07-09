@@ -166,10 +166,8 @@ class InfraOrchestrator:
                         pass
 
                 if endpoints or unique_ips:
-                    from app.services.infrastructure_intelligence.cert_intelligence import (
-                        CertIntelligenceModule,
-                    )
-                    cert_module = CertIntelligenceModule(keys)
+                    cert_cls = _import_class(_MODULE_CLASSES["cert"])
+                    cert_module = cert_cls(keys)
                     try:
                         cert_findings: list[dict] = []
                         if endpoints:
