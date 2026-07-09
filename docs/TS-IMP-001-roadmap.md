@@ -271,7 +271,7 @@ There are **no blockers** preventing the system from running. All Phase 2 additi
 | M2 | VirusTotal | `VIRUSTOTAL_API_KEY` | ✅ Integrations |
 | M2 | Apple App Store | *(itunes-search or App Store Connect)* | ❌ Phase 2 stub |
 | M3 | checkdmarc (DNS) | *(none)* | ✅ live |
-| M3 | Honeypot SMTP | `SMTP_SERVER`, `SMTP_USER`, `SMTP_PASS` | ❌ Phase 2 stub |
+| M3 | Honeypot Mailbox (IMAP) | `HONEYPOT_IMAP_HOST`, `HONEYPOT_IMAP_USER`, `HONEYPOT_IMAP_PASSWORD` | ✅ live |
 | M3 | Inbound Headers | `MSGRAPH_CLIENT_ID`, `MSGRAPH_CLIENT_SECRET` | ❌ Phase 2 stub |
 | M5 | HIBP | `HIBP_API_KEY` | ✅ Integrations |
 | M5 | IntelX | `INTELX_API_KEY` | ✅ Integrations |

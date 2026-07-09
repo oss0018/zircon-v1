@@ -1373,24 +1373,247 @@ async def _scan_m2_google_play(rule: dict) -> list:
     return findings
 
 
+# Heuristic BEC (Business Email Compromise) indicators used by the honeypot
+# scanner to score inbound messages. No live ML classifier is available, so
+# scoring is keyword/pattern-based, matching this file's convention elsewhere
+# (rapidfuzz similarity, substring matches) rather than a trained model.
+_BEC_URGENCY_KEYWORDS = (
+    "urgent", "asap", "immediately", "confidential", "wire transfer",
+    "wire the funds", "gift card", "gift cards", "payment", "invoice",
+    "action required", "time sensitive", "do not discuss", "keep this quiet",
+)
+_BEC_EXEC_TITLE_KEYWORDS = (
+    "ceo", "cfo", "coo", "president", "chairman",
+    "chief executive", "chief financial",
+)
+
+
+def _extract_email_body(msg) -> str:
+    """Best-effort plain-text body extraction from a parsed email.message.Message."""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain" and not part.get_filename():
+                try:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        return payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+                except Exception:  # noqa: BLE001
+                    continue
+        return ""
+    try:
+        payload = msg.get_payload(decode=True)
+        return payload.decode(msg.get_content_charset() or "utf-8", errors="replace") if payload else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _fetch_honeypot_messages(host: str, port: int, user: str, password: str) -> list:
+    """Connect to the honeypot IMAP mailbox and return parsed unseen messages.
+
+    Blocking (uses ``imaplib``); callers must run this via ``asyncio.to_thread``.
+    Marks fetched messages ``\\Seen`` so they are not re-processed on the next
+    scan. This is a best-effort optimisation only — the caller's fingerprint-
+    based dedup (keyed on Message-ID) is the authoritative safety net if
+    marking fails or another process also reads the mailbox.
+    """
+    import email
+    import imaplib
+    from email.utils import getaddresses, parseaddr
+
+    parsed: list[dict] = []
+    conn = imaplib.IMAP4_SSL(host, port)
+    try:
+        conn.login(user, password)
+        conn.select("INBOX")
+        status, data = conn.search(None, "UNSEEN")
+        if status != "OK" or not data or not data[0]:
+            return parsed
+        for num in data[0].split():
+            status, msg_data = conn.fetch(num, "(RFC822)")
+            if status != "OK" or not msg_data or not msg_data[0]:
+                continue
+            raw = msg_data[0][1]
+            parsed_msg = email.message_from_bytes(raw)
+            from_display, from_address = parseaddr(parsed_msg.get("From", ""))
+            _, reply_to_address = parseaddr(parsed_msg.get("Reply-To", ""))
+            to_addresses = [addr for _, addr in getaddresses([parsed_msg.get("To", "")]) if addr]
+            parsed.append(
+                {
+                    "message_id": (parsed_msg.get("Message-ID") or "").strip(),
+                    "from_display": from_display or "",
+                    "from_address": (from_address or "").lower(),
+                    "reply_to": (reply_to_address or "").lower(),
+                    "to_addresses": to_addresses,
+                    "subject": parsed_msg.get("Subject", "") or "",
+                    "body": _extract_email_body(parsed_msg),
+                }
+            )
+            try:
+                conn.store(num, "+FLAGS", "\\Seen")
+            except Exception:  # noqa: BLE001
+                pass
+    finally:
+        try:
+            conn.logout()
+        except Exception:  # noqa: BLE001
+            pass
+    return parsed
+
+
+def _score_bec_message(msg: dict, official_domains: list, exec_first_names: set) -> tuple:
+    """Heuristic BEC scoring for a message that landed in the honeypot mailbox.
+
+    Any message reaching a honeypot address is inherently suspicious (the
+    address is never legitimately distributed), so the baseline score is
+    non-zero; additional signals raise confidence this is a targeted
+    CEO-fraud / BEC attempt rather than generic spam or misdirected mail.
+    """
+    score = 20
+    signals = ["honeypot_hit"]
+
+    from_display = (msg.get("from_display") or "").lower()
+    from_address = msg.get("from_address") or ""
+    from_domain = from_address.rsplit("@", 1)[-1] if "@" in from_address else ""
+    subject = (msg.get("subject") or "").lower()
+    body = (msg.get("body") or "").lower()
+    reply_to = msg.get("reply_to") or ""
+    official_domains_lower = {d.lower() for d in official_domains}
+
+    exec_name_hit = any(name and name in from_display for name in exec_first_names)
+    title_hit = any(kw in from_display or kw in subject for kw in _BEC_EXEC_TITLE_KEYWORDS)
+    if (exec_name_hit or title_hit) and from_domain not in official_domains_lower:
+        score += 35
+        signals.append("executive_spoof")
+
+    if reply_to and reply_to != from_address:
+        reply_domain = reply_to.rsplit("@", 1)[-1] if "@" in reply_to else ""
+        if reply_domain and reply_domain != from_domain:
+            score += 20
+            signals.append("reply_to_mismatch")
+
+    if from_domain and from_domain not in official_domains_lower:
+        try:
+            from rapidfuzz import fuzz as _fuzz  # type: ignore
+            best_ratio = max((_fuzz.ratio(from_domain, d) for d in official_domains_lower), default=0)
+        except ImportError:
+            best_ratio = 0
+        if best_ratio >= 75:
+            score += 20
+            signals.append("lookalike_sender_domain")
+
+    keyword_hits = [kw for kw in _BEC_URGENCY_KEYWORDS if kw in subject or kw in body]
+    if keyword_hits:
+        score += min(15 * len(keyword_hits), 30)
+        signals.append("urgency_keywords")
+
+    return min(score, 100), signals
+
+
 async def _scan_m3_honeypot(rule: dict) -> list:
-    """M3 Phase 2: MX Honeypot for CEO Fraud Detection — stub.
+    """M3 Phase 2: MX Honeypot mailbox scan for CEO Fraud / BEC detection.
 
-    Sets up catch-all email addresses to detect incoming CEO fraud emails.
-    Pattern: ceo-honeypot@{protected_domain}, finance-honeypot@{protected_domain}.
-    Uses ML-based BEC detection on incoming messages.
+    Polls a shared catch-all honeypot mailbox via IMAP for unseen messages
+    addressed to this rule's honeypot aliases (``{alias}@{domain}`` for each
+    alias in HONEYPOT_MAILBOXES combined with each of the rule's
+    official_domains, e.g. ceo-honeypot@{domain}, finance-honeypot@{domain}).
 
-    Integration: SMTP server access + Email security service.
-    Required env vars: HONEYPOT_SMTP_HOST, HONEYPOT_SMTP_PORT, HONEYPOT_MAILBOXES
+    Reading received mail requires IMAP (or POP3), not SMTP — SMTP is
+    send-only. This deliberately uses HONEYPOT_IMAP_* env vars rather than the
+    originally-stubbed HONEYPOT_SMTP_* names, both for technical accuracy and
+    to avoid confusion with the unrelated ZIRCON_SMTP_* settings already used
+    for outbound alert notifications (see app/services/notifications.py).
+
+    Each message is scored with heuristic BEC signals (executive/title-name
+    spoofing combined with a non-official sending domain, Reply-To domain
+    mismatch, lookalike sending domain via rapidfuzz, urgency/financial
+    keywords) since no live ML classifier is available; any message that
+    reaches the honeypot still produces at least a low-confidence finding,
+    because the honeypot address is by definition never legitimately given
+    out to real correspondents.
+
+    Integration: any IMAP-accessible mailbox (a dedicated catch-all inbox, or
+    a Google Workspace/Microsoft 365 shared mailbox) whose MX record accepts
+    mail for the configured honeypot aliases.
+    Required env vars: HONEYPOT_IMAP_HOST, HONEYPOT_IMAP_USER, HONEYPOT_IMAP_PASSWORD
+    Optional env vars: HONEYPOT_IMAP_PORT (default 993),
+    HONEYPOT_MAILBOXES (default "ceo-honeypot,finance-honeypot")
+    Output types: ``honeypot_bec_attempt``, ``honeypot_suspicious_email``
     """
     domains = [d for d in (rule.get("official_domains") or []) if d]
     if not domains:
         return []
-    logger.info(
-        "[IMP M3] MX honeypot scan stub for '%s'. Configure SMTP/honeypot integration to enable CEO fraud detection.",
-        rule["brand_name"],
-    )
-    return []
+
+    host = os.getenv("HONEYPOT_IMAP_HOST", "").strip()
+    user = os.getenv("HONEYPOT_IMAP_USER", "").strip()
+    password = os.getenv("HONEYPOT_IMAP_PASSWORD", "").strip()
+    if not host or not user or not password:
+        logger.info(
+            "[IMP M3] Honeypot IMAP not configured; scan skipped for '%s'. Set "
+            "HONEYPOT_IMAP_HOST, HONEYPOT_IMAP_USER, HONEYPOT_IMAP_PASSWORD to enable.",
+            rule["brand_name"],
+        )
+        return []
+
+    try:
+        port = int(os.getenv("HONEYPOT_IMAP_PORT", "993").strip() or "993")
+    except ValueError:
+        port = 993
+
+    aliases = [
+        a.strip().lower()
+        for a in os.getenv("HONEYPOT_MAILBOXES", "ceo-honeypot,finance-honeypot").split(",")
+        if a.strip()
+    ]
+    if not aliases:
+        return []
+
+    honeypot_addresses = {f"{alias}@{domain}".lower() for alias in aliases for domain in domains}
+
+    try:
+        messages = await asyncio.to_thread(_fetch_honeypot_messages, host, port, user, password)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M3] Honeypot IMAP connection failed for '%s': %s", rule["brand_name"], exc)
+        return []
+
+    exec_first_names = {
+        n.split()[0].lower() for n in (rule.get("executive_names") or []) if n and n.split()
+    }
+
+    findings: list[dict] = []
+    for msg in messages:
+        recipients = {r.lower() for r in (msg.get("to_addresses") or [])}
+        if not (recipients & honeypot_addresses):
+            continue  # not addressed to one of this rule's honeypot aliases
+
+        score, signals = _score_bec_message(msg, domains, exec_first_names)
+        finding_type = "honeypot_bec_attempt" if "executive_spoof" in signals else "honeypot_suspicious_email"
+        identifier = msg.get("message_id") or _make_fingerprint(
+            "m3", "email-honeypot", f"{msg.get('from_address', '')}:{msg.get('subject', '')}"
+        )
+        findings.append(
+            {
+                "module": "m3",
+                "platform": "email",
+                "finding_type": finding_type,
+                "target_url": "",
+                "target_identifier": identifier,
+                "display_name": msg.get("from_display") or msg.get("from_address", ""),
+                "description": (
+                    f"Inbound message to honeypot mailbox impersonating '{rule['brand_name']}' "
+                    f"from '{msg.get('from_address', 'unknown')}' (subject: '{msg.get('subject', '')}')."
+                ),
+                "threat_score": score,
+                "signals": signals,
+                "evidence": {
+                    "from": msg.get("from_address"),
+                    "reply_to": msg.get("reply_to"),
+                    "to": sorted(recipients),
+                    "subject": msg.get("subject"),
+                },
+            }
+        )
+
+    return findings
 
 
 async def _scan_m3_inbound_headers(rule: dict) -> list:

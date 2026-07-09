@@ -589,6 +589,200 @@ class TestScanM2GooglePlay:
         assert "READ_CONTACTS" in source or "SUSPICIOUS" in source or "suspicious_permissions" in source
 
 
+# ── M3 Honeypot Mailbox ───────────────────────────────────────────────────────
+
+class TestScanM3Honeypot:
+    def test_honeypot_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m3_honeypot" in source
+
+    def test_honeypot_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "honeypot_bec_attempt" in source
+        assert "honeypot_suspicious_email" in source
+
+    @pytest.mark.asyncio
+    async def test_honeypot_not_configured_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m3_honeypot
+        with patch.dict(
+            "os.environ",
+            {"HONEYPOT_IMAP_HOST": "", "HONEYPOT_IMAP_USER": "", "HONEYPOT_IMAP_PASSWORD": ""},
+            clear=False,
+        ):
+            result = await _scan_m3_honeypot({
+                "brand_name": "TestBrand",
+                "official_domains": ["testbrand.com"],
+                "executive_names": [],
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_honeypot_missing_password_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m3_honeypot
+        with patch.dict(
+            "os.environ",
+            {
+                "HONEYPOT_IMAP_HOST": "mail.example.com",
+                "HONEYPOT_IMAP_USER": "honeypot@example.com",
+                "HONEYPOT_IMAP_PASSWORD": "",
+            },
+            clear=False,
+        ):
+            result = await _scan_m3_honeypot({
+                "brand_name": "TestBrand",
+                "official_domains": ["testbrand.com"],
+                "executive_names": [],
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_honeypot_mock_messages_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m3_honeypot
+        mock_message = {
+            "message_id": "<spam1@random-marketer.example>",
+            "from_display": "Random Marketer",
+            "from_address": "sales@random-marketer.example",
+            "reply_to": "",
+            "to_addresses": ["ceo-honeypot@testbrand.com"],
+            "subject": "Great deals for you",
+            "body": "Check out our catalog.",
+        }
+        with patch.dict(
+            "os.environ",
+            {
+                "HONEYPOT_IMAP_HOST": "mail.example.com",
+                "HONEYPOT_IMAP_USER": "honeypot@example.com",
+                "HONEYPOT_IMAP_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            with patch("asyncio.to_thread", new=AsyncMock(return_value=[mock_message])):
+                result = await _scan_m3_honeypot({
+                    "brand_name": "TestBrand",
+                    "official_domains": ["testbrand.com"],
+                    "executive_names": [],
+                })
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["platform"] == "email"
+        assert result[0]["finding_type"] == "honeypot_suspicious_email"
+        assert result[0]["target_identifier"] == "<spam1@random-marketer.example>"
+
+    @pytest.mark.asyncio
+    async def test_honeypot_executive_impersonation_mock_response(self):
+        from app.services.impersonation.scanner import _scan_m3_honeypot
+        mock_message = {
+            "message_id": "<fraud1@evil-lookalike.example>",
+            "from_display": "Jordan CEO",
+            "from_address": "jordan@evil-lookalike.example",
+            "reply_to": "jordan.reply@another-domain.example",
+            "to_addresses": ["ceo-honeypot@testbrand.com"],
+            "subject": "URGENT wire transfer needed",
+            "body": "Please wire the funds immediately, this is confidential.",
+        }
+        with patch.dict(
+            "os.environ",
+            {
+                "HONEYPOT_IMAP_HOST": "mail.example.com",
+                "HONEYPOT_IMAP_USER": "honeypot@example.com",
+                "HONEYPOT_IMAP_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            with patch("asyncio.to_thread", new=AsyncMock(return_value=[mock_message])):
+                result = await _scan_m3_honeypot({
+                    "brand_name": "TestBrand",
+                    "official_domains": ["testbrand.com"],
+                    "executive_names": ["Jordan Smith"],
+                })
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["finding_type"] == "honeypot_bec_attempt"
+        assert "executive_spoof" in result[0]["signals"]
+        assert "reply_to_mismatch" in result[0]["signals"]
+        assert "urgency_keywords" in result[0]["signals"]
+        assert result[0]["threat_score"] > 50
+
+    @pytest.mark.asyncio
+    async def test_honeypot_message_not_addressed_to_alias_excluded(self):
+        from app.services.impersonation.scanner import _scan_m3_honeypot
+        mock_message = {
+            "message_id": "<other1@random.example>",
+            "from_display": "Someone",
+            "from_address": "someone@random.example",
+            "reply_to": "",
+            "to_addresses": ["not-a-honeypot@testbrand.com"],
+            "subject": "Hello",
+            "body": "Not addressed to a honeypot alias.",
+        }
+        with patch.dict(
+            "os.environ",
+            {
+                "HONEYPOT_IMAP_HOST": "mail.example.com",
+                "HONEYPOT_IMAP_USER": "honeypot@example.com",
+                "HONEYPOT_IMAP_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            with patch("asyncio.to_thread", new=AsyncMock(return_value=[mock_message])):
+                result = await _scan_m3_honeypot({
+                    "brand_name": "TestBrand",
+                    "official_domains": ["testbrand.com"],
+                    "executive_names": [],
+                })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_honeypot_imap_connection_failure_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m3_honeypot
+        with patch.dict(
+            "os.environ",
+            {
+                "HONEYPOT_IMAP_HOST": "mail.example.com",
+                "HONEYPOT_IMAP_USER": "honeypot@example.com",
+                "HONEYPOT_IMAP_PASSWORD": "secret",
+            },
+            clear=False,
+        ):
+            with patch("asyncio.to_thread", new=AsyncMock(side_effect=OSError("connection refused"))):
+                result = await _scan_m3_honeypot({
+                    "brand_name": "TestBrand",
+                    "official_domains": ["testbrand.com"],
+                    "executive_names": [],
+                })
+        assert result == []
+
+    def test_fetch_honeypot_messages_parses_real_imap_response(self):
+        import email.message
+        from app.services.impersonation.scanner import _fetch_honeypot_messages
+
+        msg = email.message.EmailMessage()
+        msg["From"] = "Jordan CEO <jordan@evil-lookalike.example>"
+        msg["To"] = "ceo-honeypot@testbrand.com"
+        msg["Subject"] = "Urgent wire transfer"
+        msg["Message-ID"] = "<abc123@evil-lookalike.example>"
+        msg.set_content("Please wire funds immediately.")
+        raw = msg.as_bytes()
+
+        mock_conn = MagicMock()
+        mock_conn.login.return_value = ("OK", [b"Logged in"])
+        mock_conn.select.return_value = ("OK", [b"1"])
+        mock_conn.search.return_value = ("OK", [b"1"])
+        mock_conn.fetch.return_value = ("OK", [(b"1 (RFC822 {123}", raw)])
+        mock_conn.store.return_value = ("OK", [b"1"])
+        mock_conn.logout.return_value = ("BYE", [b"Logging out"])
+
+        with patch("imaplib.IMAP4_SSL", return_value=mock_conn):
+            result = _fetch_honeypot_messages("mail.example.com", 993, "user", "pass")
+
+        assert len(result) == 1
+        assert result[0]["from_address"] == "jordan@evil-lookalike.example"
+        assert result[0]["to_addresses"] == ["ceo-honeypot@testbrand.com"]
+        assert result[0]["message_id"] == "<abc123@evil-lookalike.example>"
+        assert "wire funds" in result[0]["body"].lower()
+        mock_conn.store.assert_called_once()
+
+
 # ── Alert Engine ──────────────────────────────────────────────────────────────
 
 class TestAlertEngine:
@@ -1007,6 +1201,11 @@ class TestScannerFunctionSignatures:
         assert "HIBPClient" in source
         assert "HIBP_API_KEY" in source
 
+    def test_m3_honeypot_implemented(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "HONEYPOT_IMAP_HOST" in source
+        assert "honeypot_bec_attempt" in source
+
     def test_stubs_still_present_for_phase2b(self):
         """Phase 2b stubs must remain for deferred modules."""
         source = SCANNER.read_text(encoding="utf-8")
@@ -1023,6 +1222,7 @@ class TestScannerFunctionSignatures:
         assert "APIFY_API_KEY" in env_example
         assert "FACEBOOK_APIFY_ACTOR" in env_example
         assert "VK_SERVICE_TOKEN" in env_example
+        assert "HONEYPOT_IMAP_HOST" in env_example
         assert "PAGERDUTY_API_KEY" in env_example
         assert "PAGERDUTY_SERVICE_ID" in env_example
 
