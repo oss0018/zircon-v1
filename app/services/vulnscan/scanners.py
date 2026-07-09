@@ -1,6 +1,7 @@
 import json
 import asyncio
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
@@ -490,7 +491,7 @@ class TestSSLScanner:
         safe_host = parsed.hostname or hostname
         scheme = parsed.scheme or "https"
         target_url, host, resolved_port = _target_parts(f"{scheme}://{safe_host}:{port}")
-        temp_path = Path(f"/tmp/testssl_{uuid.uuid4().hex}.json")
+        temp_path = Path(tempfile.gettempdir()) / f"testssl_{uuid.uuid4().hex}.json"
         findings: list[dict] = []
         testssl_bin = shutil.which("testssl.sh") or shutil.which("testssl")
         if not testssl_bin:
@@ -633,7 +634,7 @@ class NiktoScanner:
     @staticmethod
     async def scan(target: str) -> list[dict]:
         target_url, host, port = _target_parts(target)
-        temp_path = Path(f"/tmp/nikto_{uuid.uuid4().hex}.json")
+        temp_path = Path(tempfile.gettempdir()) / f"nikto_{uuid.uuid4().hex}.json"
         findings: list[dict] = []
         nikto_bin = shutil.which("nikto") or shutil.which("nikto.pl")
         if not nikto_bin:
