@@ -341,6 +341,98 @@ class TestScanM6Ads:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_m6_ad_linked_to_official_subdomain_url_is_excluded(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "123",
+                    "page_id": "999",
+                    "page_name": "Acme Official",
+                    "ad_creative_bodies": ["Check out our summer sale!"],
+                    "ad_creative_link_captions": ["https://shop.acme.com/deals?ref=meta"],
+                    "ad_snapshot_url": "https://www.facebook.com/ads/library/?id=123",
+                }
+            ]
+        }
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": "test-token"}, clear=False):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _scan_m6_ads({
+                    "brand_name": "Acme",
+                    "official_domains": ["acme.com"],
+                })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m6_deceptive_domain_containing_official_domain_is_not_excluded(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "123",
+                    "page_id": "999",
+                    "page_name": "Totally Not A Scam",
+                    "ad_creative_bodies": ["Buy fake Acme products cheap!"],
+                    "ad_creative_link_captions": ["https://acme.com.scam-site.example/login"],
+                    "ad_snapshot_url": "https://www.facebook.com/ads/library/?id=123",
+                }
+            ]
+        }
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": "test-token"}, clear=False):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _scan_m6_ads({
+                    "brand_name": "Acme",
+                    "official_domains": ["acme.com"],
+                })
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_m6_without_official_domains_uses_conditional_description(self):
+        from app.services.impersonation.scanner import _scan_m6_ads
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "data": [
+                {
+                    "id": "123",
+                    "page_id": "999",
+                    "page_name": "Totally Not A Scam",
+                    "ad_creative_bodies": ["Buy fake Acme products cheap!"],
+                    "ad_creative_link_captions": ["scam-site.example"],
+                    "ad_snapshot_url": "https://www.facebook.com/ads/library/?id=123",
+                }
+            ]
+        }
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch.dict("os.environ", {"META_AD_LIBRARY_ACCESS_TOKEN": "test-token"}, clear=False):
+            with patch("httpx.AsyncClient", return_value=mock_client):
+                result = await _scan_m6_ads({
+                    "brand_name": "Acme",
+                    "official_domains": [],
+                })
+        assert len(result) == 1
+        assert "known official domain" not in result[0]["description"]
+        assert "no official domains are configured for comparison" in result[0]["description"]
+
+    @pytest.mark.asyncio
     async def test_m6_non_200_status_returns_empty(self):
         from app.services.impersonation.scanner import _scan_m6_ads
         mock_response = MagicMock()

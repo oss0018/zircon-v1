@@ -10,6 +10,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import select
@@ -44,6 +45,24 @@ def _utcnow():
 def _make_fingerprint(module: str, platform: str, identifier: str) -> str:
     raw = f"{module}:{platform}:{identifier}"
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
+
+
+def _normalize_hostish_value(value: str) -> str:
+    raw = str(value).strip().lower()
+    if not raw:
+        return ""
+
+    parsed = urlparse(raw if "://" in raw else f"//{raw}")
+    host = (parsed.hostname or parsed.netloc or parsed.path.split("/", 1)[0]).strip().strip(".")
+    if "@" in host:
+        host = host.rsplit("@", 1)[-1]
+    if ":" in host:
+        host = host.split(":", 1)[0]
+    return host
+
+
+def _host_matches_domain(host: str, domain: str) -> bool:
+    return host == domain or host.endswith(f".{domain}")
 
 
 async def run_scan_for_rule(rule_id: int) -> dict:
@@ -634,7 +653,9 @@ async def _scan_m6_ads(rule: dict) -> list:
         return []
 
     official_domains = {
-        str(d).strip().lower() for d in (rule.get("official_domains") or []) if str(d).strip()
+        normalized_domain
+        for d in (rule.get("official_domains") or [])
+        if (normalized_domain := _normalize_hostish_value(str(d)))
     }
 
     params = {
@@ -688,8 +709,14 @@ async def _scan_m6_ads(rule: dict) -> list:
         link_captions = [
             str(c).strip().lower() for c in (ad.get("ad_creative_link_captions") or []) if str(c).strip()
         ]
-        if official_domains and link_captions and any(
-            domain in caption for domain in official_domains for caption in link_captions
+        link_caption_hosts = [
+            normalized_caption for caption in link_captions
+            if (normalized_caption := _normalize_hostish_value(caption))
+        ]
+        if official_domains and link_caption_hosts and any(
+            _host_matches_domain(host, domain)
+            for domain in official_domains
+            for host in link_caption_hosts
         ):
             # The ad's own link caption references one of the brand's official
             # domains — treat this as the brand's own legitimate ad, not fraud.
@@ -702,6 +729,14 @@ async def _scan_m6_ads(rule: dict) -> list:
             str(b).strip()[:200] for b in (ad.get("ad_creative_bodies") or []) if str(b).strip()
         ][:2]
 
+        description = (
+            f"Ad referencing '{brand}' run by Page '{page_name}', not linked to a known official domain"
+            if official_domains
+            else (
+                f"Ad referencing '{brand}' run by Page '{page_name}'; "
+                "no official domains are configured for comparison"
+            )
+        )
         findings.append(
             {
                 "module": "m6",
@@ -710,11 +745,7 @@ async def _scan_m6_ads(rule: dict) -> list:
                 "target_url": ad.get("ad_snapshot_url") or "",
                 "target_identifier": page_name,
                 "display_name": page_name,
-                "description": (
-                    f"Ad referencing '{brand}' run by Page '{page_name}', not linked to a "
-                    f"known official domain"
-                    + (f": {' | '.join(creative_snippets)}" if creative_snippets else ".")
-                ),
+                "description": description + (f": {' | '.join(creative_snippets)}" if creative_snippets else "."),
                 "threat_score": 65,
                 "signals": (
                     ([f"meta_page_id:{page_id}"] if page_id else [])
