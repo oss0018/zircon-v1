@@ -614,6 +614,7 @@ class TestScanM2AppStore:
     async def test_appstore_mock_itunes_response_returns_finding(self):
         from app.services.impersonation.scanner import _scan_m2_appstore
         mock_response = MagicMock()
+        mock_response.status_code = 200
         mock_response.json.return_value = {
             "resultCount": 1,
             "results": [
@@ -641,9 +642,9 @@ class TestScanM2AppStore:
                 "min_impersonation_score": 40,
             })
         assert isinstance(result, list)
-        if result:
-            assert result[0]["platform"] == "app_store"
-            assert result[0]["finding_type"] == "fake_mobile_app"
+        assert len(result) == 1
+        assert result[0]["platform"] == "app_store"
+        assert result[0]["finding_type"] == "fake_mobile_app"
 
     @pytest.mark.asyncio
     async def test_appstore_skips_known_official_developer(self):
