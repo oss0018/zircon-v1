@@ -536,6 +536,176 @@ class TestScanM1Facebook:
             assert result[0]["finding_type"] == "fake_facebook_page"
 
 
+# ── M1 LinkedIn scanner ───────────────────────────────────────────────────────
+
+class TestScanM1Linkedin:
+    def test_linkedin_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m1_linkedin" in source
+
+    def test_linkedin_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "fake_linkedin_page" in source
+        assert "fake_linkedin_profile" in source
+
+    @pytest.mark.asyncio
+    async def test_linkedin_no_api_key_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_linkedin
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "", "LINKEDIN_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            result = await _scan_m1_linkedin({
+                "brand_name": "TestBrand",
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_linkedin_no_actor_configured_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_linkedin
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "LINKEDIN_APIFY_ACTOR": ""},
+            clear=False,
+        ):
+            result = await _scan_m1_linkedin({
+                "brand_name": "TestBrand",
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_linkedin_mock_apify_response_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m1_linkedin
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "companyName": "TestBrand Official",
+                "publicIdentifier": "testbrand-official",
+                "companyUrl": "https://www.linkedin.com/company/testbrand-official",
+                "followersCount": 5000,
+                "verified": False,
+            }
+        ]
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "LINKEDIN_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_linkedin({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert isinstance(result, list)
+        if result:
+            assert result[0]["platform"] == "linkedin"
+            assert result[0]["finding_type"] == "fake_linkedin_page"
+
+    @pytest.mark.asyncio
+    async def test_linkedin_executive_impersonation_mock_response(self):
+        from app.services.impersonation.scanner import _scan_m1_linkedin
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "fullName": "Jordan TestBrand CEO",
+                "publicIdentifier": "fake-jordan-ceo",
+                "profileUrl": "https://www.linkedin.com/in/fake-jordan-ceo",
+                "headline": "CEO at TestBrand",
+                "followersCount": 300,
+                "verified": False,
+            }
+        ]
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "LINKEDIN_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_linkedin({
+                    "brand_name": "TestBrand",
+                    "executive_names": ["Jordan Smith"],
+                    "min_impersonation_score": 40,
+                })
+        assert isinstance(result, list)
+        if result:
+            assert result[0]["finding_type"] == "fake_linkedin_profile"
+            assert "executive_impersonation" in result[0]["signals"]
+
+    @pytest.mark.asyncio
+    async def test_linkedin_verified_page_excluded(self):
+        from app.services.impersonation.scanner import _scan_m1_linkedin
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "companyName": "TestBrand Official",
+                "publicIdentifier": "testbrand-official",
+                "companyUrl": "https://www.linkedin.com/company/testbrand-official",
+                "followersCount": 500000,
+                "verified": True,
+            }
+        ]
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "LINKEDIN_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_linkedin({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_linkedin_non_200_status_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_linkedin
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "LINKEDIN_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_linkedin({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert result == []
+        mock_response.json.assert_not_called()
+
+
 # ── M2 Google Play scanner ────────────────────────────────────────────────────
 
 class TestScanM2GooglePlay:
@@ -1007,11 +1177,15 @@ class TestScannerFunctionSignatures:
         assert "HIBPClient" in source
         assert "HIBP_API_KEY" in source
 
+    def test_m1_linkedin_implemented(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "LINKEDIN_APIFY_ACTOR" in source
+        assert "fake_linkedin_page" in source
+
     def test_stubs_still_present_for_phase2b(self):
         """Phase 2b stubs must remain for deferred modules."""
         source = SCANNER.read_text(encoding="utf-8")
         assert "async def _scan_m1_tiktok" in source
-        assert "async def _scan_m1_linkedin" in source
         assert "async def _scan_m1_youtube" in source
         assert "async def _scan_m2_appstore" in source
         assert "async def _scan_m5_darkweb" in source
@@ -1022,6 +1196,7 @@ class TestScannerFunctionSignatures:
         assert "HIBP_API_KEY" in env_example
         assert "APIFY_API_KEY" in env_example
         assert "FACEBOOK_APIFY_ACTOR" in env_example
+        assert "LINKEDIN_APIFY_ACTOR" in env_example
         assert "VK_SERVICE_TOKEN" in env_example
         assert "PAGERDUTY_API_KEY" in env_example
         assert "PAGERDUTY_SERVICE_ID" in env_example
