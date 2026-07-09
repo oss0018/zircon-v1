@@ -282,9 +282,10 @@ class TestScanM5Darkweb:
         from app.services.impersonation.scanner import _scan_m5_darkweb
         mock_records = [
             {"name": "leak_dump.txt", "type": "leaks", "date": "2023-01-01"},
+            {"name": "combo_dump.txt", "type": "leaks", "date": "2023-01-02"},
         ]
         mock_client = MagicMock()
-        mock_client.search = AsyncMock(return_value={"records": mock_records, "total": 1})
+        mock_client.search = AsyncMock(return_value={"records": mock_records, "total": 27})
 
         with patch.dict("os.environ", {"INTELX_API_KEY": "test-key"}, clear=False):
             with patch("app.services.osint.intelx.IntelXClient", return_value=mock_client):
@@ -299,6 +300,10 @@ class TestScanM5Darkweb:
         assert finding["platform"] == "dark_web"
         assert finding["finding_type"] == "darkweb_credential_leak"
         assert "acme.com" in finding["target_identifier"]
+        assert finding["description"] == (
+            "Found 27 dark web / paste-site record(s) referencing "
+            "'acme.com': leak_dump.txt, combo_dump.txt."
+        )
         assert "intelx_type:leaks" in finding["signals"]
 
     @pytest.mark.asyncio
@@ -315,6 +320,24 @@ class TestScanM5Darkweb:
                     "official_domains": ["acme.com"],
                 })
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m5_darkweb_omits_empty_record_name_list(self):
+        from app.services.impersonation.scanner import _scan_m5_darkweb
+        mock_client = MagicMock()
+        mock_client.search = AsyncMock(return_value={"records": [{"type": "leaks"}], "total": 3})
+
+        with patch.dict("os.environ", {"INTELX_API_KEY": "test-key"}, clear=False):
+            with patch("app.services.osint.intelx.IntelXClient", return_value=mock_client):
+                result = await _scan_m5_darkweb({
+                    "brand_name": "Acme",
+                    "executive_names": [],
+                    "official_domains": ["acme.com"],
+                })
+
+        assert result[0]["description"] == (
+            "Found 3 dark web / paste-site record(s) referencing 'acme.com'."
+        )
 
     @pytest.mark.asyncio
     async def test_m5_darkweb_error_result_returns_empty(self):

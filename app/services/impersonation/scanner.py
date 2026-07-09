@@ -639,11 +639,16 @@ async def _scan_m5_darkweb(rule: dict) -> list:
             continue
 
         record_names = [
-            str(rec.get("name", "record"))[:120] for rec in records[:5] if isinstance(rec, dict)
+            str(name)[:120]
+            for rec in records[:5]
+            if isinstance(rec, dict) and (name := rec.get("name"))
         ]
         record_types = [
             str(rec.get("type")) for rec in records[:5] if isinstance(rec, dict) and rec.get("type")
         ]
+        total_records = result.get("total")
+        record_count = total_records if isinstance(total_records, int) else len(records)
+        record_list_suffix = f": {', '.join(record_names)}" if record_names else ""
         signals = [f"intelx_type:{t}" for t in dict.fromkeys(record_types)][:3] or [
             f"intelx_term_type:{term_type}"
         ]
@@ -657,8 +662,8 @@ async def _scan_m5_darkweb(rule: dict) -> list:
                 "target_identifier": term,
                 "display_name": f"{term} ({term_type})",
                 "description": (
-                    f"Found {len(records)} dark web / paste-site record(s) referencing "
-                    f"'{term}': {', '.join(record_names)}."
+                    f"Found {record_count} dark web / paste-site record(s) referencing "
+                    f"'{term}'{record_list_suffix}."
                 ),
                 "threat_score": 70,
                 "signals": signals,
