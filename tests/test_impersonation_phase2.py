@@ -271,6 +271,18 @@ async def test_m1_linkedin_no_longer_a_stub():
     assert result == []
 
 
+@pytest.mark.asyncio
+async def test_m1_linkedin_handles_missing_brand_name_in_noop_paths():
+    from app.services.impersonation.scanner import _scan_m1_linkedin
+    from unittest.mock import patch
+
+    with patch.dict('os.environ', {'APIFY_API_KEY': '', 'LINKEDIN_APIFY_ACTOR': ''}, clear=False):
+        result = await _scan_m1_linkedin({
+            'executive_names': [],
+        })
+    assert result == []
+
+
 # ── API endpoint tests ────────────────────────────────────────────────────────
 
 def test_phase2_api_endpoints_present():

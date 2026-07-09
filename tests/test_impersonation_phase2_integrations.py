@@ -682,6 +682,80 @@ class TestScanM1Linkedin:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_linkedin_string_verified_false_and_string_followers_are_parsed(self):
+        from app.services.impersonation.scanner import _scan_m1_linkedin
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "companyName": "TestBrand Official",
+                "publicIdentifier": "testbrand-unverified",
+                "companyUrl": "https://www.linkedin.com/company/testbrand-unverified",
+                "followersCount": "5,000",
+                "verified": "false",
+            }
+        ]
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "LINKEDIN_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_linkedin({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        assert len(result) == 1
+        assert result[0]["target_identifier"] == "testbrand-unverified"
+        assert result[0]["subscriber_count"] == 5000
+
+    @pytest.mark.asyncio
+    async def test_linkedin_bad_followers_value_does_not_abort_scan(self):
+        from app.services.impersonation.scanner import _scan_m1_linkedin
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {
+                "companyName": "TestBrand Support",
+                "publicIdentifier": "bad-followers",
+                "companyUrl": "https://www.linkedin.com/company/bad-followers",
+                "followersCount": "N/A",
+                "verified": False,
+            },
+            {
+                "companyName": "TestBrand Careers",
+                "publicIdentifier": "good-followers",
+                "companyUrl": "https://www.linkedin.com/company/good-followers",
+                "followersCount": 42,
+                "verified": False,
+            },
+        ]
+        with patch.dict(
+            "os.environ",
+            {"APIFY_API_KEY": "test-key", "LINKEDIN_APIFY_ACTOR": "some~actor"},
+            clear=False,
+        ):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
+                result = await _scan_m1_linkedin({
+                    "brand_name": "TestBrand",
+                    "executive_names": [],
+                    "min_impersonation_score": 40,
+                })
+        identifiers = {item["target_identifier"] for item in result}
+        assert "good-followers" in identifiers
+
+    @pytest.mark.asyncio
     async def test_linkedin_non_200_status_returns_empty(self):
         from app.services.impersonation.scanner import _scan_m1_linkedin
         mock_response = MagicMock()

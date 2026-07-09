@@ -327,11 +327,12 @@ async def _scan_m1_linkedin(rule: dict) -> list:
     Optional env vars: LINKEDIN_APIFY_SEARCH_FIELD (default: "keyword")
     Output type: ``fake_linkedin_page`` or ``fake_linkedin_profile``
     """
+    brand = (rule.get("brand_name") or "").strip()
     apify_key = os.getenv("APIFY_API_KEY", "").strip()
     if not apify_key:
         logger.info(
             "[IMP M1] APIFY_API_KEY not configured; LinkedIn scan skipped for '%s'.",
-            rule["brand_name"],
+            brand,
         )
         return []
 
@@ -341,13 +342,44 @@ async def _scan_m1_linkedin(rule: dict) -> list:
             "[IMP M1] LINKEDIN_APIFY_ACTOR not configured; LinkedIn scan skipped for '%s'. "
             "No single official Apify actor exists for LinkedIn search — set "
             "LINKEDIN_APIFY_ACTOR to an actor id from https://apify.com/store?search=linkedin.",
-            rule["brand_name"],
+            brand,
         )
         return []
 
-    brand = (rule.get("brand_name") or "").strip()
     if not brand:
         return []
+
+    def _parse_count(value) -> int:
+        if value is None:
+            return 0
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+
+        text = str(value).strip().replace(",", "")
+        if not text:
+            return 0
+        if text.endswith("+"):
+            text = text[:-1]
+
+        try:
+            return int(text)
+        except (TypeError, ValueError):
+            return 0
+
+    def _parse_bool_flag(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y"}:
+                return True
+            if normalized in {"false", "0", "no", "n", ""}:
+                return False
+        return bool(value)
 
     search_field = os.getenv("LINKEDIN_APIFY_SEARCH_FIELD", "keyword").strip() or "keyword"
 
@@ -422,7 +454,7 @@ async def _scan_m1_linkedin(rule: dict) -> list:
                 or item.get("url")
                 or f"https://www.linkedin.com/in/{identifier}"
             )
-            followers = int(
+            followers = _parse_count(
                 item.get("followersCount")
                 or item.get("followerCount")
                 or item.get("followers")
@@ -430,7 +462,7 @@ async def _scan_m1_linkedin(rule: dict) -> list:
                 or 0
             )
             headline = str(item.get("headline") or item.get("occupation") or item.get("jobTitle") or "")
-            is_verified = bool(item.get("verified") or item.get("isVerified"))
+            is_verified = _parse_bool_flag(item.get("verified")) or _parse_bool_flag(item.get("isVerified"))
 
             if not display_name or is_verified:
                 continue
