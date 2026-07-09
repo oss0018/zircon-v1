@@ -338,7 +338,7 @@ async def _scan_m1_youtube(rule: dict) -> list:
     if not api_key:
         logger.info(
             "[IMP M1] YOUTUBE_API_KEY not configured; YouTube scan skipped for '%s'.",
-            rule["brand_name"],
+            rule.get("brand_name"),
         )
         return []
 
@@ -363,6 +363,7 @@ async def _scan_m1_youtube(rule: dict) -> list:
                     "key": api_key,
                 },
             )
+            search_resp.raise_for_status()
             search_data = search_resp.json()
 
             channel_ids: list[str] = []
@@ -382,6 +383,7 @@ async def _scan_m1_youtube(rule: dict) -> list:
                     "key": api_key,
                 },
             )
+            channels_resp.raise_for_status()
             channels_data = channels_resp.json()
     except Exception as exc:  # noqa: BLE001
         logger.warning("[IMP M1] YouTube scan error for '%s': %s", brand, exc)

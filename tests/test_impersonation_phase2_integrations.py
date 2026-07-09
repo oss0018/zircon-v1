@@ -18,6 +18,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -559,6 +560,16 @@ class TestScanM1YouTube:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_youtube_no_api_key_without_brand_name_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m1_youtube
+        with patch.dict("os.environ", {"YOUTUBE_API_KEY": ""}, clear=False):
+            result = await _scan_m1_youtube({
+                "executive_names": [],
+                "min_impersonation_score": 40,
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
     async def test_youtube_no_brand_returns_empty(self):
         from app.services.impersonation.scanner import _scan_m1_youtube
         with patch.dict("os.environ", {"YOUTUBE_API_KEY": "test-key"}, clear=False):
@@ -574,10 +585,12 @@ class TestScanM1YouTube:
         from app.services.impersonation.scanner import _scan_m1_youtube
 
         search_response = MagicMock()
+        search_response.raise_for_status.return_value = None
         search_response.json.return_value = {
             "items": [{"id": {"kind": "youtube#channel", "channelId": "UC_fake_123"}}]
         }
         channels_response = MagicMock()
+        channels_response.raise_for_status.return_value = None
         channels_response.json.return_value = {
             "items": [
                 {
@@ -615,6 +628,7 @@ class TestScanM1YouTube:
         from app.services.impersonation.scanner import _scan_m1_youtube
 
         search_response = MagicMock()
+        search_response.raise_for_status.return_value = None
         search_response.json.return_value = {"items": []}
 
         with patch.dict("os.environ", {"YOUTUBE_API_KEY": "test-key"}, clear=False):
@@ -631,6 +645,78 @@ class TestScanM1YouTube:
                 })
         assert result == []
         assert mock_client.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_youtube_search_http_error_logs_and_returns_empty(self, caplog):
+        import httpx
+
+        from app.services.impersonation.scanner import _scan_m1_youtube
+
+        request = httpx.Request("GET", "https://www.googleapis.com/youtube/v3/search")
+        response = httpx.Response(403, request=request)
+        search_response = MagicMock()
+        search_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "403 Forbidden",
+            request=request,
+            response=response,
+        )
+
+        with patch.dict("os.environ", {"YOUTUBE_API_KEY": "test-key"}, clear=False):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.get = AsyncMock(return_value=search_response)
+                mock_client_cls.return_value = mock_client
+                with caplog.at_level(logging.WARNING):
+                    result = await _scan_m1_youtube({
+                        "brand_name": "TestBrand",
+                        "executive_names": [],
+                        "min_impersonation_score": 40,
+                    })
+
+        assert result == []
+        assert mock_client.get.call_count == 1
+        assert "YouTube scan error for 'TestBrand'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_youtube_channels_http_error_logs_and_returns_empty(self, caplog):
+        import httpx
+
+        from app.services.impersonation.scanner import _scan_m1_youtube
+
+        search_response = MagicMock()
+        search_response.raise_for_status.return_value = None
+        search_response.json.return_value = {
+            "items": [{"id": {"kind": "youtube#channel", "channelId": "UC_fake_123"}}]
+        }
+
+        request = httpx.Request("GET", "https://www.googleapis.com/youtube/v3/channels")
+        response = httpx.Response(403, request=request)
+        channels_response = MagicMock()
+        channels_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "403 Forbidden",
+            request=request,
+            response=response,
+        )
+
+        with patch.dict("os.environ", {"YOUTUBE_API_KEY": "test-key"}, clear=False):
+            with patch("httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock(return_value=False)
+                mock_client.get = AsyncMock(side_effect=[search_response, channels_response])
+                mock_client_cls.return_value = mock_client
+                with caplog.at_level(logging.WARNING):
+                    result = await _scan_m1_youtube({
+                        "brand_name": "TestBrand",
+                        "executive_names": [],
+                        "min_impersonation_score": 40,
+                    })
+
+        assert result == []
+        assert mock_client.get.call_count == 2
+        assert "YouTube scan error for 'TestBrand'" in caplog.text
 
 
 # ── M2 Google Play scanner ────────────────────────────────────────────────────
