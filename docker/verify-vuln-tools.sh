@@ -4,7 +4,7 @@ set -euo pipefail
 templates_dir="${NUCLEI_TEMPLATES_DIR:-/opt/nuclei-templates}"
 missing=0
 
-for tool in testssl.sh nikto nuclei; do
+for tool in testssl.sh nikto nuclei nmap; do
     if command -v "${tool}" >/dev/null 2>&1; then
         echo "[zircon-runtime] ${tool}: $(command -v "${tool}")"
     else

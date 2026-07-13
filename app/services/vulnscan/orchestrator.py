@@ -14,6 +14,7 @@ from app.services.vulnscan.scanners import (
     DNSSecScanner,
     HeaderScanner,
     NiktoScanner,
+    NmapScanner,
     NucleiScanner,
     OpenVASScanner,
     TestSSLScanner,
@@ -23,8 +24,8 @@ from app.services.vulnscan.scanners import (
 
 PROFILE_SCANNERS = {
     "quick": ["headers", "dns_sec", "testssl", "nikto"],
-    "standard": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive"],
-    "deep": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive", "openvas"],
+    "standard": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive", "nmap"],
+    "deep": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive", "openvas", "nmap"],
 }
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ class VulnScanOrchestrator:
             return await ZAPPassiveScanner.scan(target_url)
         if scanner == "openvas":
             return await OpenVASScanner.scan(target.target_value, profile)
+        if scanner == "nmap":
+            return await NmapScanner.scan(target.target_value, profile)
         return []
 
     async def run(self, scan_id: int) -> None:

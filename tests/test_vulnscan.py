@@ -128,7 +128,13 @@ def test_index_wires_vulnscan_page_into_spa():
     assert "/static/js/vulnscan.js" in html
     assert "page === 'vulnscan'" in html
     assert 'x-data="vulnscanApp()"' in html
-    assert "Vuln Scanner" in html
+    assert "x-text=\"t('vulnerability_scanner')\"" in html
+
+
+def test_i18n_defines_vulnerability_scanner_label():
+    i18n_js = (REPO_ROOT / "app" / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+
+    assert "vulnerability_scanner: 'Vulnerability Scanner'" in i18n_js
 
 
 def test_vulnscan_component_targets_expected_frontend_flows():
@@ -415,6 +421,151 @@ def test_nuclei_scanner_returns_tool_not_available_when_binary_missing(monkeypat
     assert len(findings) == 1
     assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
     assert findings[0]["title"] == "Nuclei not installed"
+
+
+def test_nmap_scanner_returns_tool_not_available_when_binary_missing(monkeypatch):
+    from app.services.vulnscan.scanners import NmapScanner
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: None)
+
+    findings = asyncio.run(NmapScanner.scan("https://example.com", "quick"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
+    assert findings[0]["title"] == "Nmap not installed"
+
+
+def test_nmap_scanner_parses_xml_for_open_ports_and_vuln_scripts(monkeypatch):
+    from app.services.vulnscan.scanners import NmapScanner
+
+    captured = {"xml_path": None}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        xml_path = Path(args[args.index("-oX") + 1])
+        captured["xml_path"] = xml_path
+        xml_path.write_text(
+            """<?xml version="1.0"?>
+<nmaprun>
+  <host>
+    <address addr="93.184.216.34" addrtype="ipv4"/>
+    <hostscript>
+      <script id="http-vuln-example" output="VULNERABLE: Example host-level issue IDs: CVE-2021-1234"/>
+    </hostscript>
+    <ports>
+      <port protocol="tcp" portid="23">
+        <state state="open"/>
+        <service name="telnet" product="Telnetd" version="1.0"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="open"/>
+        <service name="http" product="nginx" version="1.18.0"/>
+        <script id="http-server-header" output="nginx/1.18.0"/>
+        <script id="http-vuln-cve2021-9999" output="VULNERABLE: State: VULNERABLE IDs: CVE-2021-9999"/>
+      </port>
+      <port protocol="tcp" portid="8081">
+        <state state="closed"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>""",
+            encoding="utf-8",
+        )
+        return _Proc()
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/nmap" if name == "nmap" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    findings = asyncio.run(NmapScanner.scan("https://example.com", "standard"))
+
+    open_port_findings = [f for f in findings if f["finding_type"] == "OPEN_PORT"]
+    assert {f["target_port"] for f in open_port_findings} == {23, 80}
+    telnet_finding = next(f for f in open_port_findings if f["target_port"] == 23)
+    assert telnet_finding["severity"] == "HIGH"
+    http_finding = next(f for f in open_port_findings if f["target_port"] == 80)
+    assert http_finding["severity"] == "INFO"
+
+    cve_findings = [f for f in findings if f["finding_type"] == "CVE"]
+    assert len(cve_findings) == 2
+    port_cve = next(f for f in cve_findings if f["target_port"] == 80)
+    assert json.loads(port_cve["cve_ids_json"]) == ["CVE-2021-9999"]
+    host_cve = next(f for f in cve_findings if f["target_port"] is None)
+    assert json.loads(host_cve["cve_ids_json"]) == ["CVE-2021-1234"]
+
+    # Closed ports must not produce findings, and non-"VULNERABLE" scripts must be skipped.
+    assert all(f["target_port"] != 8081 for f in findings)
+    assert not any("http-server-header" in f["scanner_finding_id"] for f in findings)
+    assert not captured["xml_path"].exists()
+
+
+def test_nmap_scanner_returns_timeout_finding_when_scan_exceeds_limit(monkeypatch):
+    from app.services.vulnscan.scanners import NmapScanner
+
+    class _Proc:
+        returncode = None
+
+        async def wait(self):
+            return 0
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        return _Proc()
+
+    async def _timeout(coro, timeout=None):  # noqa: ARG001
+        coro.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/nmap" if name == "nmap" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+    monkeypatch.setattr(asyncio, "wait_for", _timeout)
+
+    findings = asyncio.run(NmapScanner.scan("https://example.com", "quick"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "SCAN_TIMEOUT"
+
+
+def test_orchestrator_wires_nmap_into_standard_and_deep_profiles():
+    from app.services.vulnscan.orchestrator import PROFILE_SCANNERS
+
+    assert "nmap" not in PROFILE_SCANNERS["quick"]
+    assert "nmap" in PROFILE_SCANNERS["standard"]
+    assert "nmap" in PROFILE_SCANNERS["deep"]
+
+
+def test_run_scanner_dispatches_nmap(monkeypatch):
+    from app.models import VSScanTarget
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator
+    import app.services.vulnscan.orchestrator as orchestrator_module
+
+    captured = {}
+
+    async def _fake_scan(target, profile):
+        captured["target"] = target
+        captured["profile"] = profile
+        return [{"finding_type": "OPEN_PORT"}]
+
+    monkeypatch.setattr(orchestrator_module.NmapScanner, "scan", staticmethod(_fake_scan))
+
+    target = VSScanTarget(target_value="example.com", target_type="domain")
+    findings = asyncio.run(VulnScanOrchestrator()._run_scanner("nmap", target, "deep"))
+
+    assert findings == [{"finding_type": "OPEN_PORT"}]
+    assert captured == {"target": "example.com", "profile": "deep"}
 
 
 @pytest.mark.asyncio

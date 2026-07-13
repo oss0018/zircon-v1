@@ -1,8 +1,10 @@
 import json
 import asyncio
+import re
 import shutil
 import tempfile
 import uuid
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -877,6 +879,190 @@ class NucleiScanner:
             return findings
         except Exception:
             return []
+
+
+_NMAP_HIGH_RISK_PORTS = {23, 3389, 5900, 27017}       # telnet, rdp, vnc, mongodb
+_NMAP_MEDIUM_RISK_PORTS = {21, 445, 3306, 5432, 6379, 9200}  # ftp, smb, mysql, postgres, redis, elasticsearch
+_NMAP_CVE_RE = re.compile(r"cve-\d{4}-\d{4,7}", re.IGNORECASE)
+
+
+def _nmap_port_severity(port: int) -> str:
+    if port in _NMAP_HIGH_RISK_PORTS:
+        return "HIGH"
+    if port in _NMAP_MEDIUM_RISK_PORTS:
+        return "MEDIUM"
+    return "INFO"
+
+
+def _nmap_script_findings(
+    script_el: "ET.Element",
+    target_url: str,
+    host_ip: str,
+    port_num: int | None,
+) -> list[dict]:
+    """Turn an NSE `vuln`-category <script> element into findings.
+
+    Nmap's shared `vulns.lua` library (used by essentially every script in the
+    stock `vuln` category) always prefixes positive hits with a "VULNERABLE"
+    marker in the human-readable output, so that substring is a reliable,
+    tool-agnostic signal without needing a bespoke parser per NSE script.
+    """
+    output = (script_el.get("output") or "").strip()
+    if "VULNERABLE" not in output.upper():
+        return []
+
+    script_id = script_el.get("id", "nmap-vuln-script")
+    cve_ids = sorted({m.upper() for m in _NMAP_CVE_RE.findall(output)})
+    references = (
+        [f"https://nvd.nist.gov/vuln/detail/{cve}" for cve in cve_ids]
+        if cve_ids
+        else ["https://nmap.org/nsedoc/categories/vuln.html"]
+    )
+
+    return [
+        {
+            **_base_finding(
+                "nmap",
+                f"nmap-{script_id}-{port_num if port_num is not None else 'host'}",
+                f"Nmap NSE: {script_id}",
+                output[:2000],
+                "CVE" if cve_ids else "EXPOSURE",
+                "HIGH",
+                target_url,
+                host_ip,
+                port_num,
+            ),
+            "cve_ids_json": json.dumps(cve_ids),
+            "references_json": json.dumps(references),
+        }
+    ]
+
+
+class NmapScanner:
+    @staticmethod
+    async def scan(target: str, profile: str) -> list[dict]:
+        target_url, host, _default_port = _target_parts(target)
+        temp_path = Path(tempfile.gettempdir()) / f"nmap_{uuid.uuid4().hex}.xml"
+        findings: list[dict] = []
+        nmap_bin = shutil.which("nmap")
+        if not nmap_bin:
+            return _tool_not_available_finding("Nmap", "nmap", target_url, host, None)
+
+        if profile == "deep":
+            port_args = ["--top-ports", "1000"]
+            timeout = 600
+            script_timeout = "90s"
+            host_timeout = "8m"
+        else:
+            port_args = ["--top-ports", "100"]
+            timeout = 300
+            script_timeout = "45s"
+            host_timeout = "4m"
+
+        try:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    nmap_bin,
+                    "-Pn",
+                    "-sV",
+                    "-T4",
+                    *port_args,
+                    "--script",
+                    "vuln",
+                    "--script-timeout",
+                    script_timeout,
+                    "--host-timeout",
+                    host_timeout,
+                    "-oX",
+                    str(temp_path),
+                    host,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                return _tool_not_available_finding("Nmap", "nmap", target_url, host, None)
+            except Exception:
+                return []
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return _scan_timeout_finding("Nmap", "nmap", target_url, host, None)
+
+            root = None
+            if temp_path.exists():
+                try:
+                    root = ET.parse(str(temp_path)).getroot()
+                except (ET.ParseError, OSError):
+                    root = None
+
+            if root is not None:
+                for host_el in root.findall("host"):
+                    addr_el = host_el.find("address")
+                    host_ip = addr_el.get("addr") if addr_el is not None else host
+
+                    hostscript_el = host_el.find("hostscript")
+                    if hostscript_el is not None:
+                        for script_el in hostscript_el.findall("script"):
+                            findings.extend(
+                                _nmap_script_findings(script_el, target_url, host_ip, None)
+                            )
+
+                    ports_el = host_el.find("ports")
+                    if ports_el is None:
+                        continue
+                    for port_el in ports_el.findall("port"):
+                        state_el = port_el.find("state")
+                        if state_el is None or state_el.get("state") != "open":
+                            continue
+                        try:
+                            port_num = int(port_el.get("portid", "0") or 0)
+                        except ValueError:
+                            continue
+
+                        service_el = port_el.find("service")
+                        service_name = service_el.get("name", "") if service_el is not None else ""
+                        product = service_el.get("product", "") if service_el is not None else ""
+                        version = service_el.get("version", "") if service_el is not None else ""
+                        banner = " ".join(part for part in (product, version) if part).strip()
+
+                        findings.append(
+                            {
+                                **_base_finding(
+                                    "nmap",
+                                    f"nmap-open-port-{port_num}",
+                                    f"Open port {port_num}/tcp ({service_name or 'unknown'})",
+                                    (
+                                        f"Nmap detected an open {service_name or 'unknown'} "
+                                        f"service on port {port_num}"
+                                        + (f" ({banner})" if banner else "")
+                                        + "."
+                                    ),
+                                    "OPEN_PORT",
+                                    _nmap_port_severity(port_num),
+                                    target_url,
+                                    host_ip,
+                                    port_num,
+                                ),
+                                "references_json": json.dumps(["https://nmap.org/book/man-port-scanning-basics.html"]),
+                            }
+                        )
+
+                        for script_el in port_el.findall("script"):
+                            findings.extend(
+                                _nmap_script_findings(script_el, target_url, host_ip, port_num)
+                            )
+
+            return findings
+        except Exception:
+            return []
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 class ZAPPassiveScanner:

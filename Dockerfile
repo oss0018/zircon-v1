@@ -21,6 +21,7 @@ RUN apt-get update \
         libio-socket-ssl-perl \
         libmagic1 \
         libnet-ssleay-perl \
+        nmap \
         openssl \
         perl \
         testssl.sh \
