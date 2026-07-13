@@ -73,6 +73,15 @@ docker compose run --rm app verify-vuln-tools
 
 If you manage Nuclei templates separately, set `ZIRCON_NUCLEI_UPDATE_TEMPLATES=0` to skip the first-run template download.
 
+### Vulnerability scan reports
+Every scan can generate downloadable reports in **JSON, CSV, HTML, KQL, and PDF** formats. Pick formats when launching a scan (they are generated automatically once the scan completes) or generate them on demand afterwards from the scan detail drawer's **Reports** tab.
+- `POST /api/v1/vulnscan/scans/{scan_id}/reports` — generate a report in a given format
+- `GET /api/v1/vulnscan/scans/{scan_id}/reports` — list reports generated for a scan
+- `GET /api/v1/vulnscan/reports/{report_id}/download` — download a generated report file
+- `DELETE /api/v1/vulnscan/reports/{report_id}` — delete a generated report
+
+Reports are written to `ZIRCON_VULNSCAN_REPORTS_DIR` (default `./data/vulnscan_reports`). The KQL format emits a Kusto `datatable(...)` literal ready to paste into Log Analytics/Sentinel for further hunting.
+
 ### Architecture
 ```
 FastAPI (HTTPS) ─── SQLite (SQLAlchemy async)

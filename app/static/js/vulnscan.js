@@ -22,6 +22,9 @@ document.addEventListener('alpine:init', () => {
     scans: [],
     selectedScan: null,
     scanFindings: [],
+    scanReports: [],
+    reportFormat: 'json',
+    reportGenerating: false,
     scanDrawerVisible: false,
     activeScanTab: 'overview',
     findingsFilter: { severity: '', status: '', scanner: '' },
@@ -39,6 +42,7 @@ document.addEventListener('alpine:init', () => {
       profile: 'standard',
       scope: 'SELF',
       comment: '',
+      reportFormats: ['json'],
     },
     launchSubmitting: false,
 
@@ -167,6 +171,7 @@ document.addEventListener('alpine:init', () => {
       try {
         this.selectedScan = await api.get(`/vulnscan/scans/${scan.id}`);
         this.scanFindings = await api.get(`/vulnscan/scans/${scan.id}/findings?limit=500`);
+        await this.loadScanReports(scan.id);
         this.scanDrawerVisible = true;
         this.activeScanTab = 'overview';
         if (this.selectedScan.status === 'pending' || this.selectedScan.status === 'running') {
@@ -183,6 +188,7 @@ document.addEventListener('alpine:init', () => {
       this.scanDrawerVisible = false;
       this.selectedScan = null;
       this.scanFindings = [];
+      this.scanReports = [];
       this.stopPolling();
     },
 
@@ -210,11 +216,64 @@ document.addEventListener('alpine:init', () => {
           if (current.status === 'completed' || current.status === 'failed' || current.status === 'cancelled') {
             this.stopPolling();
             await this.loadAllFindings();
+            await this.loadScanReports(id);
           }
         } catch (_) {
           this.stopPolling();
         }
       }, 5000);
+    },
+
+    async loadScanReports(scanId) {
+      try {
+        this.scanReports = await api.get(`/vulnscan/scans/${scanId}/reports`);
+      } catch (e) {
+        this.scanReports = [];
+      }
+    },
+
+    async generateReport() {
+      if (!this.selectedScan) return;
+      this.reportGenerating = true;
+      try {
+        await api.post(`/vulnscan/scans/${this.selectedScan.id}/reports`, { format: this.reportFormat });
+        showToast('Report generated', 'success');
+        await this.loadScanReports(this.selectedScan.id);
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.reportGenerating = false;
+      }
+    },
+
+    downloadReport(report) {
+      const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
+      const url = `/api/v1/vulnscan/reports/${report.id}/download`;
+      // Use fetch to include the auth header, then trigger a client-side download.
+      fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => {
+          if (!r.ok) throw new Error(`Download failed: ${r.status}`);
+          return r.blob();
+        })
+        .then(blob => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `vulnscan_scan_${report.scan_id}_report.${report.format}`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        })
+        .catch(e => showToast(e.message, 'error'));
+    },
+
+    async deleteReport(report) {
+      if (!confirm(t('confirm_delete'))) return;
+      try {
+        await api.delete(`/vulnscan/reports/${report.id}`);
+        showToast('Report deleted', 'success');
+        await this.loadScanReports(report.scan_id);
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
     },
 
     stopPolling() {
@@ -232,6 +291,7 @@ document.addEventListener('alpine:init', () => {
         profile: target.default_profile || 'standard',
         scope: target.scope || 'SELF',
         comment: '',
+        reportFormats: ['json'],
       };
     },
 
@@ -243,6 +303,7 @@ document.addEventListener('alpine:init', () => {
           profile: this.launchModal.profile,
           scope: this.launchModal.scope,
           comment: this.launchModal.comment,
+          report_formats: this.launchModal.reportFormats || [],
         });
         showToast('Scan launched', 'success');
         this.launchModal.visible = false;
@@ -443,9 +504,14 @@ document.addEventListener('alpine:init', () => {
         testssl_scanner: 'testssl.sh',
         nuclei: 'Nuclei',
         nikto: 'Nikto',
+        nmap: 'Nmap',
         zap_passive: 'ZAP Passive',
         openvas: 'OpenVAS',
       })[scanner] || scanner || '—';
+    },
+
+    reportFormatLabel(format) {
+      return ({ json: 'JSON', csv: 'CSV', html: 'HTML', kql: 'KQL', pdf: 'PDF' })[format] || (format || '').toUpperCase();
     },
   }));
 });

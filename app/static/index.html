@@ -7284,6 +7284,18 @@
                     <div class="form-group"><label class="form-label">Scope</label><select class="form-select" x-model="launchModal.scope"><option value="SELF">SELF</option><option value="INTERNAL">INTERNAL</option><option value="THREAT_INTEL">THREAT_INTEL</option></select></div>
                   </div>
                   <div class="form-group"><label class="form-label">Comment</label><textarea class="form-input" rows="3" x-model="launchModal.comment"></textarea></div>
+                  <div class="form-group">
+                    <label class="form-label">Auto-generate Reports on Completion</label>
+                    <div class="flex gap-3" style="flex-wrap:wrap;">
+                      <template x-for="fmt in ['json','csv','html','kql','pdf']" :key="fmt">
+                        <label class="text-sm flex items-center gap-1" style="cursor:pointer;">
+                          <input type="checkbox" :value="fmt" :checked="launchModal.reportFormats.includes(fmt)"
+                                 @change="$event.target.checked ? launchModal.reportFormats.push(fmt) : launchModal.reportFormats = launchModal.reportFormats.filter(f => f !== fmt)" />
+                          <span x-text="reportFormatLabel(fmt)"></span>
+                        </label>
+                      </template>
+                    </div>
+                  </div>
                   <div class="flex gap-2"><button class="btn btn-primary" :disabled="launchSubmitting" @click="submitLaunchScan()"><span x-text="launchSubmitting ? 'Submitting…' : 'Launch'"></span></button><button class="btn btn-secondary" @click="launchModal.visible = false">Cancel</button></div>
                 </div>
               </div>
@@ -7305,6 +7317,7 @@
                         <div class="flex gap-2" style="flex-wrap:wrap;">
                           <button class="btn btn-sm" :class="activeScanTab === 'overview' ? 'btn-primary' : 'btn-secondary'" @click="activeScanTab = 'overview'">Overview</button>
                           <button class="btn btn-sm" :class="activeScanTab === 'findings' ? 'btn-primary' : 'btn-secondary'" @click="activeScanTab = 'findings'">Findings</button>
+                          <button class="btn btn-sm" :class="activeScanTab === 'reports' ? 'btn-primary' : 'btn-secondary'" @click="activeScanTab = 'reports'">Reports</button>
                         </div>
                       </div>
 
@@ -7339,6 +7352,43 @@
                                   <td><span :class="statusBadgeClass(finding.status)" x-text="finding.status"></span></td>
                                   <td x-text="scannerLabel(finding.scanner_source)"></td>
                                   <td><button class="btn btn-sm btn-primary" @click="openFindingDetail(finding)">Detail</button></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div x-show="activeScanTab === 'reports'" class="card" style="padding:12px;">
+                        <div class="flex justify-between items-center mb-3" style="gap:8px;flex-wrap:wrap;">
+                          <div class="text-muted text-sm">Generate a downloadable report for this scan</div>
+                          <div class="flex gap-2" style="flex-wrap:wrap;">
+                            <select class="form-select" style="min-width:110px;" x-model="reportFormat">
+                              <option value="json">JSON</option>
+                              <option value="csv">CSV</option>
+                              <option value="html">HTML</option>
+                              <option value="kql">KQL</option>
+                              <option value="pdf">PDF</option>
+                            </select>
+                            <button class="btn btn-sm btn-primary" :disabled="reportGenerating" @click="generateReport()">
+                              <span x-text="reportGenerating ? 'Generating…' : 'Generate Report'"></span>
+                            </button>
+                          </div>
+                        </div>
+                        <div class="table-wrapper">
+                          <table>
+                            <thead><tr><th>Format</th><th>Size</th><th>Generated</th><th>Actions</th></tr></thead>
+                            <tbody>
+                              <template x-if="!scanReports || scanReports.length === 0"><tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted);">No reports generated yet.</td></tr></template>
+                              <template x-for="report in scanReports" :key="report.id">
+                                <tr>
+                                  <td><span class="badge badge-gray" x-text="reportFormatLabel(report.format)"></span></td>
+                                  <td x-text="report.file_size_bytes ? Math.ceil(report.file_size_bytes / 1024) + ' KB' : '—'"></td>
+                                  <td x-text="report.generated_at ? formatDate(report.generated_at) : '—'"></td>
+                                  <td class="flex gap-2">
+                                    <button class="btn btn-sm btn-primary" @click="downloadReport(report)">Download</button>
+                                    <button class="btn btn-sm btn-secondary" @click="deleteReport(report)">Delete</button>
+                                  </td>
                                 </tr>
                               </template>
                             </tbody>
