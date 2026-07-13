@@ -797,6 +797,110 @@ async def test_vulnscan_run_dispatches_severe_alert_once(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_vulnscan_run_marks_undetected_findings_as_fixed(monkeypatch):
+    from app.models import VSFinding, VSScan, VSScanTarget
+    from app.database import Base
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator, PROFILE_SCANNERS
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    call_count = {"n": 0}
+
+    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+        call_count["n"] += 1
+        findings = [
+            {
+                "scanner_source": "nmap",
+                "scanner_finding_id": "nmap-open-port-80",
+                "title": "Open port 80",
+                "description": "HTTP open",
+                "finding_type": "OPEN_PORT",
+                "severity": "INFO",
+                "target_host": "example.com",
+                "target_port": 80,
+            }
+        ]
+        if call_count["n"] == 1:
+            # Only present on the first scan; must be marked "fixed" once a
+            # later scan no longer detects it.
+            findings.append(
+                {
+                    "scanner_source": "nmap",
+                    "scanner_finding_id": "nmap-open-port-23",
+                    "title": "Open port 23",
+                    "description": "Telnet open",
+                    "finding_type": "OPEN_PORT",
+                    "severity": "HIGH",
+                    "target_host": "example.com",
+                    "target_port": 23,
+                }
+            )
+        return findings
+
+    original_scanners = PROFILE_SCANNERS["quick"]
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Example target", target_value="https://example.com")
+            db.add(target)
+            await db.flush()
+            scan1 = VSScan(target_id=target.id, profile="quick", status="pending")
+            db.add(scan1)
+            await db.commit()
+            target_id = target.id
+            scan1_id = scan1.id
+
+        monkeypatch.setattr("app.services.vulnscan.orchestrator.AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(VulnScanOrchestrator, "_run_scanner", _fake_run_scanner)
+        PROFILE_SCANNERS["quick"] = ["nmap"]
+
+        await VulnScanOrchestrator().run(scan1_id)
+
+        async with session_factory() as db:
+            scan1 = (await db.execute(select(VSScan).where(VSScan.id == scan1_id))).scalar_one()
+        assert scan1.findings_new == 2
+        assert scan1.findings_fixed == 0
+
+        async with session_factory() as db:
+            scan2 = VSScan(target_id=target_id, profile="quick", status="pending")
+            db.add(scan2)
+            await db.commit()
+            scan2_id = scan2.id
+
+        await VulnScanOrchestrator().run(scan2_id)
+
+        async with session_factory() as db:
+            scan2 = (await db.execute(select(VSScan).where(VSScan.id == scan2_id))).scalar_one()
+            all_findings = (
+                await db.execute(select(VSFinding).where(VSFinding.target_id == target_id))
+            ).scalars().all()
+
+        assert scan2.findings_new == 0
+        assert scan2.findings_fixed == 1
+        port23 = next(f for f in all_findings if f.target_port == 23)
+        assert port23.status == "remediated"
+        port80 = next(f for f in all_findings if f.target_port == 80)
+        assert port80.status == "new"
+
+        # A follow-up scan that still doesn't see the already-fixed finding
+        # must not recount it.
+        async with session_factory() as db:
+            scan3 = VSScan(target_id=target_id, profile="quick", status="pending")
+            db.add(scan3)
+            await db.commit()
+            scan3_id = scan3.id
+
+        await VulnScanOrchestrator().run(scan3_id)
+
+        async with session_factory() as db:
+            scan3 = (await db.execute(select(VSScan).where(VSScan.id == scan3_id))).scalar_one()
+        assert scan3.findings_fixed == 0
+    finally:
+        PROFILE_SCANNERS["quick"] = original_scanners
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
 async def test_vulnscan_run_skips_alert_for_non_severe_findings(monkeypatch):
     from app.models import VSScan, VSScanTarget
     from app.database import Base
