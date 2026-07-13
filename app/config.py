@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     whoosh_index_dir: str = "./data/index"
     uploads_dir: str = "./data/uploads"
     monitored_dir: str = "./data/monitored"
+    vulnscan_reports_dir: str = "./data/vulnscan_reports"
     deep_search_dir: str = "deep_search_data"
     deep_search_staging_dir: str = "/tmp/ds_staging"
     elasticsearch_url: str = ""

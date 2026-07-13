@@ -62,8 +62,8 @@ Key settings:
 - `ZIRCON_SMTP_*` — Email notification settings
 - `ZIRCON_TELEGRAM_BOT_TOKEN` — Telegram bot for alerts
 
-### Docker runtime for vuln scanners
-`Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, and `nuclei`, and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
+### Docker runtime for vulnerability scanners
+`Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, `nuclei`, `nmap`, and **OWASP ZAP** (`zap-baseline.py`, plus a headless JRE to run it), and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
 
 To verify the scanner tooling inside the built image:
 
@@ -72,6 +72,17 @@ docker compose run --rm app verify-vuln-tools
 ```
 
 If you manage Nuclei templates separately, set `ZIRCON_NUCLEI_UPDATE_TEMPLATES=0` to skip the first-run template download.
+
+**Scanner coverage**: `headers`, `dns_sec`, `testssl`, `nikto`, `nuclei`, `zap_passive`, and `nmap` run real tools. `openvas` (in the `deep` profile) intentionally reports itself as unavailable rather than fabricating findings: a working OpenVAS/Greenbone scan needs a running `gvmd` daemon reachable over GMP with provisioned scan configs, which is a much larger stateful integration than the bounded CLI scanners above and isn't bundled with Zircon.
+
+### Vulnerability scan reports
+Every scan can generate downloadable reports in **JSON, CSV, HTML, KQL, and PDF** formats. Pick formats when launching a scan (they are generated automatically once the scan completes) or generate them on demand afterwards from the scan detail drawer's **Reports** tab.
+- `POST /api/v1/vulnscan/scans/{scan_id}/reports` — generate a report in a given format
+- `GET /api/v1/vulnscan/scans/{scan_id}/reports` — list reports generated for a scan
+- `GET /api/v1/vulnscan/reports/{report_id}/download` — download a generated report file
+- `DELETE /api/v1/vulnscan/reports/{report_id}` — delete a generated report
+
+Reports are written to `ZIRCON_VULNSCAN_REPORTS_DIR` (default `./data/vulnscan_reports`). The KQL format emits a Kusto `datatable(...)` literal ready to paste into Log Analytics/Sentinel for further hunting.
 
 ### Architecture
 ```

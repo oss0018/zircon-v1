@@ -812,11 +812,11 @@ class VSFinding(Base):
     target_id = Column(Integer, ForeignKey("vs_scan_targets.id"), nullable=False)
 
     # Classification
-    scanner_source = Column(String(30), nullable=False)        # nuclei|openvas|zap|nikto|testssl|headers|dns_sec
+    scanner_source = Column(String(30), nullable=False)        # nuclei|openvas|zap|nikto|testssl|headers|dns_sec|nmap
     scanner_finding_id = Column(String(255), default="")
     title = Column(Text, nullable=False)
     description = Column(Text, default="")
-    finding_type = Column(String(50), nullable=False)          # CVE|MISCONFIGURATION|EXPOSURE|MISSING_HEADER|SSL_ISSUE|INJECTION|INFORMATION_DISCLOSURE
+    finding_type = Column(String(50), nullable=False)          # CVE|MISCONFIGURATION|EXPOSURE|MISSING_HEADER|SSL_ISSUE|INJECTION|INFORMATION_DISCLOSURE|OPEN_PORT
     owasp_category = Column(String(5), nullable=True)
 
     # Severity

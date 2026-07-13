@@ -79,6 +79,9 @@ def test_vulnscan_router_importable_and_paths():
     assert "/scans/{scan_id}" in paths
     assert "/scans/{scan_id}/findings" in paths
     assert "/scans/{scan_id}/summary" in paths
+    assert "/scans/{scan_id}/reports" in paths
+    assert "/reports/{report_id}/download" in paths
+    assert "/reports/{report_id}" in paths
     assert "/findings/{finding_id}" in paths
     assert "/findings/{finding_id}/status" in paths
     assert "/templates" in paths
@@ -128,7 +131,13 @@ def test_index_wires_vulnscan_page_into_spa():
     assert "/static/js/vulnscan.js" in html
     assert "page === 'vulnscan'" in html
     assert 'x-data="vulnscanApp()"' in html
-    assert "Vuln Scanner" in html
+    assert "x-text=\"t('vulnerability_scanner')\"" in html
+
+
+def test_i18n_defines_vulnerability_scanner_label():
+    i18n_js = (REPO_ROOT / "app" / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+
+    assert "vulnerability_scanner: 'Vulnerability Scanner'" in i18n_js
 
 
 def test_vulnscan_component_targets_expected_frontend_flows():
@@ -145,6 +154,31 @@ def test_vulnscan_component_targets_expected_frontend_flows():
     assert "severityBadgeClass" in js
     assert "statusBadgeClass" in js
     assert "formatDuration" in js
+
+
+def test_vulnscan_component_supports_report_generation_and_download():
+    js = VULNSCAN_JS.read_text(encoding="utf-8")
+
+    assert "loadScanReports" in js
+    assert "/vulnscan/scans/${scanId}/reports" in js
+    assert "generateReport" in js
+    assert "/vulnscan/scans/${this.selectedScan.id}/reports" in js
+    assert "downloadReport" in js
+    assert "/api/v1/vulnscan/reports/${report.id}/download" in js
+    assert "deleteReport" in js
+    assert "/vulnscan/reports/${report.id}" in js
+    assert "report_formats: this.launchModal.reportFormats" in js
+
+
+def test_index_wires_vulnscan_reports_tab_into_scan_drawer():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+
+    assert "activeScanTab = 'reports'" in html
+    assert "x-show=\"activeScanTab === 'reports'\"" in html
+    assert 'generateReport()' in html
+    assert 'downloadReport(report)' in html
+    assert 'deleteReport(report)' in html
+    assert "launchModal.reportFormats" in html
 
 
 def test_dnssec_scanner_emits_expected_weak_and_missing_findings(monkeypatch):
@@ -417,6 +451,326 @@ def test_nuclei_scanner_returns_tool_not_available_when_binary_missing(monkeypat
     assert findings[0]["title"] == "Nuclei not installed"
 
 
+def test_nmap_scanner_returns_tool_not_available_when_binary_missing(monkeypatch):
+    from app.services.vulnscan.scanners import NmapScanner
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: None)
+
+    findings = asyncio.run(NmapScanner.scan("https://example.com", "quick"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
+    assert findings[0]["title"] == "Nmap not installed"
+
+
+def test_nmap_scanner_parses_xml_for_open_ports_and_vuln_scripts(monkeypatch):
+    from app.services.vulnscan.scanners import NmapScanner
+
+    captured = {"xml_path": None}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        xml_path = Path(args[args.index("-oX") + 1])
+        captured["xml_path"] = xml_path
+        xml_path.write_text(
+            """<?xml version="1.0"?>
+<nmaprun>
+  <host>
+    <address addr="93.184.216.34" addrtype="ipv4"/>
+    <hostscript>
+      <script id="http-vuln-example" output="VULNERABLE: Example host-level issue IDs: CVE-2021-1234"/>
+    </hostscript>
+    <ports>
+      <port protocol="tcp" portid="23">
+        <state state="open"/>
+        <service name="telnet" product="Telnetd" version="1.0"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="open"/>
+        <service name="http" product="nginx" version="1.18.0"/>
+        <script id="http-server-header" output="nginx/1.18.0"/>
+        <script id="http-vuln-cve2021-9999" output="VULNERABLE: State: VULNERABLE IDs: CVE-2021-9999"/>
+      </port>
+      <port protocol="tcp" portid="8081">
+        <state state="closed"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>""",
+            encoding="utf-8",
+        )
+        return _Proc()
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/nmap" if name == "nmap" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    findings = asyncio.run(NmapScanner.scan("https://example.com", "standard"))
+
+    open_port_findings = [f for f in findings if f["finding_type"] == "OPEN_PORT"]
+    assert {f["target_port"] for f in open_port_findings} == {23, 80}
+    telnet_finding = next(f for f in open_port_findings if f["target_port"] == 23)
+    assert telnet_finding["severity"] == "HIGH"
+    http_finding = next(f for f in open_port_findings if f["target_port"] == 80)
+    assert http_finding["severity"] == "INFO"
+
+    cve_findings = [f for f in findings if f["finding_type"] == "CVE"]
+    assert len(cve_findings) == 2
+    port_cve = next(f for f in cve_findings if f["target_port"] == 80)
+    assert json.loads(port_cve["cve_ids_json"]) == ["CVE-2021-9999"]
+    host_cve = next(f for f in cve_findings if f["target_port"] is None)
+    assert json.loads(host_cve["cve_ids_json"]) == ["CVE-2021-1234"]
+
+    # Closed ports must not produce findings, and non-"VULNERABLE" scripts must be skipped.
+    assert all(f["target_port"] != 8081 for f in findings)
+    assert not any("http-server-header" in f["scanner_finding_id"] for f in findings)
+    assert not captured["xml_path"].exists()
+
+
+def test_nmap_scanner_returns_timeout_finding_when_scan_exceeds_limit(monkeypatch):
+    from app.services.vulnscan.scanners import NmapScanner
+
+    class _Proc:
+        returncode = None
+
+        async def wait(self):
+            return 0
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        return _Proc()
+
+    async def _timeout(coro, timeout=None):  # noqa: ARG001
+        coro.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/nmap" if name == "nmap" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+    monkeypatch.setattr(asyncio, "wait_for", _timeout)
+
+    findings = asyncio.run(NmapScanner.scan("https://example.com", "quick"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "SCAN_TIMEOUT"
+
+
+def test_orchestrator_wires_nmap_into_standard_and_deep_profiles():
+    from app.services.vulnscan.orchestrator import PROFILE_SCANNERS
+
+    assert "nmap" not in PROFILE_SCANNERS["quick"]
+    assert "nmap" in PROFILE_SCANNERS["standard"]
+    assert "nmap" in PROFILE_SCANNERS["deep"]
+
+
+def test_run_scanner_dispatches_nmap(monkeypatch):
+    from app.models import VSScanTarget
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator
+    import app.services.vulnscan.orchestrator as orchestrator_module
+
+    captured = {}
+
+    async def _fake_scan(target, profile):
+        captured["target"] = target
+        captured["profile"] = profile
+        return [{"finding_type": "OPEN_PORT"}]
+
+    monkeypatch.setattr(orchestrator_module.NmapScanner, "scan", staticmethod(_fake_scan))
+
+    target = VSScanTarget(target_value="example.com", target_type="domain")
+    findings = asyncio.run(VulnScanOrchestrator()._run_scanner("nmap", target, "deep"))
+
+    assert findings == [{"finding_type": "OPEN_PORT"}]
+    assert captured == {"target": "example.com", "profile": "deep"}
+
+
+def test_zap_scanner_returns_tool_not_available_when_binary_missing(monkeypatch):
+    from app.services.vulnscan.scanners import ZAPPassiveScanner
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: None)
+
+    findings = asyncio.run(ZAPPassiveScanner.scan("https://example.com", "standard"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
+    assert findings[0]["title"] == "OWASP ZAP not installed"
+
+
+def test_zap_scanner_parses_json_report_for_alerts(monkeypatch):
+    from app.services.vulnscan.scanners import ZAPPassiveScanner
+
+    captured = {"json_path": None}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        json_path = Path(args[args.index("-J") + 1])
+        captured["json_path"] = json_path
+        json_path.write_text(
+            json.dumps(
+                {
+                    "site": [
+                        {
+                            "@name": "https://example.com",
+                            "alerts": [
+                                {
+                                    "pluginid": "10020",
+                                    "alert": "X-Frame-Options Header Not Set",
+                                    "name": "X-Frame-Options Header Not Set",
+                                    "riskcode": "2",
+                                    "confidence": "2",
+                                    "desc": "<p>The response does not include <b>X-Frame-Options</b>.</p>",
+                                    "solution": "<p>Set the X-Frame-Options header.</p>",
+                                    "reference": "<p>https://example.org/xfo</p>",
+                                    "cweid": 1021,
+                                    "wascid": 15,
+                                    "instances": [
+                                        {"uri": "https://example.com/", "method": "GET", "param": "", "evidence": ""}
+                                    ],
+                                },
+                                {
+                                    "pluginid": "40012",
+                                    "alert": "Cross Site Scripting (Reflected)",
+                                    "name": "Cross Site Scripting (Reflected)",
+                                    "riskcode": "3",
+                                    "confidence": "2",
+                                    "desc": "Reflected XSS found.",
+                                    "solution": "Sanitize user input.",
+                                    "reference": "https://example.org/xss",
+                                    "cweid": 79,
+                                    "wascid": 8,
+                                    "instances": [
+                                        {"uri": "https://example.com/search", "method": "GET", "param": "q", "evidence": "<script>"}
+                                    ],
+                                },
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return _Proc()
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/zap-baseline.py" if name == "zap-baseline.py" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    findings = asyncio.run(ZAPPassiveScanner.scan("https://example.com", "standard"))
+
+    assert len(findings) == 2
+    xfo = next(f for f in findings if f["scanner_finding_id"] == "zap-10020")
+    assert xfo["severity"] == "MEDIUM"
+    assert xfo["finding_type"] == "MISCONFIGURATION"
+    assert "X-Frame-Options" in xfo["description"]
+    assert "<p>" not in xfo["description"]
+    assert xfo["remediation_summary"] == "Set the X-Frame-Options header."
+    assert json.loads(xfo["cwe_ids_json"]) == ["CWE-1021"]
+    assert xfo["wasc_id"] == "15"
+
+    xss = next(f for f in findings if f["scanner_finding_id"] == "zap-40012")
+    assert xss["severity"] == "HIGH"
+    assert xss["finding_type"] == "XSS"
+    assert xss["affected_parameter"] == "q"
+    assert xss["evidence"] == "<script>"
+
+    # The temp JSON report is cleaned up after parsing.
+    assert not captured["json_path"].exists()
+
+
+def test_zap_scanner_returns_timeout_finding_when_scan_exceeds_limit(monkeypatch):
+    from app.services.vulnscan.scanners import ZAPPassiveScanner
+
+    class _Proc:
+        returncode = None
+
+        async def wait(self):
+            return 0
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        return _Proc()
+
+    async def _timeout(coro, timeout=None):  # noqa: ARG001
+        coro.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/zap-baseline.py" if name == "zap-baseline.py" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+    monkeypatch.setattr(asyncio, "wait_for", _timeout)
+
+    findings = asyncio.run(ZAPPassiveScanner.scan("https://example.com", "deep"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "SCAN_TIMEOUT"
+
+
+def test_openvas_scanner_reports_unavailable_instead_of_fabricating_findings(monkeypatch):
+    """Regression test: OpenVAS previously returned a hardcoded fake HIGH
+    finding on every deep scan regardless of the target. It should now be
+    honest about not having a real GVM daemon to scan with."""
+    from app.services.vulnscan.scanners import OpenVASScanner
+
+    # Even if a gvm-cli binary happens to be on PATH, there's no bundled/
+    # configured GVM daemon to actually scan with, so the result must not
+    # change based on binary presence.
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/gvm-cli",
+    )
+
+    findings = asyncio.run(OpenVASScanner.scan("https://example.com", "deep"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
+    assert findings[0]["severity"] == "INFO"
+    assert findings[0]["title"] == "OpenVAS/GVM not installed"
+
+
+def test_run_scanner_dispatches_zap_with_profile(monkeypatch):
+    from app.models import VSScanTarget
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator
+    import app.services.vulnscan.orchestrator as orchestrator_module
+
+    captured = {}
+
+    async def _fake_scan(target_url, profile):
+        captured["target_url"] = target_url
+        captured["profile"] = profile
+        return [{"finding_type": "MISCONFIGURATION"}]
+
+    monkeypatch.setattr(orchestrator_module.ZAPPassiveScanner, "scan", staticmethod(_fake_scan))
+
+    target = VSScanTarget(target_value="example.com", target_type="domain")
+    findings = asyncio.run(VulnScanOrchestrator()._run_scanner("zap_passive", target, "deep"))
+
+    assert findings == [{"finding_type": "MISCONFIGURATION"}]
+    assert captured == {"target_url": "https://example.com", "profile": "deep"}
+
+
 @pytest.mark.asyncio
 async def test_resync_vulnscan_scheduled_jobs_schedules_active_valid_targets(monkeypatch, caplog):
     from app import database
@@ -646,6 +1000,110 @@ async def test_vulnscan_run_dispatches_severe_alert_once(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_vulnscan_run_marks_undetected_findings_as_fixed(monkeypatch):
+    from app.models import VSFinding, VSScan, VSScanTarget
+    from app.database import Base
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator, PROFILE_SCANNERS
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    call_count = {"n": 0}
+
+    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+        call_count["n"] += 1
+        findings = [
+            {
+                "scanner_source": "nmap",
+                "scanner_finding_id": "nmap-open-port-80",
+                "title": "Open port 80",
+                "description": "HTTP open",
+                "finding_type": "OPEN_PORT",
+                "severity": "INFO",
+                "target_host": "example.com",
+                "target_port": 80,
+            }
+        ]
+        if call_count["n"] == 1:
+            # Only present on the first scan; must be marked "fixed" once a
+            # later scan no longer detects it.
+            findings.append(
+                {
+                    "scanner_source": "nmap",
+                    "scanner_finding_id": "nmap-open-port-23",
+                    "title": "Open port 23",
+                    "description": "Telnet open",
+                    "finding_type": "OPEN_PORT",
+                    "severity": "HIGH",
+                    "target_host": "example.com",
+                    "target_port": 23,
+                }
+            )
+        return findings
+
+    original_scanners = PROFILE_SCANNERS["quick"]
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Example target", target_value="https://example.com")
+            db.add(target)
+            await db.flush()
+            scan1 = VSScan(target_id=target.id, profile="quick", status="pending")
+            db.add(scan1)
+            await db.commit()
+            target_id = target.id
+            scan1_id = scan1.id
+
+        monkeypatch.setattr("app.services.vulnscan.orchestrator.AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(VulnScanOrchestrator, "_run_scanner", _fake_run_scanner)
+        PROFILE_SCANNERS["quick"] = ["nmap"]
+
+        await VulnScanOrchestrator().run(scan1_id)
+
+        async with session_factory() as db:
+            scan1 = (await db.execute(select(VSScan).where(VSScan.id == scan1_id))).scalar_one()
+        assert scan1.findings_new == 2
+        assert scan1.findings_fixed == 0
+
+        async with session_factory() as db:
+            scan2 = VSScan(target_id=target_id, profile="quick", status="pending")
+            db.add(scan2)
+            await db.commit()
+            scan2_id = scan2.id
+
+        await VulnScanOrchestrator().run(scan2_id)
+
+        async with session_factory() as db:
+            scan2 = (await db.execute(select(VSScan).where(VSScan.id == scan2_id))).scalar_one()
+            all_findings = (
+                await db.execute(select(VSFinding).where(VSFinding.target_id == target_id))
+            ).scalars().all()
+
+        assert scan2.findings_new == 0
+        assert scan2.findings_fixed == 1
+        port23 = next(f for f in all_findings if f.target_port == 23)
+        assert port23.status == "remediated"
+        port80 = next(f for f in all_findings if f.target_port == 80)
+        assert port80.status == "new"
+
+        # A follow-up scan that still doesn't see the already-fixed finding
+        # must not recount it.
+        async with session_factory() as db:
+            scan3 = VSScan(target_id=target_id, profile="quick", status="pending")
+            db.add(scan3)
+            await db.commit()
+            scan3_id = scan3.id
+
+        await VulnScanOrchestrator().run(scan3_id)
+
+        async with session_factory() as db:
+            scan3 = (await db.execute(select(VSScan).where(VSScan.id == scan3_id))).scalar_one()
+        assert scan3.findings_fixed == 0
+    finally:
+        PROFILE_SCANNERS["quick"] = original_scanners
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
 async def test_vulnscan_run_skips_alert_for_non_severe_findings(monkeypatch):
     from app.models import VSScan, VSScanTarget
     from app.database import Base
@@ -767,5 +1225,492 @@ async def test_vulnscan_run_handles_missing_notification_config(monkeypatch, cap
         assert "no notification destination is configured" in caplog.text
     finally:
         PROFILE_SCANNERS["quick"] = original_scanners
+        await engine.dispose()
+        os.remove(db_path)
+
+
+# ── Report generation (app/services/vulnscan/reports.py) ────────────────────
+
+def _make_report_fixtures():
+    from app.models import VSFinding, VSScan, VSScanTarget
+
+    scan = VSScan(
+        id=1, profile="standard", status="completed", overall_risk="HIGH",
+        findings_total=1, findings_critical=0, findings_high=1, findings_medium=0,
+        findings_low=0, findings_info=0, findings_new=1, findings_fixed=0,
+    )
+    target = VSScanTarget(id=1, name="Acme Corp", target_type="network", target_value="acme.example.com")
+    finding = VSFinding(
+        id=1, scan_id=1, target_id=1, scanner_source="nmap", title="Open port 22",
+        description="SSH exposed", finding_type="OPEN_PORT", severity="HIGH", severity_numeric=4,
+        target_host="acme.example.com", target_port=22, cve_ids_json='["CVE-2023-0001"]',
+        remediation_summary="Restrict access", status="new",
+    )
+    return scan, target, finding
+
+
+def test_reports_valid_formats_constant():
+    from app.services.vulnscan.reports import VALID_REPORT_FORMATS
+
+    assert VALID_REPORT_FORMATS == {"json", "csv", "html", "kql", "pdf"}
+
+
+def test_reports_generate_report_rejects_unknown_format():
+    from app.services.vulnscan.reports import generate_report
+
+    scan, target, _finding = _make_report_fixtures()
+    with pytest.raises(ValueError):
+        generate_report("docx", scan, target, [])
+
+
+def test_reports_generate_json_produces_valid_structure():
+    from app.services.vulnscan.reports import generate_report
+
+    scan, target, finding = _make_report_fixtures()
+    content, ext, mime = generate_report("json", scan, target, [finding])
+
+    assert ext == "json"
+    assert mime == "application/json"
+    payload = json.loads(content)
+    assert payload["scan"]["id"] == 1
+    assert payload["target"]["target_value"] == "acme.example.com"
+    assert payload["findings"][0]["cve_ids"] == ["CVE-2023-0001"]
+    assert payload["findings"][0]["title"] == "Open port 22"
+
+
+def test_reports_generate_csv_contains_finding_row():
+    from app.services.vulnscan.reports import generate_report
+
+    scan, target, finding = _make_report_fixtures()
+    content, ext, mime = generate_report("csv", scan, target, [finding])
+
+    assert ext == "csv"
+    assert mime == "text/csv"
+    text = content.decode("utf-8")
+    assert "Open port 22" in text
+    assert "CVE-2023-0001" in text
+    assert "acme.example.com" in text
+
+
+def test_reports_generate_html_contains_table_and_finding():
+    from app.services.vulnscan.reports import generate_report
+
+    scan, target, finding = _make_report_fixtures()
+    content, ext, mime = generate_report("html", scan, target, [finding])
+
+    assert ext == "html"
+    assert mime == "text/html"
+    text = content.decode("utf-8")
+    assert "<table>" in text
+    assert "Open port 22" in text
+    assert "Acme Corp" in text
+
+
+def test_reports_generate_html_escapes_finding_title():
+    from app.models import VSFinding
+    from app.services.vulnscan.reports import generate_report
+
+    scan, target, _finding = _make_report_fixtures()
+    xss_finding = VSFinding(
+        id=2, scan_id=1, target_id=1, scanner_source="nmap", title="<script>alert(1)</script>",
+        finding_type="OPEN_PORT", severity="LOW", severity_numeric=2,
+        target_host="acme.example.com", status="new",
+    )
+    content, _ext, _mime = generate_report("html", scan, target, [xss_finding])
+    text = content.decode("utf-8")
+    assert "<script>alert(1)</script>" not in text
+    assert "&lt;script&gt;" in text
+
+
+def test_reports_generate_kql_contains_datatable_and_escapes_quotes():
+    from app.models import VSFinding
+    from app.services.vulnscan.reports import generate_report
+
+    scan, target, _finding = _make_report_fixtures()
+    quoted_finding = VSFinding(
+        id=3, scan_id=1, target_id=1, scanner_source="nmap", title='Weird "quoted" title',
+        finding_type="OPEN_PORT", severity="LOW", severity_numeric=2,
+        target_host="acme.example.com", status="new",
+    )
+    content, ext, mime = generate_report("kql", scan, target, [quoted_finding])
+
+    assert ext == "kql"
+    assert mime == "text/plain"
+    text = content.decode("utf-8")
+    assert "datatable" in text
+    assert '\\"quoted\\"' in text
+
+
+def test_reports_generate_pdf_starts_with_pdf_header():
+    from app.services.vulnscan.reports import generate_report
+
+    scan, target, finding = _make_report_fixtures()
+    content, ext, mime = generate_report("pdf", scan, target, [finding])
+
+    assert ext == "pdf"
+    assert mime == "application/pdf"
+    assert content[:4] == b"%PDF"
+
+
+def test_reports_generate_all_formats_handle_no_findings():
+    from app.services.vulnscan.reports import generate_report, VALID_REPORT_FORMATS
+
+    scan, target, _finding = _make_report_fixtures()
+    for fmt in VALID_REPORT_FORMATS:
+        content, _ext, _mime = generate_report(fmt, scan, target, [])
+        assert len(content) > 0
+
+
+# ── Report API endpoints (app/api/vulnscan.py) ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_generate_scan_report_creates_report_row_and_file(monkeypatch, tmp_path):
+    from app.database import Base
+    from app.models import VSFinding, VSReport, VSScan, VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+
+    class _FakeUser:
+        id = 42
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="acme.example.com")
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="standard", status="completed", findings_total=1)
+            db.add(scan)
+            await db.flush()
+            finding = VSFinding(
+                scan_id=scan.id, target_id=target.id, scanner_source="nmap", title="Open port 22",
+                finding_type="OPEN_PORT", severity="MEDIUM", severity_numeric=3,
+                target_host="acme.example.com", target_port=22,
+            )
+            db.add(finding)
+            await db.commit()
+            scan_id = scan.id
+
+            result = await vulnscan_api.generate_scan_report(
+                scan_id, vulnscan_api.ReportGenerateRequest(format="json"), db=db, current_user=_FakeUser()
+            )
+
+        assert result["format"] == "json"
+        assert result["file_size_bytes"] > 0
+        assert result["download_url"] == f"/api/v1/vulnscan/reports/{result['id']}/download"
+
+        async with session_factory() as db:
+            report = (await db.execute(select(VSReport).where(VSReport.scan_id == scan_id))).scalar_one()
+        assert report.generated_by == 42
+        assert Path(report.file_path).exists()
+        assert Path(report.file_path).parent == tmp_path
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_generate_scan_report_rejects_invalid_format(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+    from app.database import Base
+    from app.models import VSScan, VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="acme.example.com")
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="standard", status="completed")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+            with pytest.raises(HTTPException) as exc_info:
+                await vulnscan_api.generate_scan_report(
+                    scan_id, vulnscan_api.ReportGenerateRequest(format="exe"), db=db, current_user=_FakeUser()
+                )
+            assert exc_info.value.status_code == 400
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_generate_scan_report_404_for_missing_scan(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+    from app.database import Base
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            with pytest.raises(HTTPException) as exc_info:
+                await vulnscan_api.generate_scan_report(
+                    999999, vulnscan_api.ReportGenerateRequest(format="json"), db=db, current_user=_FakeUser()
+                )
+            assert exc_info.value.status_code == 404
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_list_scan_reports_returns_reports_for_scan(monkeypatch, tmp_path):
+    from app.database import Base
+    from app.models import VSScan, VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="acme.example.com")
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="standard", status="completed")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+            await vulnscan_api.generate_scan_report(
+                scan_id, vulnscan_api.ReportGenerateRequest(format="json"), db=db, current_user=_FakeUser()
+            )
+            await vulnscan_api.generate_scan_report(
+                scan_id, vulnscan_api.ReportGenerateRequest(format="csv"), db=db, current_user=_FakeUser()
+            )
+
+            reports = await vulnscan_api.list_scan_reports(scan_id, db=db, _=_FakeUser())
+
+        assert len(reports) == 2
+        assert {r["format"] for r in reports} == {"json", "csv"}
+        assert all(r["download_url"].startswith("/api/v1/vulnscan/reports/") for r in reports)
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_download_and_delete_report_lifecycle(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from app.database import Base
+    from app.models import VSScan, VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="acme.example.com")
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="standard", status="completed")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+            created = await vulnscan_api.generate_scan_report(
+                scan_id, vulnscan_api.ReportGenerateRequest(format="html"), db=db, current_user=_FakeUser()
+            )
+            report_id = created["id"]
+
+            response = await vulnscan_api.download_report(report_id, db=db, _=_FakeUser())
+            assert isinstance(response, FileResponse)
+            assert response.media_type == "text/html"
+
+            with pytest.raises(HTTPException) as exc_info:
+                await vulnscan_api.download_report(999999, db=db, _=_FakeUser())
+            assert exc_info.value.status_code == 404
+
+            await vulnscan_api.delete_report(report_id, db=db, _=_FakeUser())
+            assert not any(tmp_path.iterdir())
+
+            with pytest.raises(HTTPException) as exc_info:
+                await vulnscan_api.download_report(report_id, db=db, _=_FakeUser())
+            assert exc_info.value.status_code == 404
+
+            with pytest.raises(HTTPException) as exc_info:
+                await vulnscan_api.delete_report(999999, db=db, _=_FakeUser())
+            assert exc_info.value.status_code == 404
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_run_scan_bg_auto_generates_requested_report_formats(monkeypatch, tmp_path):
+    from app.database import Base
+    from app.models import VSReport, VSScan, VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(vulnscan_api, "AsyncSessionLocal", session_factory)
+
+    class _FakeOrchestrator:
+        async def run(self, scan_id):
+            async with session_factory() as db:
+                scan = (await db.execute(select(VSScan).where(VSScan.id == scan_id))).scalar_one()
+                scan.status = "completed"
+                await db.commit()
+
+    monkeypatch.setattr(vulnscan_api, "VulnScanOrchestrator", _FakeOrchestrator)
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="acme.example.com")
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="standard", status="pending")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+        await vulnscan_api._run_scan_bg(scan_id, ["json", "csv", "bogus"], generated_by=7)
+
+        async with session_factory() as db:
+            reports = (await db.execute(select(VSReport).where(VSReport.scan_id == scan_id))).scalars().all()
+
+        assert {r.format for r in reports} == {"json", "csv"}
+        assert all(r.generated_by == 7 for r in reports)
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_run_scan_bg_skips_report_generation_when_no_formats_requested(monkeypatch, tmp_path):
+    from app.database import Base
+    from app.models import VSReport, VSScan, VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(vulnscan_api, "AsyncSessionLocal", session_factory)
+
+    class _FakeOrchestrator:
+        async def run(self, scan_id):
+            async with session_factory() as db:
+                scan = (await db.execute(select(VSScan).where(VSScan.id == scan_id))).scalar_one()
+                scan.status = "completed"
+                await db.commit()
+
+    monkeypatch.setattr(vulnscan_api, "VulnScanOrchestrator", _FakeOrchestrator)
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="acme.example.com")
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="standard", status="pending")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+        await vulnscan_api._run_scan_bg(scan_id)
+        await vulnscan_api._run_scan_bg(scan_id, None, generated_by=7)
+        await vulnscan_api._run_scan_bg(scan_id, [], generated_by=7)
+
+        async with session_factory() as db:
+            reports = (await db.execute(select(VSReport).where(VSReport.scan_id == scan_id))).scalars().all()
+
+        assert reports == []
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_launch_scan_rejects_invalid_report_formats(monkeypatch, tmp_path):
+    from fastapi import BackgroundTasks, HTTPException
+    from app.database import Base
+    from app.models import VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="acme.example.com")
+            db.add(target)
+            await db.commit()
+            await db.refresh(target)
+            target_id = target.id
+
+            with pytest.raises(HTTPException) as exc_info:
+                await vulnscan_api.launch_scan(
+                    target_id,
+                    vulnscan_api.ScanLaunchRequest(report_formats=["docx"]),
+                    BackgroundTasks(),
+                    db=db,
+                    current_user=_FakeUser(),
+                )
+            assert exc_info.value.status_code == 400
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_launch_scan_passes_report_formats_to_background_task(monkeypatch, tmp_path):
+    from fastapi import BackgroundTasks
+    from app.database import Base
+    from app.models import VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    monkeypatch.setattr(vulnscan_api, "REPORTS_DIR", tmp_path)
+
+    class _FakeUser:
+        id = 9
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="acme.example.com")
+            db.add(target)
+            await db.commit()
+            await db.refresh(target)
+            target_id = target.id
+
+            background_tasks = BackgroundTasks()
+            result = await vulnscan_api.launch_scan(
+                target_id,
+                vulnscan_api.ScanLaunchRequest(report_formats=["json", "pdf"]),
+                background_tasks,
+                db=db,
+                current_user=_FakeUser(),
+            )
+
+        assert result["status"] == "pending"
+        assert len(background_tasks.tasks) == 1
+        task = background_tasks.tasks[0]
+        assert task.func is vulnscan_api._run_scan_bg
+        assert task.args == (result["scan_id"], ["json", "pdf"], 9)
+    finally:
         await engine.dispose()
         os.remove(db_path)
