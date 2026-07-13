@@ -62,7 +62,7 @@ class VulnScanOrchestrator:
         if scanner == "nuclei":
             return await NucleiScanner.scan(target.target_value, profile)
         if scanner == "zap_passive":
-            return await ZAPPassiveScanner.scan(target_url)
+            return await ZAPPassiveScanner.scan(target_url, profile)
         if scanner == "openvas":
             return await OpenVASScanner.scan(target.target_value, profile)
         if scanner == "nmap":

@@ -1,5 +1,6 @@
 import json
 import asyncio
+import html
 import re
 import shutil
 import tempfile
@@ -1065,41 +1066,167 @@ class NmapScanner:
                 pass
 
 
+_ZAP_RISK_SEVERITY = {
+    "0": "INFO",
+    "1": "LOW",
+    "2": "MEDIUM",
+    "3": "HIGH",
+}
+
+
+def _strip_html(value: str) -> str:
+    """Best-effort plain-text rendering of ZAP's HTML-flavoured report fields."""
+    text = re.sub(r"<[^>]+>", " ", value or "")
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def _zap_alert_finding(alert: dict, target_url: str, host: str, port: int | None) -> dict:
+    risk_code = str(alert.get("riskcode", "1"))
+    severity = _ZAP_RISK_SEVERITY.get(risk_code, "LOW")
+    name = str(alert.get("name") or alert.get("alert") or "ZAP finding").strip()
+    description = _strip_html(str(alert.get("desc", ""))) or name
+    solution = _strip_html(str(alert.get("solution", "")))
+    plugin_id = str(alert.get("pluginid") or alert.get("id") or "0")
+
+    instances = alert.get("instances")
+    first_instance = instances[0] if isinstance(instances, list) and instances else {}
+    evidence = first_instance.get("evidence") if isinstance(first_instance, dict) else None
+    affected_parameter = first_instance.get("param") if isinstance(first_instance, dict) else None
+
+    name_lower = name.lower()
+    if "sql" in name_lower:
+        finding_type = "SQLI"
+    elif "cross site scripting" in name_lower or "cross-site scripting" in name_lower or "xss" in name_lower:
+        finding_type = "XSS"
+    elif "disclosure" in name_lower or "information" in name_lower:
+        finding_type = "EXPOSURE"
+    else:
+        finding_type = "MISCONFIGURATION"
+
+    references = [
+        _strip_html(line)
+        for line in re.split(r"<br ?/?>|\n", str(alert.get("reference", "")))
+        if _strip_html(line)
+    ] or ["https://www.zaproxy.org/"]
+
+    cwe_id = alert.get("cweid")
+    cwe_ids = [f"CWE-{cwe_id}"] if cwe_id not in (None, "", -1, "-1", "0") else []
+    wasc_id = alert.get("wascid")
+
+    return {
+        **_base_finding(
+            "zap",
+            f"zap-{plugin_id}",
+            name[:255],
+            description,
+            finding_type,
+            severity,
+            target_url,
+            host,
+            port,
+            cwe_ids,
+        ),
+        "remediation_summary": solution or "Review the ZAP finding and apply the recommended mitigation.",
+        "references_json": json.dumps(references),
+        "evidence": evidence,
+        "affected_parameter": affected_parameter,
+        "wasc_id": str(wasc_id) if wasc_id not in (None, "", -1, "-1") else None,
+    }
+
+
 class ZAPPassiveScanner:
+    """Runs a real OWASP ZAP baseline scan (spider + passive rules only, no
+    active attacks) via the `zap-baseline.py` CLI shipped with ZAP, and
+    parses its JSON report. Degrades to a TOOL_NOT_AVAILABLE finding when ZAP
+    isn't installed, matching every other scanner in this module instead of
+    fabricating a finding.
+    """
+
     @staticmethod
-    async def scan(target_url: str) -> list[dict]:
-        # TODO: replace with real subprocess call
+    async def scan(target_url: str, profile: str = "standard") -> list[dict]:
         normalized_url, host, port = _target_parts(target_url)
-        return [
-            _base_finding(
-                "zap",
-                "zap-passive-001",
-                "Cookie without SameSite",
-                "Passive scan found cookie without SameSite attribute.",
-                "MISCONFIGURATION",
-                "LOW",
-                normalized_url,
-                host,
-                port,
-            )
-        ]
+        temp_path = Path(tempfile.gettempdir()) / f"zap_{uuid.uuid4().hex}.json"
+        findings: list[dict] = []
+        zap_bin = shutil.which("zap-baseline.py")
+        if not zap_bin:
+            return _tool_not_available_finding("OWASP ZAP", "zap", normalized_url, host, port)
+
+        if profile == "deep":
+            spider_minutes, max_minutes, timeout = "3", "8", 600
+        else:
+            spider_minutes, max_minutes, timeout = "1", "4", 300
+
+        try:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    zap_bin,
+                    "-t",
+                    normalized_url,
+                    "-J",
+                    str(temp_path),
+                    "-m",
+                    spider_minutes,
+                    "-T",
+                    max_minutes,
+                    "-I",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                return _tool_not_available_finding("OWASP ZAP", "zap", normalized_url, host, port)
+            except Exception:
+                return []
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return _scan_timeout_finding("OWASP ZAP", "zap", normalized_url, host, port)
+
+            sites: list[dict] = []
+            if temp_path.exists():
+                try:
+                    payload = json.loads(temp_path.read_text(encoding="utf-8"))
+                    raw_sites = payload.get("site", []) if isinstance(payload, dict) else []
+                    sites = raw_sites if isinstance(raw_sites, list) else []
+                except (json.JSONDecodeError, OSError):
+                    sites = []
+
+            for site in sites:
+                if not isinstance(site, dict):
+                    continue
+                alerts = site.get("alerts")
+                if not isinstance(alerts, list):
+                    continue
+                for alert in alerts:
+                    if isinstance(alert, dict):
+                        findings.append(_zap_alert_finding(alert, normalized_url, host, port))
+
+            return findings
+        except Exception:
+            return []
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 class OpenVASScanner:
+    """OpenVAS / Greenbone Vulnerability Manager (GVM) scanning.
+
+    A real OpenVAS scan requires a running `gvmd` daemon reachable over the
+    GMP protocol, plus provisioned scan configs and port lists - a stateful
+    create-target -> create-task -> start -> poll -> fetch-report lifecycle
+    that can run for tens of minutes, unlike the other scanners in this
+    module which are bounded one-shot CLI calls. Zircon doesn't bundle or
+    manage a GVM daemon, so rather than fabricate a finding (as this scanner
+    previously did) we honestly report it as unavailable, exactly like the
+    other scanners do when their underlying tool is missing.
+    """
+
     @staticmethod
     async def scan(target: str, profile: str) -> list[dict]:
-        # TODO: replace with real subprocess call
         target_url, host, port = _target_parts(target)
-        return [
-            _base_finding(
-                "openvas",
-                "openvas-001",
-                "Outdated service vulnerability",
-                "OpenVAS detected a known vulnerable service version.",
-                "EXPOSURE",
-                "HIGH",
-                target_url,
-                host,
-                port,
-            )
-        ]
+        return _tool_not_available_finding("OpenVAS/GVM", "openvas", target_url, host, port)

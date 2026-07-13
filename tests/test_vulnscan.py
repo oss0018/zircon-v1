@@ -596,6 +596,181 @@ def test_run_scanner_dispatches_nmap(monkeypatch):
     assert captured == {"target": "example.com", "profile": "deep"}
 
 
+def test_zap_scanner_returns_tool_not_available_when_binary_missing(monkeypatch):
+    from app.services.vulnscan.scanners import ZAPPassiveScanner
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: None)
+
+    findings = asyncio.run(ZAPPassiveScanner.scan("https://example.com", "standard"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
+    assert findings[0]["title"] == "OWASP ZAP not installed"
+
+
+def test_zap_scanner_parses_json_report_for_alerts(monkeypatch):
+    from app.services.vulnscan.scanners import ZAPPassiveScanner
+
+    captured = {"json_path": None}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        json_path = Path(args[args.index("-J") + 1])
+        captured["json_path"] = json_path
+        json_path.write_text(
+            json.dumps(
+                {
+                    "site": [
+                        {
+                            "@name": "https://example.com",
+                            "alerts": [
+                                {
+                                    "pluginid": "10020",
+                                    "alert": "X-Frame-Options Header Not Set",
+                                    "name": "X-Frame-Options Header Not Set",
+                                    "riskcode": "2",
+                                    "confidence": "2",
+                                    "desc": "<p>The response does not include <b>X-Frame-Options</b>.</p>",
+                                    "solution": "<p>Set the X-Frame-Options header.</p>",
+                                    "reference": "<p>https://example.org/xfo</p>",
+                                    "cweid": 1021,
+                                    "wascid": 15,
+                                    "instances": [
+                                        {"uri": "https://example.com/", "method": "GET", "param": "", "evidence": ""}
+                                    ],
+                                },
+                                {
+                                    "pluginid": "40012",
+                                    "alert": "Cross Site Scripting (Reflected)",
+                                    "name": "Cross Site Scripting (Reflected)",
+                                    "riskcode": "3",
+                                    "confidence": "2",
+                                    "desc": "Reflected XSS found.",
+                                    "solution": "Sanitize user input.",
+                                    "reference": "https://example.org/xss",
+                                    "cweid": 79,
+                                    "wascid": 8,
+                                    "instances": [
+                                        {"uri": "https://example.com/search", "method": "GET", "param": "q", "evidence": "<script>"}
+                                    ],
+                                },
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return _Proc()
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/zap-baseline.py" if name == "zap-baseline.py" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    findings = asyncio.run(ZAPPassiveScanner.scan("https://example.com", "standard"))
+
+    assert len(findings) == 2
+    xfo = next(f for f in findings if f["scanner_finding_id"] == "zap-10020")
+    assert xfo["severity"] == "MEDIUM"
+    assert xfo["finding_type"] == "MISCONFIGURATION"
+    assert "X-Frame-Options" in xfo["description"]
+    assert "<p>" not in xfo["description"]
+    assert xfo["remediation_summary"] == "Set the X-Frame-Options header."
+    assert json.loads(xfo["cwe_ids_json"]) == ["CWE-1021"]
+    assert xfo["wasc_id"] == "15"
+
+    xss = next(f for f in findings if f["scanner_finding_id"] == "zap-40012")
+    assert xss["severity"] == "HIGH"
+    assert xss["finding_type"] == "XSS"
+    assert xss["affected_parameter"] == "q"
+    assert xss["evidence"] == "<script>"
+
+    # The temp JSON report is cleaned up after parsing.
+    assert not captured["json_path"].exists()
+
+
+def test_zap_scanner_returns_timeout_finding_when_scan_exceeds_limit(monkeypatch):
+    from app.services.vulnscan.scanners import ZAPPassiveScanner
+
+    class _Proc:
+        returncode = None
+
+        async def wait(self):
+            return 0
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        return _Proc()
+
+    async def _timeout(coro, timeout=None):  # noqa: ARG001
+        coro.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/zap-baseline.py" if name == "zap-baseline.py" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+    monkeypatch.setattr(asyncio, "wait_for", _timeout)
+
+    findings = asyncio.run(ZAPPassiveScanner.scan("https://example.com", "deep"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "SCAN_TIMEOUT"
+
+
+def test_openvas_scanner_reports_unavailable_instead_of_fabricating_findings(monkeypatch):
+    """Regression test: OpenVAS previously returned a hardcoded fake HIGH
+    finding on every deep scan regardless of the target. It should now be
+    honest about not having a real GVM daemon to scan with."""
+    from app.services.vulnscan.scanners import OpenVASScanner
+
+    # Even if a gvm-cli binary happens to be on PATH, there's no bundled/
+    # configured GVM daemon to actually scan with, so the result must not
+    # change based on binary presence.
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/gvm-cli",
+    )
+
+    findings = asyncio.run(OpenVASScanner.scan("https://example.com", "deep"))
+    assert len(findings) == 1
+    assert findings[0]["finding_type"] == "TOOL_NOT_AVAILABLE"
+    assert findings[0]["severity"] == "INFO"
+    assert findings[0]["title"] == "OpenVAS/GVM not installed"
+
+
+def test_run_scanner_dispatches_zap_with_profile(monkeypatch):
+    from app.models import VSScanTarget
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator
+    import app.services.vulnscan.orchestrator as orchestrator_module
+
+    captured = {}
+
+    async def _fake_scan(target_url, profile):
+        captured["target_url"] = target_url
+        captured["profile"] = profile
+        return [{"finding_type": "MISCONFIGURATION"}]
+
+    monkeypatch.setattr(orchestrator_module.ZAPPassiveScanner, "scan", staticmethod(_fake_scan))
+
+    target = VSScanTarget(target_value="example.com", target_type="domain")
+    findings = asyncio.run(VulnScanOrchestrator()._run_scanner("zap_passive", target, "deep"))
+
+    assert findings == [{"finding_type": "MISCONFIGURATION"}]
+    assert captured == {"target_url": "https://example.com", "profile": "deep"}
+
+
 @pytest.mark.asyncio
 async def test_resync_vulnscan_scheduled_jobs_schedules_active_valid_targets(monkeypatch, caplog):
     from app import database
