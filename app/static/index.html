@@ -120,7 +120,7 @@
 
             <div class="nav-item" :class="page === 'vulnscan' ? 'active' : ''" @click="navigate('vulnscan')" @contextmenu.prevent="openPageInNewWindow('vulnscan')">
               <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l8 4v6c0 5.25-3.438 9.813-8 11-4.562-1.187-8-5.75-8-11V6l8-4z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.5 12.5l2 2 3-4"/></svg>
-              <span>Vuln Scanner</span>
+              <span x-text="t('vulnerability_scanner')"></span>
             </div>
 
             <!-- ── Brand Protection Section (collapsible) ── -->
@@ -7030,7 +7030,7 @@
             <div x-show="page === 'vulnscan'" x-data="vulnscanApp()" x-init="init()">
               <div class="flex justify-between items-center mb-4">
                 <div>
-                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;">Vuln Scanner</h2>
+                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;" x-text="t('vulnerability_scanner')"></h2>
                 </div>
                 <div class="flex gap-2">
                   <button class="btn btn-secondary btn-sm" @click="loadDashboard(); loadScans(); loadAllFindings();">Refresh</button>

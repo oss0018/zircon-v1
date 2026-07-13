@@ -62,8 +62,8 @@ Key settings:
 - `ZIRCON_SMTP_*` — Email notification settings
 - `ZIRCON_TELEGRAM_BOT_TOKEN` — Telegram bot for alerts
 
-### Docker runtime for vuln scanners
-`Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, and `nuclei`, and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
+### Docker runtime for vulnerability scanners
+`Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, `nuclei`, and `nmap`, and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
 
 To verify the scanner tooling inside the built image:
 
