@@ -75,6 +75,28 @@ If you manage Nuclei templates separately, set `ZIRCON_NUCLEI_UPDATE_TEMPLATES=0
 
 **Scanner coverage**: `headers`, `dns_sec`, `testssl`, `nikto`, `nuclei`, `zap_passive`, and `nmap` run real tools. `openvas` (in the `deep` profile) intentionally reports itself as unavailable rather than fabricating findings: a working OpenVAS/Greenbone scan needs a running `gvmd` daemon reachable over GMP with provisioned scan configs, which is a much larger stateful integration than the bounded CLI scanners above and isn't bundled with Zircon.
 
+### Scanner tuning options
+Beyond the fixed quick/standard/deep profile bundles, Nuclei, ZAP, testssl.sh, and Nikto each accept extra tuning via a `scanner_config` JSON object. Set a reusable default per target (in the target's **Scanner Options** panel, or via the API) and optionally override it for a single run when launching a scan — overrides are merged onto the target's default one tool at a time, so supplying only `nuclei` at launch leaves the target's saved `zap`/`testssl`/`nikto` settings untouched. All input is validated and clamped server-side; unknown keys or out-of-range values are dropped silently rather than rejected.
+
+```json
+{
+  "nuclei": { "severity": ["critical", "high"], "tags": "cve,exposure" },
+  "zap": { "spider_minutes": 2, "max_minutes": 8 },
+  "testssl": { "fast": true, "checks": ["protocols", "vulnerabilities", "headers"] },
+  "nikto": { "tuning": "1239", "max_time": 180 }
+}
+```
+
+- `nuclei.severity` — subset of `critical`, `high`, `medium`, `low`, `info`.
+- `nuclei.tags` — comma-separated custom template tags; when set, this **replaces** the profile's built-in tag list (including for `deep`, which otherwise runs untagged/unfiltered).
+- `zap.spider_minutes` (1-10) / `zap.max_minutes` (1-30) — override the baseline scan's spider and total time budget.
+- `testssl.fast` — skip slower cipher/vulnerability checks (`--fast`).
+- `testssl.checks` — subset of `protocols`, `vulnerabilities`, `headers` to run as single-check-only passes.
+- `nikto.tuning` — Nikto `-Tuning` scan-category codes (digits `0`-`9` plus `a`, `b`, `c`, `x`).
+- `nikto.max_time` (30-600 seconds) — overrides Nikto's default 120s time budget.
+
+Both `POST /api/v1/vulnscan/targets` / `PATCH /api/v1/vulnscan/targets/{id}` (target defaults) and `POST /api/v1/vulnscan/targets/{id}/scan` (per-launch override) accept a `scanner_config` field; targets, scans, and scan detail responses all echo back the sanitized `scanner_config` that was stored or used.
+
 ### Vulnerability scan reports
 Every scan can generate downloadable reports in **JSON, CSV, HTML, KQL, and PDF** formats. Pick formats when launching a scan (they are generated automatically once the scan completes) or generate them on demand afterwards from the scan detail drawer's **Reports** tab.
 - `POST /api/v1/vulnscan/scans/{scan_id}/reports` — generate a report in a given format

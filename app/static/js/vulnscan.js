@@ -15,8 +15,15 @@ document.addEventListener('alpine:init', () => {
       default_profile: 'standard',
       tags: '',
       schedule_cron: '',
+      scanner_config: {
+        nuclei: { severity: [], tags: '' },
+        zap: { spider_minutes: null, max_minutes: null },
+        testssl: { fast: false, checks: [] },
+        nikto: { tuning: '', max_time: null },
+      },
     },
     targetFormVisible: false,
+    targetScannerOptionsOpen: false,
     editingTarget: null,
 
     scans: [],
@@ -43,8 +50,15 @@ document.addEventListener('alpine:init', () => {
       scope: 'SELF',
       comment: '',
       reportFormats: ['json'],
+      scanner_config: {
+        nuclei: { severity: [], tags: '' },
+        zap: { spider_minutes: null, max_minutes: null },
+        testssl: { fast: false, checks: [] },
+        nikto: { tuning: '', max_time: null },
+      },
     },
     launchSubmitting: false,
+    launchScannerOptionsOpen: false,
 
     templates: [],
     templateForm: {
@@ -65,6 +79,49 @@ document.addEventListener('alpine:init', () => {
         this.loadTemplates(),
       ]);
       await this.loadAllFindings();
+    },
+
+    _defaultScannerConfig() {
+      return {
+        nuclei: { severity: [], tags: '' },
+        zap: { spider_minutes: null, max_minutes: null },
+        testssl: { fast: false, checks: [] },
+        nikto: { tuning: '', max_time: null },
+      };
+    },
+
+    _mergeScannerConfig(saved) {
+      const defaults = this._defaultScannerConfig();
+      const src = saved && typeof saved === 'object' ? saved : {};
+      return {
+        nuclei: { ...defaults.nuclei, ...(src.nuclei || {}) },
+        zap: { ...defaults.zap, ...(src.zap || {}) },
+        testssl: { ...defaults.testssl, ...(src.testssl || {}) },
+        nikto: { ...defaults.nikto, ...(src.nikto || {}) },
+      };
+    },
+
+    _cleanScannerConfigForSubmit(cfg) {
+      const num = v => (v === '' || v === null || v === undefined || Number.isNaN(v) ? null : Number(v));
+      const str = v => (typeof v === 'string' ? v.trim() : '');
+      return {
+        nuclei: {
+          severity: Array.isArray(cfg.nuclei.severity) ? cfg.nuclei.severity.slice() : [],
+          tags: str(cfg.nuclei.tags),
+        },
+        zap: {
+          spider_minutes: num(cfg.zap.spider_minutes),
+          max_minutes: num(cfg.zap.max_minutes),
+        },
+        testssl: {
+          fast: !!cfg.testssl.fast,
+          checks: Array.isArray(cfg.testssl.checks) ? cfg.testssl.checks.slice() : [],
+        },
+        nikto: {
+          tuning: str(cfg.nikto.tuning),
+          max_time: num(cfg.nikto.max_time),
+        },
+      };
     },
 
     async loadDashboard() {
@@ -95,7 +152,9 @@ document.addEventListener('alpine:init', () => {
         default_profile: 'standard',
         tags: '',
         schedule_cron: '',
+        scanner_config: this._defaultScannerConfig(),
       };
+      this.targetScannerOptionsOpen = false;
       this.targetFormVisible = true;
     },
 
@@ -109,7 +168,9 @@ document.addEventListener('alpine:init', () => {
         default_profile: t.default_profile || 'standard',
         tags: Array.isArray(t.tags) ? t.tags.join(', ') : '',
         schedule_cron: t.schedule_cron || '',
+        scanner_config: this._mergeScannerConfig(t.scanner_config),
       };
+      this.targetScannerOptionsOpen = false;
       this.targetFormVisible = true;
     },
 
@@ -129,6 +190,7 @@ document.addEventListener('alpine:init', () => {
           .map(s => s.trim())
           .filter(Boolean),
         schedule_cron: this.targetForm.schedule_cron.trim() || null,
+        scanner_config: this._cleanScannerConfigForSubmit(this.targetForm.scanner_config),
       };
       try {
         if (this.editingTarget && this.editingTarget.id) {
@@ -292,7 +354,9 @@ document.addEventListener('alpine:init', () => {
         scope: target.scope || 'SELF',
         comment: '',
         reportFormats: ['json'],
+        scanner_config: this._mergeScannerConfig(target.scanner_config),
       };
+      this.launchScannerOptionsOpen = false;
     },
 
     async submitLaunchScan() {
@@ -304,6 +368,7 @@ document.addEventListener('alpine:init', () => {
           scope: this.launchModal.scope,
           comment: this.launchModal.comment,
           report_formats: this.launchModal.reportFormats || [],
+          scanner_config: this._cleanScannerConfigForSubmit(this.launchModal.scanner_config),
         });
         showToast('Scan launched', 'success');
         this.launchModal.visible = false;

@@ -48,7 +48,9 @@ class VulnScanOrchestrator:
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
         return value, host, port
 
-    async def _run_scanner(self, scanner: str, target: VSScanTarget, profile: str) -> list[dict]:
+    async def _run_scanner(
+        self, scanner: str, target: VSScanTarget, profile: str, scanner_config: dict
+    ) -> list[dict]:
         target_url, host, port = self._target_parts(target.target_value)
 
         if scanner == "headers":
@@ -56,13 +58,13 @@ class VulnScanOrchestrator:
         if scanner == "dns_sec":
             return await DNSSecScanner.scan(host)
         if scanner == "testssl":
-            return await TestSSLScanner.scan(host, port)
+            return await TestSSLScanner.scan(host, port, scanner_config.get("testssl"))
         if scanner == "nikto":
-            return await NiktoScanner.scan(target.target_value)
+            return await NiktoScanner.scan(target.target_value, scanner_config.get("nikto"))
         if scanner == "nuclei":
-            return await NucleiScanner.scan(target.target_value, profile)
+            return await NucleiScanner.scan(target.target_value, profile, scanner_config.get("nuclei"))
         if scanner == "zap_passive":
-            return await ZAPPassiveScanner.scan(target_url, profile)
+            return await ZAPPassiveScanner.scan(target_url, profile, scanner_config.get("zap"))
         if scanner == "openvas":
             return await OpenVASScanner.scan(target.target_value, profile)
         if scanner == "nmap":
@@ -115,6 +117,7 @@ class VulnScanOrchestrator:
                     return
 
                 scanners = PROFILE_SCANNERS.get(scan.profile, PROFILE_SCANNERS["standard"])
+                scanner_config = json.loads(scan.scanner_config_json or "{}")
                 scan.status = "running"
                 scan.started_at = started_at
                 scan.scanners_used_json = json.dumps(scanners)
@@ -128,7 +131,9 @@ class VulnScanOrchestrator:
                 total_scanners = max(len(scanners), 1)
                 for idx, scanner_name in enumerate(scanners, start=1):
                     try:
-                        raw_findings.extend(await self._run_scanner(scanner_name, target, scan.profile))
+                        raw_findings.extend(
+                            await self._run_scanner(scanner_name, target, scan.profile, scanner_config)
+                        )
                     except Exception:
                         logger.exception("Scanner %s failed for scan %s", scanner_name, scan_id)
                     finally:

@@ -590,7 +590,7 @@ def test_run_scanner_dispatches_nmap(monkeypatch):
     monkeypatch.setattr(orchestrator_module.NmapScanner, "scan", staticmethod(_fake_scan))
 
     target = VSScanTarget(target_value="example.com", target_type="domain")
-    findings = asyncio.run(VulnScanOrchestrator()._run_scanner("nmap", target, "deep"))
+    findings = asyncio.run(VulnScanOrchestrator()._run_scanner("nmap", target, "deep", {}))
 
     assert findings == [{"finding_type": "OPEN_PORT"}]
     assert captured == {"target": "example.com", "profile": "deep"}
@@ -757,18 +757,24 @@ def test_run_scanner_dispatches_zap_with_profile(monkeypatch):
 
     captured = {}
 
-    async def _fake_scan(target_url, profile):
+    async def _fake_scan(target_url, profile, config=None):
         captured["target_url"] = target_url
         captured["profile"] = profile
+        captured["config"] = config
         return [{"finding_type": "MISCONFIGURATION"}]
 
     monkeypatch.setattr(orchestrator_module.ZAPPassiveScanner, "scan", staticmethod(_fake_scan))
 
     target = VSScanTarget(target_value="example.com", target_type="domain")
-    findings = asyncio.run(VulnScanOrchestrator()._run_scanner("zap_passive", target, "deep"))
+    scanner_config = {"zap": {"spider_minutes": 2}, "nikto": {"tuning": "1239"}}
+    findings = asyncio.run(VulnScanOrchestrator()._run_scanner("zap_passive", target, "deep", scanner_config))
 
     assert findings == [{"finding_type": "MISCONFIGURATION"}]
-    assert captured == {"target_url": "https://example.com", "profile": "deep"}
+    assert captured == {
+        "target_url": "https://example.com",
+        "profile": "deep",
+        "config": {"spider_minutes": 2},
+    }
 
 
 @pytest.mark.asyncio
@@ -936,7 +942,7 @@ async def test_vulnscan_run_dispatches_severe_alert_once(monkeypatch):
             {"title": title, "message": message, "email": email, "telegram": telegram}
         )
 
-    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+    async def _fake_run_scanner(self, scanner, target, profile, scanner_config):  # noqa: ARG001
         return [
             {
                 "scanner_source": "nuclei",
@@ -1008,7 +1014,7 @@ async def test_vulnscan_run_marks_undetected_findings_as_fixed(monkeypatch):
     engine, session_factory, db_path = await _build_temp_session_factory(Base)
     call_count = {"n": 0}
 
-    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+    async def _fake_run_scanner(self, scanner, target, profile, scanner_config):  # noqa: ARG001
         call_count["n"] += 1
         findings = [
             {
@@ -1115,7 +1121,7 @@ async def test_vulnscan_run_skips_alert_for_non_severe_findings(monkeypatch):
     async def _fake_notify(title, message, email, telegram):  # noqa: ARG001
         notifications.append((title, message, email, telegram))
 
-    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+    async def _fake_run_scanner(self, scanner, target, profile, scanner_config):  # noqa: ARG001
         return [
             {
                 "scanner_source": "headers",
@@ -1173,7 +1179,7 @@ async def test_vulnscan_run_handles_missing_notification_config(monkeypatch, cap
 
     engine, session_factory, db_path = await _build_temp_session_factory(Base)
 
-    async def _fake_run_scanner(self, scanner, target, profile):  # noqa: ARG001
+    async def _fake_run_scanner(self, scanner, target, profile, scanner_config):  # noqa: ARG001
         return [
             {
                 "scanner_source": "nikto",
@@ -1712,5 +1718,602 @@ async def test_launch_scan_passes_report_formats_to_background_task(monkeypatch,
         assert task.func is vulnscan_api._run_scan_bg
         assert task.args == (result["scan_id"], ["json", "pdf"], 9)
     finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+# ---------------------------------------------------------------------------
+# Scanner configuration (Nuclei/ZAP/testssl.sh/Nikto tuning options)
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_scanner_config_handles_none_and_non_dict():
+    from app.services.vulnscan.scanner_config import sanitize_scanner_config
+
+    assert sanitize_scanner_config(None) == {}
+    assert sanitize_scanner_config({}) == {}
+    assert sanitize_scanner_config("not a dict") == {}
+    assert sanitize_scanner_config({"nuclei": "not a dict", "zap": 123}) == {}
+
+
+def test_sanitize_scanner_config_nuclei_severity_and_tags():
+    from app.services.vulnscan.scanner_config import sanitize_scanner_config
+
+    cleaned = sanitize_scanner_config(
+        {
+            "nuclei": {
+                "severity": ["HIGH", "critical", "bogus", "high"],
+                "tags": "cve, CVE-2024, bad tag!, sqli",
+            }
+        }
+    )
+    assert cleaned["nuclei"]["severity"] == ["critical", "high"]
+    # "bad tag!" contains a space and "!" so it's dropped; duplicates removed.
+    assert cleaned["nuclei"]["tags"] == "cve,cve-2024,sqli"
+
+
+def test_sanitize_scanner_config_nuclei_drops_empty_results():
+    from app.services.vulnscan.scanner_config import sanitize_scanner_config
+
+    # An all-invalid severity list / all-invalid tags string must not leave a
+    # stray empty sub-dict behind.
+    assert sanitize_scanner_config({"nuclei": {"severity": ["bogus"], "tags": "!!!, ###"}}) == {}
+
+
+def test_sanitize_scanner_config_zap_clamps_minutes():
+    from app.services.vulnscan.scanner_config import sanitize_scanner_config
+
+    cleaned = sanitize_scanner_config({"zap": {"spider_minutes": 99, "max_minutes": -5}})
+    assert cleaned["zap"]["spider_minutes"] == 10  # clamped to max
+    assert cleaned["zap"]["max_minutes"] == 1  # clamped to min
+
+    # Booleans must never be coerced into 0/1 even though bool is an int subclass.
+    assert sanitize_scanner_config({"zap": {"spider_minutes": True}}) == {}
+    # Non-numeric values are dropped entirely.
+    assert sanitize_scanner_config({"zap": {"spider_minutes": "5"}}) == {}
+    # Floats are truncated to int.
+    assert sanitize_scanner_config({"zap": {"max_minutes": 7.9}})["zap"]["max_minutes"] == 7
+
+
+def test_sanitize_scanner_config_testssl_fast_and_checks():
+    from app.services.vulnscan.scanner_config import sanitize_scanner_config
+
+    cleaned = sanitize_scanner_config({"testssl": {"fast": True, "checks": ["protocols", "headers", "bogus"]}})
+    assert cleaned["testssl"]["fast"] is True
+    assert cleaned["testssl"]["checks"] == ["headers", "protocols"]
+
+    # Non-bool "fast" values are dropped rather than truthiness-coerced.
+    assert sanitize_scanner_config({"testssl": {"fast": "yes"}}) == {}
+    assert sanitize_scanner_config({"testssl": {"checks": ["bogus"]}}) == {}
+
+
+def test_sanitize_scanner_config_nikto_tuning_and_max_time():
+    from app.services.vulnscan.scanner_config import sanitize_scanner_config
+
+    cleaned = sanitize_scanner_config({"nikto": {"tuning": "129bX", "max_time": 15}})
+    assert cleaned["nikto"]["tuning"] == "129bx"
+    assert cleaned["nikto"]["max_time"] == 30  # clamped to min
+
+    # Any disallowed character invalidates the whole tuning string.
+    assert sanitize_scanner_config({"nikto": {"tuning": "12z"}}) == {}
+    assert sanitize_scanner_config({"nikto": {"max_time": 5000}})["nikto"]["max_time"] == 600
+
+
+def test_sanitize_scanner_config_drops_unknown_top_level_keys():
+    from app.services.vulnscan.scanner_config import sanitize_scanner_config
+
+    cleaned = sanitize_scanner_config(
+        {
+            "nuclei": {"severity": ["high"]},
+            "sqlmap": {"level": 5},
+            "unexpected": "value",
+        }
+    )
+    assert cleaned == {"nuclei": {"severity": ["high"]}}
+
+
+def test_testssl_scanner_applies_config_fast_flag_and_checks(monkeypatch):
+    from app.services.vulnscan.scanners import TestSSLScanner
+
+    captured_cmd = {}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/testssl.sh" if name == "testssl.sh" else None)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    asyncio.run(
+        TestSSLScanner.scan(
+            "example.com",
+            443,
+            {"fast": True, "checks": ["protocols", "headers", "vulnerabilities"]},
+        )
+    )
+
+    args = captured_cmd["args"]
+    assert "--fast" in args
+    assert "--protocols" in args
+    assert "--headers" in args
+    assert "--vulnerable" in args
+
+
+def test_testssl_scanner_omits_flags_without_config(monkeypatch):
+    from app.services.vulnscan.scanners import TestSSLScanner
+
+    captured_cmd = {}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/testssl.sh" if name == "testssl.sh" else None)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    asyncio.run(TestSSLScanner.scan("example.com", 443))
+
+    args = captured_cmd["args"]
+    assert "--fast" not in args
+    assert "--protocols" not in args
+    assert "--headers" not in args
+    assert "--vulnerable" not in args
+
+
+def test_nikto_scanner_applies_config_tuning_and_max_time(monkeypatch):
+    from app.services.vulnscan.scanners import NiktoScanner
+
+    captured_cmd = {}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/nikto" if name == "nikto" else None)
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    asyncio.run(NiktoScanner.scan("https://example.com", {"tuning": "1239", "max_time": 45}))
+
+    args = captured_cmd["args"]
+    assert "-Tuning" in args
+    assert args[args.index("-Tuning") + 1] == "1239"
+    assert args[args.index("-maxtime") + 1] == "45s"
+
+
+def test_nikto_scanner_defensively_rejects_invalid_tuning_chars(monkeypatch):
+    """The API sanitizer already validates tuning codes, but the scanner
+    re-checks defensively since it can be invoked directly (as this test
+    does) with an unsanitized config."""
+    from app.services.vulnscan.scanners import NiktoScanner
+
+    captured_cmd = {}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/nikto" if name == "nikto" else None)
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    asyncio.run(NiktoScanner.scan("https://example.com", {"tuning": "1z9!"}))
+
+    assert "-Tuning" not in captured_cmd["args"]
+
+
+def test_nuclei_scanner_custom_tags_override_deep_profile(monkeypatch):
+    from app.services.vulnscan.scanners import NucleiScanner
+
+    captured_cmd = {}
+
+    class _Stdout:
+        async def readline(self):
+            return b""
+
+    class _Stderr:
+        async def read(self):
+            return b""
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = _Stdout()
+            self.stderr = _Stderr()
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/nuclei" if name == "nuclei" else None)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    # "deep" normally means no -tags filter at all, but explicit custom tags
+    # must always take precedence over that profile default.
+    asyncio.run(NucleiScanner.scan("https://example.com", "deep", {"tags": "custom-tag,another"}))
+
+    args = captured_cmd["args"]
+    assert "-tags" in args
+    assert args[args.index("-tags") + 1] == "custom-tag,another"
+
+
+def test_nuclei_scanner_applies_severity_filter(monkeypatch):
+    from app.services.vulnscan.scanners import NucleiScanner
+
+    captured_cmd = {}
+
+    class _Stdout:
+        async def readline(self):
+            return b""
+
+    class _Stderr:
+        async def read(self):
+            return b""
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = _Stdout()
+            self.stderr = _Stderr()
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr("app.services.vulnscan.scanners.shutil.which", lambda name: "/usr/bin/nuclei" if name == "nuclei" else None)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    asyncio.run(NucleiScanner.scan("https://example.com", "quick", {"severity": ["critical", "high", "bogus"]}))
+
+    args = captured_cmd["args"]
+    assert "-severity" in args
+    assert args[args.index("-severity") + 1] == "critical,high"
+
+
+def test_zap_scanner_config_overrides_profile_defaults(monkeypatch):
+    from app.services.vulnscan.scanners import ZAPPassiveScanner
+
+    captured_cmd = {}
+
+    class _Proc:
+        returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    async def _spawn(*args, **kwargs):  # noqa: ARG001
+        captured_cmd["args"] = args
+        return _Proc()
+
+    monkeypatch.setattr(
+        "app.services.vulnscan.scanners.shutil.which",
+        lambda name: "/usr/bin/zap-baseline.py" if name == "zap-baseline.py" else None,
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+
+    # "standard" profile normally means spider=1/max=4; config should override both.
+    asyncio.run(ZAPPassiveScanner.scan("https://example.com", "standard", {"spider_minutes": 5, "max_minutes": 9}))
+
+    args = captured_cmd["args"]
+    assert args[args.index("-m") + 1] == "5"
+    assert args[args.index("-T") + 1] == "9"
+
+
+@pytest.mark.asyncio
+async def test_create_target_persists_sanitized_scanner_config():
+    from app.database import Base
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            created = await vulnscan_api.create_target(
+                vulnscan_api.TargetCreate(
+                    name="Acme",
+                    target_value="acme.example.com",
+                    scanner_config={
+                        "nuclei": {"severity": ["HIGH", "bogus"]},
+                        "zap": {"spider_minutes": 999},
+                        "unknown_tool": {"foo": "bar"},
+                    },
+                ),
+                db=db,
+                current_user=_FakeUser(),
+            )
+            fetched = await vulnscan_api.get_target(created["id"], db=db, _=_FakeUser())
+
+        assert fetched["scanner_config"] == {
+            "nuclei": {"severity": ["high"]},
+            "zap": {"spider_minutes": 10},
+        }
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_create_target_defaults_scanner_config_to_empty_dict():
+    from app.database import Base
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            created = await vulnscan_api.create_target(
+                vulnscan_api.TargetCreate(name="Acme", target_value="acme.example.com"),
+                db=db,
+                current_user=_FakeUser(),
+            )
+            targets = await vulnscan_api.list_targets(db=db, _=_FakeUser())
+
+        target = next(t for t in targets if t["id"] == created["id"])
+        assert target["scanner_config"] == {}
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_update_target_replaces_scanner_config_wholesale():
+    from app.database import Base
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            created = await vulnscan_api.create_target(
+                vulnscan_api.TargetCreate(
+                    name="Acme",
+                    target_value="acme.example.com",
+                    scanner_config={"nuclei": {"severity": ["high"]}, "zap": {"spider_minutes": 3}},
+                ),
+                db=db,
+                current_user=_FakeUser(),
+            )
+            target_id = created["id"]
+
+            # Updating with only `nikto` replaces the *entire* scanner_config
+            # blob (same full-replacement semantics as tags_json/notify_channels_json)
+            # rather than deep-merging over the previously saved nuclei/zap values.
+            await vulnscan_api.update_target(
+                target_id,
+                vulnscan_api.TargetUpdate(scanner_config={"nikto": {"tuning": "1239"}}),
+                db=db,
+                _=_FakeUser(),
+            )
+
+            fetched = await vulnscan_api.get_target(target_id, db=db, _=_FakeUser())
+
+        assert fetched["scanner_config"] == {"nikto": {"tuning": "1239"}}
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_update_target_omitting_scanner_config_leaves_it_untouched():
+    from app.database import Base
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            created = await vulnscan_api.create_target(
+                vulnscan_api.TargetCreate(
+                    name="Acme",
+                    target_value="acme.example.com",
+                    scanner_config={"nuclei": {"severity": ["high"]}},
+                ),
+                db=db,
+                current_user=_FakeUser(),
+            )
+            target_id = created["id"]
+
+            # Updating an unrelated field with scanner_config omitted (not an
+            # explicit {}) must not clear the previously saved config.
+            await vulnscan_api.update_target(
+                target_id, vulnscan_api.TargetUpdate(name="Acme Corp"), db=db, _=_FakeUser()
+            )
+
+            fetched = await vulnscan_api.get_target(target_id, db=db, _=_FakeUser())
+
+        assert fetched["name"] == "Acme Corp"
+        assert fetched["scanner_config"] == {"nuclei": {"severity": ["high"]}}
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_launch_scan_merges_override_onto_target_default_per_tool():
+    from fastapi import BackgroundTasks
+    from app.database import Base
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            created = await vulnscan_api.create_target(
+                vulnscan_api.TargetCreate(
+                    name="Acme",
+                    target_value="acme.example.com",
+                    scanner_config={
+                        "nuclei": {"severity": ["low"]},
+                        "zap": {"spider_minutes": 2, "max_minutes": 6},
+                    },
+                ),
+                db=db,
+                current_user=_FakeUser(),
+            )
+            target_id = created["id"]
+
+            # Launch overrides only `nuclei`; the target's saved `zap` default
+            # must survive untouched in the scan snapshot (shallow, per-tool merge).
+            result = await vulnscan_api.launch_scan(
+                target_id,
+                vulnscan_api.ScanLaunchRequest(scanner_config={"nuclei": {"severity": ["critical", "bogus"]}}),
+                BackgroundTasks(),
+                db=db,
+                current_user=_FakeUser(),
+            )
+
+            scan = await vulnscan_api.get_scan(result["scan_id"], db=db, _=_FakeUser())
+
+        assert scan["scanner_config"] == {
+            "nuclei": {"severity": ["critical"]},
+            "zap": {"spider_minutes": 2, "max_minutes": 6},
+        }
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_launch_scan_without_override_snapshots_target_default():
+    from fastapi import BackgroundTasks
+    from app.database import Base
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            created = await vulnscan_api.create_target(
+                vulnscan_api.TargetCreate(
+                    name="Acme",
+                    target_value="acme.example.com",
+                    scanner_config={"nikto": {"tuning": "1239"}},
+                ),
+                db=db,
+                current_user=_FakeUser(),
+            )
+            target_id = created["id"]
+
+            result = await vulnscan_api.launch_scan(
+                target_id, vulnscan_api.ScanLaunchRequest(), BackgroundTasks(), db=db, current_user=_FakeUser()
+            )
+
+            scan = await vulnscan_api.get_scan(result["scan_id"], db=db, _=_FakeUser())
+
+        assert scan["scanner_config"] == {"nikto": {"tuning": "1239"}}
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_run_threads_scan_scanner_config_into_run_scanner(monkeypatch):
+    from app.models import VSScan, VSScanTarget
+    from app.database import Base
+    from app.services.vulnscan.orchestrator import VulnScanOrchestrator, PROFILE_SCANNERS
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+    captured = {}
+
+    async def _fake_run_scanner(self, scanner, target, profile, scanner_config):  # noqa: ARG001
+        captured["scanner_config"] = scanner_config
+        return []
+
+    original_scanners = PROFILE_SCANNERS["quick"]
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(name="Acme", target_value="https://example.com")
+            db.add(target)
+            await db.flush()
+            scan = VSScan(
+                target_id=target.id,
+                profile="quick",
+                status="pending",
+                scanner_config_json=json.dumps({"nikto": {"tuning": "1239"}}),
+            )
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+        monkeypatch.setattr("app.services.vulnscan.orchestrator.AsyncSessionLocal", session_factory)
+        monkeypatch.setattr(VulnScanOrchestrator, "_run_scanner", _fake_run_scanner)
+        PROFILE_SCANNERS["quick"] = ["nikto"]
+
+        await VulnScanOrchestrator().run(scan_id)
+
+        assert captured["scanner_config"] == {"nikto": {"tuning": "1239"}}
+    finally:
+        PROFILE_SCANNERS["quick"] = original_scanners
         await engine.dispose()
         os.remove(db_path)

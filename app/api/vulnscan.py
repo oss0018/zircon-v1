@@ -16,6 +16,7 @@ from app.database import AsyncSessionLocal, get_db
 from app.models import VSScan, VSScanTarget, VSFinding, VSReport, VSCustomTemplate, User
 from app.services.vulnscan import VulnScanOrchestrator
 from app.services.vulnscan.reports import VALID_REPORT_FORMATS, generate_report
+from app.services.vulnscan.scanner_config import sanitize_scanner_config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class TargetCreate(BaseModel):
     tags: list[str] = []
     schedule_cron: str | None = None
     notify_channels: list[str] = ["email", "telegram"]
+    scanner_config: dict | None = None
 
 
 class TargetUpdate(BaseModel):
@@ -60,6 +62,7 @@ class TargetUpdate(BaseModel):
     schedule_cron: str | None = None
     notify_channels: list[str] | None = None
     active: bool | None = None
+    scanner_config: dict | None = None
 
 
 class ScanLaunchRequest(BaseModel):
@@ -69,6 +72,7 @@ class ScanLaunchRequest(BaseModel):
     notify_on_complete: bool = True
     report_formats: list[str] = ["json"]
     comment: str = ""
+    scanner_config: dict | None = None
 
 
 class FindingStatusUpdate(BaseModel):
@@ -188,6 +192,7 @@ async def list_targets(
             "schedule_cron": t.schedule_cron,
             "notify_channels": json.loads(t.notify_channels_json or "[]"),
             "active": t.active,
+            "scanner_config": json.loads(t.scanner_config_json or "{}"),
             "created_at": t.created_at.isoformat() if t.created_at else None,
             "updated_at": t.updated_at.isoformat() if t.updated_at else None,
         }
@@ -217,6 +222,7 @@ async def create_target(
         default_profile=body.default_profile,
         schedule_cron=body.schedule_cron,
         notify_channels_json=json.dumps(body.notify_channels),
+        scanner_config_json=json.dumps(sanitize_scanner_config(body.scanner_config)),
         created_by=current_user.id,
     )
     db.add(target)
@@ -252,6 +258,7 @@ async def get_target(
         "schedule_cron": target.schedule_cron,
         "notify_channels": json.loads(target.notify_channels_json or "[]"),
         "active": target.active,
+        "scanner_config": json.loads(target.scanner_config_json or "{}"),
         "last_scan": (
             {
                 "id": last_scan.id,
@@ -292,6 +299,8 @@ async def update_target(
             target.tags_json = json.dumps(value)
         elif key == "notify_channels":
             target.notify_channels_json = json.dumps(value)
+        elif key == "scanner_config":
+            target.scanner_config_json = json.dumps(sanitize_scanner_config(value))
         else:
             setattr(target, key, value)
 
@@ -334,12 +343,19 @@ async def launch_scan(
     if invalid_formats:
         raise HTTPException(status_code=400, detail=f"Invalid report_formats: {', '.join(invalid_formats)}")
 
+    # Per-launch scanner_config overrides the target's saved default, tool by tool
+    # (e.g. supplying only `nuclei` leaves the target's `zap` default untouched).
+    effective_config = json.loads(target.scanner_config_json or "{}")
+    if body.scanner_config is not None:
+        effective_config = {**effective_config, **sanitize_scanner_config(body.scanner_config)}
+
     scan = VSScan(
         target_id=target_id,
         profile=body.profile,
         scope=body.scope,
         status="pending",
         scanners_used_json=json.dumps(body.scanners or []),
+        scanner_config_json=json.dumps(effective_config),
         initiated_by=current_user.id,
         comment=body.comment,
         created_at=_utcnow(),
@@ -425,6 +441,7 @@ async def get_scan(
         "status": scan.status,
         "progress_pct": scan.progress_pct,
         "scanners_used": json.loads(scan.scanners_used_json or "[]"),
+        "scanner_config": json.loads(scan.scanner_config_json or "{}"),
         "findings_total": scan.findings_total,
         "findings_critical": scan.findings_critical,
         "findings_high": scan.findings_high,
