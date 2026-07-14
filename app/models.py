@@ -763,6 +763,7 @@ class VSScanTarget(Base):
     scope = Column(String(20), nullable=False, default="SELF")       # SELF | INTERNAL | THREAT_INTEL
     tags_json = Column(Text, default="[]")
     default_profile = Column(String(20), nullable=False, default="standard")
+    scanner_config_json = Column(Text, default="{}")  # per-tool tuning defaults (nuclei/zap/testssl/nikto)
     schedule_cron = Column(String(100), nullable=True)
     notify_channels_json = Column(Text, default='["email","telegram"]')
     active = Column(Boolean, default=True)
@@ -781,6 +782,7 @@ class VSScan(Base):
     status = Column(String(20), nullable=False, default="pending")
     # pending | running | completed | failed | cancelled
     scanners_used_json = Column(Text, default="[]")
+    scanner_config_json = Column(Text, default="{}")  # snapshot of per-tool tuning actually used for this run
     progress_pct = Column(Integer, default=0)
     findings_total = Column(Integer, default=0)
     findings_critical = Column(Integer, default=0)

@@ -496,22 +496,30 @@ def _migrate_sl_rules(conn) -> None:
 
 
 def _migrate_vulnscan(conn) -> None:
-    """Add alert bookkeeping columns to vuln scanner tables if missing."""
+    """Add alert bookkeeping and scanner-config columns to vuln scanner tables if missing."""
     from sqlalchemy import inspect, text
 
-    allowed_new_cols: dict[str, str] = {
+    scans_new_cols: dict[str, str] = {
         "severe_alert_processed_at": "DATETIME",
+        "scanner_config_json": "TEXT DEFAULT '{}'",
+    }
+    targets_new_cols: dict[str, str] = {
+        "scanner_config_json": "TEXT DEFAULT '{}'",
     }
 
     try:
         inspector = inspect(conn)
         tables = inspector.get_table_names()
-        if "vs_scans" not in tables:
-            return
-        existing_cols = {c["name"] for c in inspector.get_columns("vs_scans")}
-        for col_name, col_type in allowed_new_cols.items():
-            if col_name not in existing_cols:
-                conn.execute(text(f"ALTER TABLE vs_scans ADD COLUMN {col_name} {col_type}"))
+        if "vs_scans" in tables:
+            existing_cols = {c["name"] for c in inspector.get_columns("vs_scans")}
+            for col_name, col_type in scans_new_cols.items():
+                if col_name not in existing_cols:
+                    conn.execute(text(f"ALTER TABLE vs_scans ADD COLUMN {col_name} {col_type}"))
+        if "vs_scan_targets" in tables:
+            existing_target_cols = {c["name"] for c in inspector.get_columns("vs_scan_targets")}
+            for col_name, col_type in targets_new_cols.items():
+                if col_name not in existing_target_cols:
+                    conn.execute(text(f"ALTER TABLE vs_scan_targets ADD COLUMN {col_name} {col_type}"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not migrate vulnscan schema: %s", exc)
 

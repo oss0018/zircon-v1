@@ -14,6 +14,8 @@ import dns.dnssec
 import dns.rdatatype
 import dns.resolver
 
+from app.services.vulnscan.scanner_config import VALID_NUCLEI_SEVERITIES
+
 
 def _as_url(target: str) -> str:
     if target.startswith("http://") or target.startswith("https://"):
@@ -486,9 +488,17 @@ class DNSSecScanner:
         return findings
 
 
+_TESTSSL_CHECK_FLAGS = {
+    "protocols": "--protocols",
+    "vulnerabilities": "--vulnerable",
+    "headers": "--headers",
+}
+
+
 class TestSSLScanner:
     @staticmethod
-    async def scan(hostname: str, port: int = 443) -> list[dict]:
+    async def scan(hostname: str, port: int = 443, config: dict | None = None) -> list[dict]:
+        config = config or {}
         base_url = _as_url(hostname)
         parsed = urlparse(base_url)
         safe_host = parsed.hostname or hostname
@@ -506,18 +516,28 @@ class TestSSLScanner:
                 resolved_port,
             )
 
+        cmd = [
+            testssl_bin,
+            "--jsonfile",
+            str(temp_path),
+            "--quiet",
+            "--color",
+            "0",
+            "--warnings",
+            "off",
+        ]
+        if config.get("fast") is True:
+            cmd.append("--fast")
+        for check in config.get("checks") or []:
+            flag = _TESTSSL_CHECK_FLAGS.get(check)
+            if flag:
+                cmd.append(flag)
+        cmd.append(f"{safe_host}:{port}")
+
         try:
             try:
                 process = await asyncio.create_subprocess_exec(
-                    testssl_bin,
-                    "--jsonfile",
-                    str(temp_path),
-                    "--quiet",
-                    "--color",
-                    "0",
-                    "--warnings",
-                    "off",
-                    f"{safe_host}:{port}",
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -633,9 +653,13 @@ class TestSSLScanner:
                 pass
 
 
+_NIKTO_TUNING_CHARS = set("0123456789abcx")
+
+
 class NiktoScanner:
     @staticmethod
-    async def scan(target: str) -> list[dict]:
+    async def scan(target: str, config: dict | None = None) -> list[dict]:
+        config = config or {}
         target_url, host, port = _target_parts(target)
         temp_path = Path(tempfile.gettempdir()) / f"nikto_{uuid.uuid4().hex}.json"
         findings: list[dict] = []
@@ -643,19 +667,31 @@ class NiktoScanner:
         if not nikto_bin:
             return _tool_not_available_finding("Nikto", "nikto", target_url, host, port)
 
+        max_time_seconds = 120
+        raw_max_time = config.get("max_time")
+        if isinstance(raw_max_time, (int, float)) and not isinstance(raw_max_time, bool):
+            max_time_seconds = max(30, min(600, int(raw_max_time)))
+
+        cmd = [
+            nikto_bin,
+            "-h",
+            target_url,
+            "-Format",
+            "json",
+            "-output",
+            str(temp_path),
+            "-nointeractive",
+            "-maxtime",
+            f"{max_time_seconds}s",
+        ]
+        tuning = str(config.get("tuning") or "").strip().lower()
+        if tuning and all(c in _NIKTO_TUNING_CHARS for c in tuning):
+            cmd.extend(["-Tuning", tuning])
+
         try:
             try:
                 process = await asyncio.create_subprocess_exec(
-                    nikto_bin,
-                    "-h",
-                    target_url,
-                    "-Format",
-                    "json",
-                    "-output",
-                    str(temp_path),
-                    "-nointeractive",
-                    "-maxtime",
-                    "120s",
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -665,7 +701,7 @@ class NiktoScanner:
                 return []
 
             try:
-                await asyncio.wait_for(process.wait(), timeout=150)
+                await asyncio.wait_for(process.wait(), timeout=max_time_seconds + 30)
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
@@ -737,7 +773,8 @@ class NiktoScanner:
 
 class NucleiScanner:
     @staticmethod
-    async def scan(target: str, profile: str) -> list[dict]:
+    async def scan(target: str, profile: str, config: dict | None = None) -> list[dict]:
+        config = config or {}
         target_url, host, port = _target_parts(target)
         profile_tags = {
             "quick": ["cve", "exposure", "misconfiguration", "default-login", "ssl"],
@@ -754,14 +791,29 @@ class NucleiScanner:
             ],
             "deep": [],
         }
-        tags = profile_tags.get(profile, profile_tags["standard"])
         nuclei_bin = shutil.which("nuclei")
         if not nuclei_bin:
             return _tool_not_available_finding("Nuclei", "nuclei", target_url, host, port)
 
         cmd = [nuclei_bin, "-target", target]
-        if profile != "deep" and tags:
-            cmd.extend(["-tags", ",".join(tags)])
+        custom_tags = str(config.get("tags") or "").strip()
+        if custom_tags:
+            tags = [t.strip() for t in custom_tags.split(",") if t.strip()]
+            if tags:
+                cmd.extend(["-tags", ",".join(tags)])
+        elif profile != "deep":
+            tags = profile_tags.get(profile, profile_tags["standard"])
+            if tags:
+                cmd.extend(["-tags", ",".join(tags)])
+
+        severities = config.get("severity")
+        if isinstance(severities, list):
+            valid_severities = sorted(
+                {s.lower() for s in severities if isinstance(s, str) and s.lower() in VALID_NUCLEI_SEVERITIES}
+            )
+            if valid_severities:
+                cmd.extend(["-severity", ",".join(valid_severities)])
+
         cmd.extend(
             [
                 "-json",
@@ -1143,7 +1195,8 @@ class ZAPPassiveScanner:
     """
 
     @staticmethod
-    async def scan(target_url: str, profile: str = "standard") -> list[dict]:
+    async def scan(target_url: str, profile: str = "standard", config: dict | None = None) -> list[dict]:
+        config = config or {}
         normalized_url, host, port = _target_parts(target_url)
         temp_path = Path(tempfile.gettempdir()) / f"zap_{uuid.uuid4().hex}.json"
         findings: list[dict] = []
@@ -1152,9 +1205,18 @@ class ZAPPassiveScanner:
             return _tool_not_available_finding("OWASP ZAP", "zap", normalized_url, host, port)
 
         if profile == "deep":
-            spider_minutes, max_minutes, timeout = "3", "8", 600
+            spider_minutes, max_minutes = 3, 8
         else:
-            spider_minutes, max_minutes, timeout = "1", "4", 300
+            spider_minutes, max_minutes = 1, 4
+
+        raw_spider = config.get("spider_minutes")
+        if isinstance(raw_spider, (int, float)) and not isinstance(raw_spider, bool):
+            spider_minutes = max(1, min(10, int(raw_spider)))
+        raw_max = config.get("max_minutes")
+        if isinstance(raw_max, (int, float)) and not isinstance(raw_max, bool):
+            max_minutes = max(1, min(30, int(raw_max)))
+        # Wall-clock guard needs headroom beyond ZAP's own -T budget for startup/teardown.
+        timeout = max_minutes * 60 + 120
 
         try:
             try:
@@ -1165,9 +1227,9 @@ class ZAPPassiveScanner:
                     "-J",
                     str(temp_path),
                     "-m",
-                    spider_minutes,
+                    str(spider_minutes),
                     "-T",
-                    max_minutes,
+                    str(max_minutes),
                     "-I",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
