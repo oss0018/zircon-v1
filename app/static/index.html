@@ -1982,10 +1982,22 @@
                     <div class="form-group">
                       <label class="form-label">TLD List</label>
                       <select class="form-select" x-model="ruleForm.tld_list" @change="scheduleRulePreview()">
-                        <option value="top30">Top 30</option>
-                        <option value="top100">Top 100</option>
-                        <option value="top500">Top 500</option>
-                        <option value="full1500">Full 1500</option>
+                        <optgroup label="Quick tiers">
+                          <option value="top30">Top 30</option>
+                          <option value="top100">Top 100</option>
+                          <option value="top500">Top 500</option>
+                          <option value="full1500">Full 1500 (all TLDs)</option>
+                        </optgroup>
+                        <optgroup label="By category">
+                          <option value="generic">Generic (gTLD)</option>
+                          <option value="country_code">Country-Code (ccTLD)</option>
+                          <option value="sponsored">Sponsored (sTLD)</option>
+                          <option value="restricted_generic">Restricted Generic</option>
+                          <option value="infrastructure">Infrastructure (.arpa)</option>
+                          <option value="test">Test / Developer</option>
+                          <option value="idn">Internationalized (IDN)</option>
+                          <option value="all">All categories combined</option>
+                        </optgroup>
                       </select>
                     </div>
                     <div class="form-group">

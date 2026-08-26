@@ -629,7 +629,10 @@ class LookalikeRule(Base):
     brand_terms = Column(Text, default="[]")                 # JSON list of terms
     # Generation config
     algorithms = Column(Text, default="[]")                  # JSON list; empty = all
-    tld_list = Column(String(20), default="top100")          # top30|top100|top500|full1500
+    tld_list = Column(String(20), default="top100")          # top30|top100|top500|full1500|
+                                                              # generic|country_code|sponsored|
+                                                              # infrastructure|restricted_generic|
+                                                              # test|idn|all
     attack_words = Column(String(20), default="core")        # core|extended
     include_idn = Column(Boolean, default=True)
     include_bitsquatting = Column(Boolean, default=True)
