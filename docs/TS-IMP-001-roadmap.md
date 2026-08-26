@@ -267,7 +267,7 @@ There are **no blockers** preventing the system from running. All Phase 2 additi
 | M1 | Apify | `APIFY_API_KEY` | ❌ Not yet |
 | M1 | YouTube | `YOUTUBE_API_KEY` | ❌ Phase 2 stub |
 | M1 | TikTok (Apify) | `APIFY_API_KEY` | ❌ Phase 2 stub |
-| M1 | LinkedIn (Apify) | `APIFY_API_KEY` | ❌ Phase 2 stub |
+| M1 | LinkedIn (Apify) | `LINKEDIN_APIFY_ACTOR` | ✅ live |
 | M2 | VirusTotal | `VIRUSTOTAL_API_KEY` | ✅ Integrations |
 | M2 | Apple App Store | *(itunes-search or App Store Connect)* | ❌ Phase 2 stub |
 | M3 | checkdmarc (DNS) | *(none)* | ✅ live |
