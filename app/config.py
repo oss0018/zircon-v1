@@ -123,6 +123,12 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("VK_SERVICE_TOKEN", "ZIRCON_VK_SERVICE_TOKEN"),
     )
+    meta_ad_library_access_token: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "META_AD_LIBRARY_ACCESS_TOKEN", "ZIRCON_META_AD_LIBRARY_ACCESS_TOKEN"
+        ),
+    )
     pagerduty_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("PAGERDUTY_API_KEY", "ZIRCON_PAGERDUTY_API_KEY"),
