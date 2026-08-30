@@ -265,7 +265,7 @@ There are **no blockers** preventing the system from running. All Phase 2 additi
 | M1 | Telegram | `TELEGRAM_SESSION_STRING` | ✅ Social Listening |
 | M1 | VK | `VK_SERVICE_TOKEN` | ❌ Not yet |
 | M1 | Apify | `APIFY_API_KEY` | ❌ Not yet |
-| M1 | YouTube | `YOUTUBE_API_KEY` | ❌ Phase 2 stub |
+| M1 | YouTube | `YOUTUBE_API_KEY` | ✅ live |
 | M1 | TikTok (Apify) | `APIFY_API_KEY` | ❌ Phase 2 stub |
 | M1 | LinkedIn (Apify) | `APIFY_API_KEY` | ❌ Phase 2 stub |
 | M2 | VirusTotal | `VIRUSTOTAL_API_KEY` | ✅ Integrations |
