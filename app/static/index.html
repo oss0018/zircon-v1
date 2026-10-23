@@ -7000,16 +7000,17 @@
                             <th>Module</th>
                             <th>Type</th>
                             <th>Entity</th>
+                            <th>Certificate validity</th>
                             <th>Source</th>
                             <th>Details</th>
                           </tr>
                         </thead>
                         <tbody>
                           <template x-if="investigationLoading">
-                            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
+                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
                           </template>
                           <template x-if="!investigationLoading && filteredFindings().length === 0">
-                            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr>
+                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr>
                           </template>
                           <template x-for="finding in filteredFindings()" :key="finding.id">
                             <tr>
@@ -7022,6 +7023,18 @@
                               <td><span class="badge badge-blue" x-text="finding.module"></span></td>
                               <td x-text="finding.finding_type"></td>
                               <td style="max-width:260px;word-break:break-word;" x-text="finding.entity"></td>
+                              <td>
+                                <template x-if="finding.module === 'cert'">
+                                  <div>
+                                    <div class="text-xs" x-text="certificateValidity(finding)"></div>
+                                    <span x-show="certificateExpiryLabel(finding)"
+                                          class="badge"
+                                          :class="severityClass(finding.severity)"
+                                          x-text="certificateExpiryLabel(finding)"></span>
+                                  </div>
+                                </template>
+                                <span x-show="finding.module !== 'cert'" class="text-muted">—</span>
+                              </td>
                               <td x-text="finding.source"></td>
                               <td>
                                 <details>

@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import InfraFinding, InfraInvestigation, Integration
 from app.services.crypto import decrypt
+from app.services.infrastructure_intelligence.cert_alerts import (
+    notify_expiring_certificates,
+)
 from app.services.infrastructure_intelligence.bgp_asn import BGPASNModule
 from app.services.infrastructure_intelligence.tech_stack import TechStackModule
 
@@ -221,6 +224,7 @@ class InfraOrchestrator:
             investigation.summary_json = json.dumps(summary)
             await db.commit()
 
+            await notify_expiring_certificates(target, all_findings)
             return summary
 
         except Exception as exc:
