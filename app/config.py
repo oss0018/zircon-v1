@@ -111,6 +111,10 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("HIBP_API_KEY", "ZIRCON_HIBP_API_KEY"),
     )
+    intelx_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("INTELX_API_KEY", "ZIRCON_INTELX_API_KEY"),
+    )
     apify_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("APIFY_API_KEY", "ZIRCON_APIFY_API_KEY"),

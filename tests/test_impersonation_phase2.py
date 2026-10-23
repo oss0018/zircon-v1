@@ -240,19 +240,35 @@ async def test_phase2_scanner_stubs_return_empty_list():
         _scan_m1_linkedin,
         _scan_m1_youtube,
         _scan_m2_appstore,
-        _scan_m5_darkweb,
         _scan_m3_honeypot,
         _scan_m3_inbound_headers,
     )
     rule = {'brand_name': 'TestBrand', 'official_domains': ['testbrand.com'], 'executive_names': []}
     for stub in (
         _scan_m1_tiktok, _scan_m1_linkedin, _scan_m1_youtube,
-        _scan_m2_appstore, _scan_m5_darkweb,
+        _scan_m2_appstore,
         _scan_m3_honeypot, _scan_m3_inbound_headers,
     ):
         result = await stub(rule)
         assert isinstance(result, list), f"{stub.__name__} should return a list"
         assert result == [], f"{stub.__name__} stub should return empty list"
+
+
+@pytest.mark.asyncio
+async def test_m5_darkweb_no_longer_a_stub():
+    """_scan_m5_darkweb should gracefully no-op without INTELX_API_KEY, but
+    is no longer an unconditional stub (see TestScanM5Darkweb for full
+    mocked-integration coverage)."""
+    from app.services.impersonation.scanner import _scan_m5_darkweb
+    from unittest.mock import patch
+
+    with patch.dict('os.environ', {'INTELX_API_KEY': ''}, clear=False):
+        result = await _scan_m5_darkweb({
+            'brand_name': 'TestBrand',
+            'official_domains': ['testbrand.com'],
+            'executive_names': [],
+        })
+    assert result == []
 
 
 # ── API endpoint tests ────────────────────────────────────────────────────────

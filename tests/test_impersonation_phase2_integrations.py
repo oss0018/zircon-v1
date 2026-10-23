@@ -242,6 +242,119 @@ class TestScanM5Hibp:
         assert result == []
 
 
+class TestScanM5Darkweb:
+    def test_m5_darkweb_function_exists(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "async def _scan_m5_darkweb" in source
+
+    def test_m5_darkweb_uses_intelx_client(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "IntelXClient" in source
+
+    def test_m5_darkweb_output_type_correct(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "darkweb_credential_leak" in source
+
+    @pytest.mark.asyncio
+    async def test_m5_darkweb_no_api_key_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m5_darkweb
+        with patch.dict("os.environ", {"INTELX_API_KEY": ""}, clear=False):
+            result = await _scan_m5_darkweb({
+                "brand_name": "Acme",
+                "executive_names": ["John Doe"],
+                "official_domains": ["acme.com"],
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m5_darkweb_no_search_terms_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m5_darkweb
+        with patch.dict("os.environ", {"INTELX_API_KEY": "test-key"}, clear=False):
+            result = await _scan_m5_darkweb({
+                "brand_name": "Acme",
+                "executive_names": [],
+                "official_domains": [],
+            })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m5_darkweb_records_found_returns_finding(self):
+        from app.services.impersonation.scanner import _scan_m5_darkweb
+        mock_records = [
+            {"name": "leak_dump.txt", "type": "leaks", "date": "2023-01-01"},
+            {"name": "combo_dump.txt", "type": "leaks", "date": "2023-01-02"},
+        ]
+        mock_client = MagicMock()
+        mock_client.search = AsyncMock(return_value={"records": mock_records, "total": 27})
+
+        with patch.dict("os.environ", {"INTELX_API_KEY": "test-key"}, clear=False):
+            with patch("app.services.osint.intelx.IntelXClient", return_value=mock_client):
+                result = await _scan_m5_darkweb({
+                    "brand_name": "Acme",
+                    "executive_names": [],
+                    "official_domains": ["acme.com"],
+                })
+        assert len(result) == 1
+        finding = result[0]
+        assert finding["module"] == "m5"
+        assert finding["platform"] == "dark_web"
+        assert finding["finding_type"] == "darkweb_credential_leak"
+        assert "acme.com" in finding["target_identifier"]
+        assert finding["description"] == (
+            "Found 27 dark web / paste-site record(s) referencing "
+            "'acme.com': leak_dump.txt, combo_dump.txt."
+        )
+        assert "intelx_type:leaks" in finding["signals"]
+
+    @pytest.mark.asyncio
+    async def test_m5_darkweb_no_records_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m5_darkweb
+        mock_client = MagicMock()
+        mock_client.search = AsyncMock(return_value={"records": [], "total": 0})
+
+        with patch.dict("os.environ", {"INTELX_API_KEY": "test-key"}, clear=False):
+            with patch("app.services.osint.intelx.IntelXClient", return_value=mock_client):
+                result = await _scan_m5_darkweb({
+                    "brand_name": "Acme",
+                    "executive_names": [],
+                    "official_domains": ["acme.com"],
+                })
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_m5_darkweb_omits_empty_record_name_list(self):
+        from app.services.impersonation.scanner import _scan_m5_darkweb
+        mock_client = MagicMock()
+        mock_client.search = AsyncMock(return_value={"records": [{"type": "leaks"}], "total": 3})
+
+        with patch.dict("os.environ", {"INTELX_API_KEY": "test-key"}, clear=False):
+            with patch("app.services.osint.intelx.IntelXClient", return_value=mock_client):
+                result = await _scan_m5_darkweb({
+                    "brand_name": "Acme",
+                    "executive_names": [],
+                    "official_domains": ["acme.com"],
+                })
+
+        assert result[0]["description"] == (
+            "Found 3 dark web / paste-site record(s) referencing 'acme.com'."
+        )
+
+    @pytest.mark.asyncio
+    async def test_m5_darkweb_error_result_returns_empty(self):
+        from app.services.impersonation.scanner import _scan_m5_darkweb
+        mock_client = MagicMock()
+        mock_client.search = AsyncMock(return_value={"error": "Invalid API key"})
+
+        with patch.dict("os.environ", {"INTELX_API_KEY": "bad-key"}, clear=False):
+            with patch("app.services.osint.intelx.IntelXClient", return_value=mock_client):
+                result = await _scan_m5_darkweb({
+                    "brand_name": "Acme",
+                    "executive_names": [],
+                    "official_domains": ["acme.com"],
+                })
+        assert result == []
+
+
 # ── M1 Telegram scanner ───────────────────────────────────────────────────────
 
 class TestScanM1Telegram:
@@ -1007,6 +1120,11 @@ class TestScannerFunctionSignatures:
         assert "HIBPClient" in source
         assert "HIBP_API_KEY" in source
 
+    def test_m5_darkweb_implemented(self):
+        source = SCANNER.read_text(encoding="utf-8")
+        assert "IntelXClient" in source
+        assert "INTELX_API_KEY" in source
+
     def test_stubs_still_present_for_phase2b(self):
         """Phase 2b stubs must remain for deferred modules."""
         source = SCANNER.read_text(encoding="utf-8")
@@ -1014,12 +1132,12 @@ class TestScannerFunctionSignatures:
         assert "async def _scan_m1_linkedin" in source
         assert "async def _scan_m1_youtube" in source
         assert "async def _scan_m2_appstore" in source
-        assert "async def _scan_m5_darkweb" in source
         assert "async def _scan_m6_ads" in source
 
     def test_env_example_updated(self):
         env_example = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
         assert "HIBP_API_KEY" in env_example
+        assert "INTELX_API_KEY" in env_example
         assert "APIFY_API_KEY" in env_example
         assert "FACEBOOK_APIFY_ACTOR" in env_example
         assert "VK_SERVICE_TOKEN" in env_example
