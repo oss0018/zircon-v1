@@ -123,6 +123,26 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("VK_SERVICE_TOKEN", "ZIRCON_VK_SERVICE_TOKEN"),
     )
+    honeypot_imap_host: str = Field(
+        default="",
+        validation_alias=AliasChoices("HONEYPOT_IMAP_HOST", "ZIRCON_HONEYPOT_IMAP_HOST"),
+    )
+    honeypot_imap_port: int = Field(
+        default=993,
+        validation_alias=AliasChoices("HONEYPOT_IMAP_PORT", "ZIRCON_HONEYPOT_IMAP_PORT"),
+    )
+    honeypot_imap_user: str = Field(
+        default="",
+        validation_alias=AliasChoices("HONEYPOT_IMAP_USER", "ZIRCON_HONEYPOT_IMAP_USER"),
+    )
+    honeypot_imap_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("HONEYPOT_IMAP_PASSWORD", "ZIRCON_HONEYPOT_IMAP_PASSWORD"),
+    )
+    honeypot_mailboxes: str = Field(
+        default="ceo-honeypot,finance-honeypot",
+        validation_alias=AliasChoices("HONEYPOT_MAILBOXES", "ZIRCON_HONEYPOT_MAILBOXES"),
+    )
     pagerduty_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("PAGERDUTY_API_KEY", "ZIRCON_PAGERDUTY_API_KEY"),
