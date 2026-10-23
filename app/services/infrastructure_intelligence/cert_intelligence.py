@@ -4,12 +4,47 @@ self-signed/expired certificate detection via TLS handshake.
 """
 import ipaddress
 import logging
+from datetime import datetime, timezone
 
 from app.services.infrastructure_intelligence.self_signed_cert_analyzer import (
     SelfSignedCertAnalyzer,
 )
 
 logger = logging.getLogger(__name__)
+CERT_EXPIRY_WARNING_DAYS = 30
+
+
+def _expiry_metadata(not_after: str) -> dict:
+    """Return expiry state for a certificate transparency date, when parseable."""
+    if not not_after:
+        return {}
+
+    try:
+        expires_at = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return {}
+
+    now = datetime.now(timezone.utc)
+    days_until_expiry = (expires_at - now).days
+    is_expired = expires_at < now
+    if is_expired:
+        severity, finding_type = 4, "expired_cert"
+    elif days_until_expiry <= 7:
+        severity, finding_type = 4, "expiring_cert"
+    elif days_until_expiry <= CERT_EXPIRY_WARNING_DAYS:
+        severity, finding_type = 3, "expiring_cert"
+    else:
+        severity, finding_type = 1, "certificate"
+
+    return {
+        "days_until_expiry": days_until_expiry,
+        "is_expired": is_expired,
+        "validity_status": finding_type,
+        "severity": severity,
+        "finding_type": finding_type,
+    }
 
 
 class CertIntelligenceModule:
@@ -47,17 +82,26 @@ class CertIntelligenceModule:
             severity = 3 if is_wildcard else 1
 
             san_list = [n.strip() for n in name_value.split("\n") if n.strip()]
+            not_after = cert.get("not_after", "") or ""
+            expiry = _expiry_metadata(not_after)
+            if expiry:
+                severity = max(severity, expiry["severity"])
 
             findings.append({
                 "entity": common_name or domain,
                 "module": "cert",
-                "finding_type": "certificate",
+                "finding_type": expiry.get("finding_type", "certificate"),
                 "severity": severity,
                 "source": "crtsh",
                 "data_json": {
                     "issuer": cert.get("issuer_name", ""),
                     "not_before": cert.get("not_before", ""),
-                    "not_after": cert.get("not_after", ""),
+                    "not_after": not_after,
+                    **{
+                        key: expiry[key]
+                        for key in ("days_until_expiry", "is_expired", "validity_status")
+                        if key in expiry
+                    },
                     "serial": serial,
                     "san_count": len(san_list),
                     "common_name": common_name,

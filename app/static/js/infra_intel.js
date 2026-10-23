@@ -193,6 +193,26 @@ document.addEventListener('alpine:init', () => {
       return this.findings.filter(f => f.module === mod).length;
     },
 
+    certificateValidity(finding) {
+      const data = finding.data_json || {};
+      const start = data.not_before ? this.formatDate(data.not_before) : 'Unknown';
+      const end = data.not_after ? this.formatDate(data.not_after) : 'Unknown';
+      return `${start} – ${end}`;
+    },
+
+    certificateExpiryLabel(finding) {
+      const data = finding.data_json || {};
+      if (
+        data.days_until_expiry === null ||
+        data.days_until_expiry === undefined ||
+        data.days_until_expiry === ''
+      ) return '';
+      const expiry = Number(data.days_until_expiry);
+      if (!Number.isFinite(expiry)) return '';
+      if (expiry < 0) return `Expired ${Math.abs(expiry)}d ago`;
+      return `${expiry}d remaining`;
+    },
+
     parseSummary(inv) {
       if (!inv || !inv.summary_json) return {};
       if (typeof inv.summary_json === 'object') return inv.summary_json;
