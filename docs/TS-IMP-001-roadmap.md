@@ -276,7 +276,7 @@ There are **no blockers** preventing the system from running. All Phase 2 additi
 | M5 | HIBP | `HIBP_API_KEY` | ✅ Integrations |
 | M5 | IntelX | `INTELX_API_KEY` | ✅ Integrations |
 | M5 | Dark Web (Tor) | `TOR_SOCKS_PROXY` | ❌ Phase 2 stub |
-| M6 | Google Ads Transparency | *(public API)* | N/A |
+| M6 | Meta Ad Library | `META_AD_LIBRARY_ACCESS_TOKEN` | ✅ live |
 | M6 | Yandex Direct | `YANDEX_OAUTH_TOKEN` | ❌ Not yet |
 | M7/M8 | NRD feed / lookalike | *(internal)* | ✅ live |
 | Alert Engine | Slack | `SLACK_WEBHOOK_URL` | ❌ Phase 2 new |
