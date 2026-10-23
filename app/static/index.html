@@ -263,92 +263,141 @@
 
             <!-- ── DASHBOARD ──────────────────────────────────── -->
             <div x-show="page === 'dashboard'" x-data="dashboardPage" x-init="init()">
-              <div class="stats-grid">
-                <div class="stat-card" @click="navigate('files')" title="View files">
-                  <div class="stat-label" x-text="t('total_files')"></div>
-                  <div class="stat-value" x-text="stat('total_files')"></div>
+              <div class="dashboard-header">
+                <div>
+                  <div class="dashboard-eyebrow">ZIRCON / OPERATIONS</div>
+                  <h1 x-text="t('dashboard_heading')"></h1>
+                  <p x-text="t('dashboard_subtitle')"></p>
                 </div>
-                <div class="stat-card" @click="navigate('files')" title="View indexed files">
-                  <div class="stat-label" x-text="t('indexed_files')"></div>
-                  <div class="stat-value text-blue" x-text="stat('indexed_files')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('search')" title="Go to search">
-                  <div class="stat-label" x-text="t('total_searches')"></div>
-                  <div class="stat-value" x-text="stat('total_searches')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('integrations')" title="View integrations">
-                  <div class="stat-label" x-text="t('active_integrations')"></div>
-                  <div class="stat-value text-blue" x-text="stat('active_integrations')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('watchlist')" title="View watchlist">
-                  <div class="stat-label" x-text="t('watchlist_items')"></div>
-                  <div class="stat-value" x-text="stat('watchlist_items')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('brands')" title="View brand alerts">
-                  <div class="stat-label" x-text="t('brand_alerts')"></div>
-                  <div class="stat-value text-red" x-text="stat('brand_alerts_new')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('monitoring')" title="View monitoring jobs">
-                  <div class="stat-label" x-text="t('monitoring_jobs')"></div>
-                  <div class="stat-value" x-text="stat('active_monitoring_jobs')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('notifications'); $dispatch('load-stats')" title="View notifications">
-                  <div class="stat-label" x-text="t('unread_notifications')"></div>
-                  <div class="stat-value text-red" x-text="stat('unread_notifications')"></div>
+                <div class="dashboard-header-actions">
+                  <span class="dashboard-updated" x-show="lastUpdatedAt" x-text="lastUpdatedLabel()"></span>
+                  <button class="btn btn-secondary" @click="load()" :disabled="loading">
+                    <span x-show="loading" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="t('refresh')"></span>
+                  </button>
+                  <button class="btn btn-primary" @click="showWidgetSettings = !showWidgetSettings"
+                          :aria-expanded="showWidgetSettings" aria-controls="dashboard-widget-settings"
+                          x-text="t('customize_dashboard')"></button>
                 </div>
               </div>
 
-              <div class="grid-2" style="gap:20px;">
-                <div class="card">
-                  <div class="card-title" x-text="t('recent_searches')"></div>
-                  <template x-if="stats && stats.recent_searches.length === 0">
-                    <p class="text-muted text-sm" x-text="t('no_data')"></p>
-                  </template>
-                  <template x-for="s in (stats ? stats.recent_searches : [])" :key="s.query + s.created_at">
-                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-color);cursor:pointer;"
-                         @click="navigate('search')" title="Click to search again">
-                      <span class="text-sm truncate text-green" x-text="s.query" style="max-width:200px;"></span>
-                      <span class="badge badge-gray" x-text="s.results_count + ' results'"></span>
-                    </div>
+              <div id="dashboard-widget-settings" class="card dashboard-settings" x-show="showWidgetSettings" x-cloak>
+                <div class="dashboard-settings-heading">
+                  <div>
+                    <div class="card-title" x-text="t('dashboard_widgets')"></div>
+                    <p class="text-muted text-sm" x-text="t('dashboard_widgets_hint')"></p>
+                  </div>
+                  <button class="btn btn-sm btn-secondary" @click="resetWidgets()" x-text="t('reset')"></button>
+                </div>
+                <div class="dashboard-widget-options">
+                  <template x-for="option in widgetOptions" :key="option.id">
+                    <label class="dashboard-widget-option">
+                      <input type="checkbox" :checked="widgetVisibility[option.id]"
+                             @change="toggleWidget(option.id, $event.target.checked)">
+                      <span x-text="t(option.label)"></span>
+                    </label>
                   </template>
                 </div>
+              </div>
 
-                <div class="card">
-                  <div class="card-title" x-text="t('file_types')"></div>
-                  <!-- Loading state -->
-                  <div x-show="loading" style="padding:20px 0;text-align:center;">
-                    <span class="spinner" style="width:18px;height:18px;"></span>
+              <div x-show="widgetVisibility.priority_metrics" class="stats-grid dashboard-stats-grid">
+                <template x-for="widget in metricWidgets()" :key="widget.id">
+                  <button class="stat-card dashboard-stat-card" @click="navigate(widget.page)" :title="t(widget.label)">
+                    <span class="stat-label" x-text="t(widget.label)"></span>
+                    <span class="stat-value" :class="widget.tone" x-text="stat(widget.statKey)"></span>
+                  </button>
+                </template>
+              </div>
+
+              <div class="dashboard-widgets">
+                <section class="card dashboard-widget" x-show="widgetVisibility.alert_feed">
+                  <div class="dashboard-widget-heading">
+                    <div>
+                      <div class="card-title" x-text="t('alert_feed')"></div>
+                      <p class="text-muted text-xs" x-text="t('alert_feed_hint')"></p>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" @click="navigate('notifications')" x-text="t('view_all')"></button>
                   </div>
-                  <!-- Error state -->
-                  <div x-show="!loading && loadError" style="padding:20px 0;text-align:center;">
-                    <p class="text-muted text-sm">Failed to load data.</p>
-                    <button class="btn btn-sm btn-secondary" style="margin-top:8px;" @click="load()">Retry</button>
+                  <p x-show="notificationError" class="dashboard-inline-error" x-text="notificationError"></p>
+                  <div x-show="!notificationError && notifications.length === 0" class="dashboard-empty" x-text="t('no_recent_alerts')"></div>
+                  <template x-for="notification in notifications" :key="notification.id">
+                    <button class="dashboard-alert-row" :class="{ 'is-unread': !notification.read }"
+                            @click="notification.read ? navigate('notifications') : markNotificationRead(notification.id)">
+                      <span class="dashboard-alert-dot" :class="'dashboard-alert-dot--' + notification.type"></span>
+                      <span class="dashboard-alert-copy">
+                        <strong x-text="notification.title"></strong>
+                        <span x-text="notification.message"></span>
+                      </span>
+                      <time x-text="formatDashboardDate(notification.created_at)"></time>
+                    </button>
+                  </template>
+                </section>
+
+                <section class="card dashboard-widget" x-show="widgetVisibility.threat_geo">
+                  <div class="dashboard-widget-heading">
+                    <div>
+                      <div class="card-title" x-text="t('threat_geography')"></div>
+                      <p class="text-muted text-xs" x-text="t('threat_geography_hint')"></p>
+                    </div>
+                    <span class="badge badge-blue" x-text="indicatorCountLabel()"></span>
                   </div>
-                  <!-- Empty state -->
-                  <div x-show="!loading && !loadError && (!stats || Object.keys(stats.file_types || {}).length === 0)"
-                       style="padding:20px 0;text-align:center;">
-                    <p class="text-muted text-sm" x-text="t('no_data')"></p>
+                  <p x-show="indicatorError" class="dashboard-inline-error" x-text="indicatorError"></p>
+                  <div x-show="!indicatorError && countryRows.length === 0" class="dashboard-empty" x-text="t(indicatorsLoaded ? 'no_geolocated_indicators' : 'loading')"></div>
+                  <div x-show="!indicatorError && countryRows.length > 0" class="dashboard-country-list">
+                    <template x-for="country in countryRows" :key="country.code">
+                      <div class="dashboard-country-row">
+                        <span class="dashboard-country-code" x-text="country.code"></span>
+                        <span class="dashboard-country-name" x-text="country.name"></span>
+                        <span class="dashboard-country-bar"><span :style="'width:' + country.percentage + '%'"></span></span>
+                        <strong x-text="country.count"></strong>
+                      </div>
+                    </template>
                   </div>
-                  <!-- File types donut chart (canvas always in DOM; x-show keeps it hidden until data arrives) -->
-                  <div x-show="!loading && !loadError && stats && Object.keys(stats.file_types || {}).length > 0"
-                       style="height:200px;position:relative;">
+                  <div class="dashboard-data-note" x-text="t('threat_geography_note')"></div>
+                </section>
+
+                <section class="card dashboard-widget" x-show="widgetVisibility.recent_searches">
+                  <div class="dashboard-widget-heading">
+                    <div class="card-title" x-text="t('recent_searches')"></div>
+                    <button class="btn btn-sm btn-secondary" @click="navigate('search')" x-text="t('view_all')"></button>
+                  </div>
+                  <div x-show="!stats || !stats.recent_searches || stats.recent_searches.length === 0" class="dashboard-empty" x-text="t('no_data')"></div>
+                  <template x-for="s in (stats && stats.recent_searches ? stats.recent_searches : [])" :key="s.query + s.created_at">
+                    <button class="dashboard-search-row" @click="navigate('search')">
+                      <span class="dashboard-search-query" x-text="s.query"></span>
+                      <span class="badge badge-gray" x-text="s.results_count + ' ' + t('results').toLowerCase()"></span>
+                    </button>
+                  </template>
+                </section>
+
+                <section class="card dashboard-widget" x-show="widgetVisibility.file_types">
+                  <div class="dashboard-widget-heading">
+                    <div class="card-title" x-text="t('file_types')"></div>
+                    <button class="btn btn-sm btn-secondary" @click="navigate('files')" x-text="t('view_all')"></button>
+                  </div>
+                  <div x-show="loading" class="dashboard-empty"><span class="spinner" style="width:18px;height:18px;"></span></div>
+                  <div x-show="!loading && !loadError && (!stats || Object.keys(stats.file_types || {}).length === 0)" class="dashboard-empty" x-text="t('no_data')"></div>
+                  <div x-show="!loading && !loadError && stats && Object.keys(stats.file_types || {}).length > 0" class="dashboard-chart">
                     <canvas id="file-types-chart"></canvas>
                   </div>
-                </div>
-              </div>
+                  <div x-show="loadError" class="dashboard-empty">
+                    <p class="dashboard-inline-error" x-text="t('dashboard_load_error')"></p>
+                    <button class="btn btn-sm btn-secondary" @click="load()" x-text="t('retry')"></button>
+                  </div>
+                </section>
 
-              <!-- Quick Actions -->
-              <div class="card" style="margin-top:20px;">
-                <div class="card-title">Quick Actions</div>
-                <div class="flex gap-2" style="flex-wrap:wrap;">
-                  <button class="btn btn-secondary" @click="reindexAll()" :disabled="reindexing">
-                    <span x-show="reindexing" class="spinner" style="width:14px;height:14px;"></span>
-                    <span x-text="reindexing ? 'Reindexing...' : 'Reindex All'"></span>
-                  </button>
-                  <button class="btn btn-secondary" @click="navigate('brands')">Scan All Brands</button>
-                  <button class="btn btn-secondary" @click="navigate('search')">View All Searches</button>
-                </div>
-                <div x-show="reindexMsg" class="alert alert-success" style="margin-top:12px;" x-text="reindexMsg"></div>
+                <section class="card dashboard-widget" x-show="widgetVisibility.quick_actions">
+                  <div class="card-title" x-text="t('quick_actions')"></div>
+                  <div class="dashboard-quick-actions">
+                    <button class="btn btn-secondary" @click="navigate('search')" x-text="t('search')"></button>
+                    <button class="btn btn-secondary" @click="navigate('ti-dashboard')" x-text="t('threat_intelligence')"></button>
+                    <button class="btn btn-secondary" @click="navigate('brands')" x-text="t('brand_protection')"></button>
+                    <button class="btn btn-secondary" @click="reindexAll()" :disabled="reindexing">
+                      <span x-text="reindexing ? t('reindexing') : t('reindex')"></span>
+                    </button>
+                  </div>
+                  <div x-show="reindexMsg" class="alert alert-success" style="margin-top:12px;" x-text="reindexMsg"></div>
+                </section>
               </div>
             </div>
 
