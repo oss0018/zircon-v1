@@ -296,19 +296,239 @@ async def _scan_m1_tiktok(rule: dict) -> list:
 
 
 async def _scan_m1_linkedin(rule: dict) -> list:
-    """M1 Phase 2: LinkedIn Account Impersonation Detection — stub.
+    """M1: LinkedIn — detect fake Company Pages and executive-impersonation
+    profiles via a configurable Apify actor.
 
-    Searches by company name and executive profiles. Flags accounts with brand
-    name combined with high executive impersonation confidence.
+    LinkedIn's own API does not offer keyword-based public search of Company
+    Pages or member profiles to third-party apps outside its Partner Program
+    (Talent/Marketing/Sign-In partners only), so general brand-monitoring
+    access is not obtainable there. As with Facebook, there is also no single
+    official Apify actor for LinkedIn search -- the marketplace has many
+    independently maintained actors with different input/output field names,
+    and any given actor id may be renamed or delisted over time -- so
+    operators must point this scanner at an actor of their choosing via
+    ``LINKEDIN_APIFY_ACTOR`` (browse options at
+    https://apify.com/store?search=linkedin; ``curious_coder/linkedin-company-search``
+    is a reasonable starting point for company-name search, though its
+    current input field is unverified here and may differ from the default
+    below). The actor's input field name for the search keyword defaults to
+    ``keyword`` and can be overridden with ``LINKEDIN_APIFY_SEARCH_FIELD`` for
+    actors that expect a different field name (e.g. some company-search
+    actors expect ``searches``, plural).
 
-    Integration: LinkedIn API (limited public access).
-    Required env vars: LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET
+    Searches brand-derived queries plus, for each configured executive name, a
+    "<brand> <first name>" query. Results whose name/headline combine the
+    brand with a configured executive's first name are flagged as likely
+    executive-impersonation profiles (a common CEO-fraud/whaling vector) with
+    a distinct finding type and a higher score; other brand-matching results
+    are flagged as generic fake Company Pages.
+
+    Required env vars: APIFY_API_KEY (shared with Instagram/Facebook), LINKEDIN_APIFY_ACTOR
+    Optional env vars: LINKEDIN_APIFY_SEARCH_FIELD (default: "keyword")
+    Output type: ``fake_linkedin_page`` or ``fake_linkedin_profile``
     """
-    logger.info(
-        "[IMP M1] LinkedIn scan stub for '%s'. Configure LinkedIn API integration to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    brand = (rule.get("brand_name") or "").strip()
+    apify_key = os.getenv("APIFY_API_KEY", "").strip()
+    if not apify_key:
+        logger.info(
+            "[IMP M1] APIFY_API_KEY not configured; LinkedIn scan skipped for '%s'.",
+            brand,
+        )
+        return []
+
+    actor = os.getenv("LINKEDIN_APIFY_ACTOR", "").strip()
+    if not actor:
+        logger.info(
+            "[IMP M1] LINKEDIN_APIFY_ACTOR not configured; LinkedIn scan skipped for '%s'. "
+            "No single official Apify actor exists for LinkedIn search — set "
+            "LINKEDIN_APIFY_ACTOR to an actor id from https://apify.com/store?search=linkedin.",
+            brand,
+        )
+        return []
+
+    if not brand:
+        return []
+
+    def _parse_count(value) -> int:
+        if value is None:
+            return 0
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+
+        text = str(value).strip().replace(",", "")
+        if not text:
+            return 0
+        if text.endswith("+"):
+            text = text[:-1]
+
+        try:
+            return int(text)
+        except (TypeError, ValueError):
+            return 0
+
+    def _parse_bool_flag(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y"}:
+                return True
+            if normalized in {"false", "0", "no", "n", ""}:
+                return False
+        return bool(value)
+
+    search_field = os.getenv("LINKEDIN_APIFY_SEARCH_FIELD", "keyword").strip() or "keyword"
+
+    try:
+        from rapidfuzz import fuzz as _fuzz  # type: ignore
+    except ImportError:
+        _fuzz = None
+
+    exec_names = [str(n).strip() for n in (rule.get("executive_names") or []) if str(n).strip()]
+    exec_first_names = {n.split()[0].lower() for n in exec_names if n.split()}
+
+    search_queries = [brand, f"{brand} official", f"{brand} careers"]
+    for exec_name in exec_names[:_MAX_EXEC_SEARCH_TERMS]:
+        parts = exec_name.split()
+        if parts:
+            search_queries.append(f"{brand} {parts[0]}")
+
+    findings: list[dict] = []
+    seen_ids: set[str] = set()
+    actor_url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
+
+    for query in search_queries:
+        payload = {search_field: query, "maxItems": 10}
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    actor_url,
+                    json=payload,
+                    headers={"Authorization": "Bearer " + apify_key},
+                )
+                if resp.status_code not in (200, 201):
+                    logger.debug(
+                        "[IMP M1] Apify LinkedIn returned %s for '%s'",
+                        resp.status_code,
+                        query,
+                    )
+                    continue
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[IMP M1] Apify LinkedIn error for '%s': %s", query, exc)
+            continue
+
+        if not isinstance(data, list):
+            data = [data] if data else []
+
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+
+            identifier = str(
+                item.get("publicIdentifier")
+                or item.get("username")
+                or item.get("linkedinId")
+                or item.get("id")
+                or ""
+            )
+            if not identifier or identifier in seen_ids:
+                continue
+            seen_ids.add(identifier)
+
+            display_name = str(
+                item.get("companyName")
+                or item.get("fullName")
+                or item.get("name")
+                or item.get("title")
+                or ""
+            )
+            profile_url = str(
+                item.get("companyUrl")
+                or item.get("linkedinUrl")
+                or item.get("profileUrl")
+                or item.get("url")
+                or f"https://www.linkedin.com/in/{identifier}"
+            )
+            followers = _parse_count(
+                item.get("followersCount")
+                or item.get("followerCount")
+                or item.get("followers")
+                or item.get("connectionsCount")
+                or 0
+            )
+            headline = str(item.get("headline") or item.get("occupation") or item.get("jobTitle") or "")
+            is_verified = _parse_bool_flag(item.get("verified")) or _parse_bool_flag(item.get("isVerified"))
+
+            if not display_name or is_verified:
+                continue
+
+            # Scoring
+            score = 0
+            brand_lower = brand.lower()
+            name_lower = display_name.lower()
+            headline_lower = headline.lower()
+
+            if _fuzz:
+                name_sim = _fuzz.partial_ratio(brand_lower, name_lower)
+                score += min(int(name_sim * 0.4), 40)
+            elif brand_lower in name_lower:
+                score += 30
+
+            if brand_lower in name_lower:
+                score += 15
+
+            if brand_lower in headline_lower:
+                score += 10
+
+            for kw in ("official", "support", "hr", "careers", "recruiter"):
+                if kw in name_lower or kw in headline_lower:
+                    score += 5
+
+            # Executive-impersonation signal: profile name matches a
+            # configured executive's first name AND references the brand.
+            is_exec_impersonation = False
+            if exec_first_names and (brand_lower in name_lower or brand_lower in headline_lower):
+                for first_name in exec_first_names:
+                    if first_name and first_name in name_lower:
+                        score += 25
+                        is_exec_impersonation = True
+                        break
+
+            min_score = int(rule.get("min_impersonation_score") or 40)
+            if score < min_score:
+                continue
+
+            finding_type = "fake_linkedin_profile" if is_exec_impersonation else "fake_linkedin_page"
+            signals = ["linkedin_impersonation", f"score:{score}"]
+            if is_exec_impersonation:
+                signals.append("executive_impersonation")
+
+            findings.append(
+                {
+                    "module": "m1",
+                    "platform": "linkedin",
+                    "finding_type": finding_type,
+                    "target_url": profile_url,
+                    "target_identifier": identifier,
+                    "display_name": display_name,
+                    "description": (
+                        f"LinkedIn {'profile' if is_exec_impersonation else 'page'} "
+                        f"'{display_name}' ({profile_url}) may be impersonating "
+                        f"'{brand}' (score {score}). Followers/connections: {followers}."
+                    ),
+                    "threat_score": min(score, 95),
+                    "subscriber_count": followers,
+                    "signals": signals,
+                    "evidence": item,
+                }
+            )
+
+    return findings
 
 
 async def _scan_m1_youtube(rule: dict) -> list:
