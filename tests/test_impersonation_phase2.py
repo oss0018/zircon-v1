@@ -238,7 +238,6 @@ async def test_phase2_scanner_stubs_return_empty_list():
     from app.services.impersonation.scanner import (
         _scan_m1_tiktok,
         _scan_m1_linkedin,
-        _scan_m1_youtube,
         _scan_m2_appstore,
         _scan_m5_darkweb,
         _scan_m3_honeypot,
@@ -246,13 +245,24 @@ async def test_phase2_scanner_stubs_return_empty_list():
     )
     rule = {'brand_name': 'TestBrand', 'official_domains': ['testbrand.com'], 'executive_names': []}
     for stub in (
-        _scan_m1_tiktok, _scan_m1_linkedin, _scan_m1_youtube,
+        _scan_m1_tiktok, _scan_m1_linkedin,
         _scan_m2_appstore, _scan_m5_darkweb,
         _scan_m3_honeypot, _scan_m3_inbound_headers,
     ):
         result = await stub(rule)
         assert isinstance(result, list), f"{stub.__name__} should return a list"
         assert result == [], f"{stub.__name__} stub should return empty list"
+
+
+@pytest.mark.asyncio
+async def test_m1_youtube_no_longer_a_stub():
+    """M1 YouTube was implemented in Phase 2b; it now calls the live YouTube
+    Data API v3 instead of returning an empty stub list unconditionally."""
+    from app.services.impersonation.scanner import _scan_m1_youtube
+    rule = {'brand_name': '', 'official_domains': ['testbrand.com'], 'executive_names': []}
+    result = await _scan_m1_youtube(rule)
+    assert isinstance(result, list)
+    assert result == []
 
 
 # ── API endpoint tests ────────────────────────────────────────────────────────
