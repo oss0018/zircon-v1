@@ -384,7 +384,11 @@ async def list_scans(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    query = select(VSScan).order_by(VSScan.created_at.desc())
+    query = (
+        select(VSScan, VSScanTarget.name, VSScanTarget.target_value)
+        .outerjoin(VSScanTarget, VSScan.target_id == VSScanTarget.id)
+        .order_by(VSScan.created_at.desc())
+    )
     if target_id is not None:
         query = query.where(VSScan.target_id == target_id)
     if profile is not None:
@@ -393,11 +397,13 @@ async def list_scans(
         query = query.where(VSScan.status == status)
 
     result = await db.execute(query.limit(min(limit, 200)).offset(offset))
-    scans = result.scalars().all()
+    scans = result.all()
     return [
         {
             "id": s.id,
             "target_id": s.target_id,
+            "target_name": target_name,
+            "target_value": target_value,
             "profile": s.profile,
             "scope": s.scope,
             "status": s.status,
@@ -415,7 +421,7 @@ async def list_scans(
             "completed_at": s.completed_at.isoformat() if s.completed_at else None,
             "created_at": s.created_at.isoformat() if s.created_at else None,
         }
-        for s in scans
+        for s, target_name, target_value in scans
     ]
 
 
@@ -425,10 +431,15 @@ async def get_scan(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    scan_result = await db.execute(select(VSScan).where(VSScan.id == scan_id))
-    scan = scan_result.scalar_one_or_none()
-    if not scan:
+    scan_result = await db.execute(
+        select(VSScan, VSScanTarget.name, VSScanTarget.target_value)
+        .outerjoin(VSScanTarget, VSScan.target_id == VSScanTarget.id)
+        .where(VSScan.id == scan_id)
+    )
+    scan_row = scan_result.one_or_none()
+    if not scan_row:
         raise HTTPException(status_code=404, detail="Scan not found")
+    scan, target_name, target_value = scan_row
 
     findings_result = await db.execute(select(VSFinding).where(VSFinding.scan_id == scan_id).order_by(VSFinding.id.desc()))
     findings = findings_result.scalars().all()
@@ -436,6 +447,8 @@ async def get_scan(
     return {
         "id": scan.id,
         "target_id": scan.target_id,
+        "target_name": target_name,
+        "target_value": target_value,
         "profile": scan.profile,
         "scope": scan.scope,
         "status": scan.status,
@@ -869,8 +882,13 @@ async def dashboard_summary(
     for severity, count in severity_rows:
         findings_by_severity[severity] = count
 
-    scans_result = await db.execute(select(VSScan).order_by(VSScan.created_at.desc()).limit(10))
-    scans = scans_result.scalars().all()
+    scans_result = await db.execute(
+        select(VSScan, VSScanTarget.name, VSScanTarget.target_value)
+        .outerjoin(VSScanTarget, VSScan.target_id == VSScanTarget.id)
+        .order_by(VSScan.created_at.desc())
+        .limit(10)
+    )
+    scans = scans_result.all()
 
     return {
         "total_targets": total_targets,
@@ -879,6 +897,8 @@ async def dashboard_summary(
             {
                 "id": s.id,
                 "target_id": s.target_id,
+                "target_name": target_name,
+                "target_value": target_value,
                 "status": s.status,
                 "profile": s.profile,
                 "overall_risk": s.overall_risk,
@@ -886,6 +906,6 @@ async def dashboard_summary(
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "completed_at": s.completed_at.isoformat() if s.completed_at else None,
             }
-            for s in scans
+            for s, target_name, target_value in scans
         ],
     }

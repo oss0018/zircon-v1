@@ -7105,7 +7105,10 @@
                         <template x-for="scan in (dashboardStats && dashboardStats.recent_scans ? dashboardStats.recent_scans : [])" :key="scan.id">
                           <tr>
                             <td x-text="scan.id"></td>
-                            <td x-text="scan.target_id"></td>
+                            <td>
+                              <div style="font-weight:600;" x-text="scan.target_name || 'Target ' + scan.target_id"></div>
+                              <div class="text-muted text-xs" x-text="scan.target_value || '—'"></div>
+                            </td>
                             <td><span :class="statusBadgeClass(scan.status)" x-text="scan.status"></span></td>
                             <td x-text="profileLabel(scan.profile)"></td>
                             <td x-text="scan.overall_risk || '—'"></td>
@@ -7181,7 +7184,10 @@
                       <template x-for="scan in scans" :key="scan.id">
                         <tr>
                           <td x-text="scan.id"></td>
-                          <td x-text="scan.target_id"></td>
+                          <td>
+                            <div style="font-weight:600;" x-text="scan.target_name || 'Target ' + scan.target_id"></div>
+                            <div class="text-muted text-xs" x-text="scan.target_value || '—'"></div>
+                          </td>
                           <td><span :class="statusBadgeClass(scan.status)" x-text="scan.status"></span></td>
                           <td style="min-width:140px;">
                             <div style="background:var(--border);height:8px;border-radius:999px;overflow:hidden;">
@@ -7422,6 +7428,12 @@
                         <span class="badge badge-blue" x-text="profileLabel(selectedScan.profile)"></span>
                         <span class="text-muted text-sm">Started: <span x-text="selectedScan.started_at ? formatDate(selectedScan.started_at) : '—'"></span></span>
                         <span class="text-muted text-sm">Completed: <span x-text="selectedScan.completed_at ? formatDate(selectedScan.completed_at) : '—'"></span></span>
+                      </div>
+
+                      <div class="card mb-3" style="padding:12px;">
+                        <div class="text-muted text-sm">Scanned Target</div>
+                        <div style="font-weight:600;" x-text="selectedScan.target_name || 'Target ' + selectedScan.target_id"></div>
+                        <div class="text-muted text-sm" style="word-break:break-word;" x-text="selectedScan.target_value || '—'"></div>
                       </div>
 
                       <div class="card mb-3" style="padding:12px;">

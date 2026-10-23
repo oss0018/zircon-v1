@@ -156,6 +156,15 @@ def test_vulnscan_component_targets_expected_frontend_flows():
     assert "formatDuration" in js
 
 
+def test_vulnscan_displays_target_name_and_value_for_scans():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+
+    assert html.count("scan.target_name || 'Target ' + scan.target_id") == 2
+    assert html.count("scan.target_value || '—'") == 2
+    assert "selectedScan.target_name || 'Target ' + selectedScan.target_id" in html
+    assert "selectedScan.target_value || '—'" in html
+
+
 def test_vulnscan_component_supports_report_generation_and_download():
     js = VULNSCAN_JS.read_text(encoding="utf-8")
 
@@ -2272,6 +2281,47 @@ async def test_launch_scan_without_override_snapshots_target_default():
             scan = await vulnscan_api.get_scan(result["scan_id"], db=db, _=_FakeUser())
 
         assert scan["scanner_config"] == {"nikto": {"tuning": "1239"}}
+    finally:
+        await engine.dispose()
+        os.remove(db_path)
+
+
+@pytest.mark.asyncio
+async def test_scan_responses_include_target_name_and_value():
+    from app.database import Base
+    from app.models import VSScan, VSScanTarget
+    import app.api.vulnscan as vulnscan_api
+
+    engine, session_factory, db_path = await _build_temp_session_factory(Base)
+
+    class _FakeUser:
+        id = 1
+
+    try:
+        async with session_factory() as db:
+            target = VSScanTarget(
+                name="Production API",
+                target_type="api",
+                target_value="https://api.example.com",
+            )
+            db.add(target)
+            await db.flush()
+            scan = VSScan(target_id=target.id, profile="quick", status="completed")
+            db.add(scan)
+            await db.commit()
+            scan_id = scan.id
+
+            scans = await vulnscan_api.list_scans(db=db, _=_FakeUser())
+            detail = await vulnscan_api.get_scan(scan_id, db=db, _=_FakeUser())
+            dashboard = await vulnscan_api.dashboard_summary(db=db, _=_FakeUser())
+
+        expected_target = ("Production API", "https://api.example.com")
+        assert (scans[0]["target_name"], scans[0]["target_value"]) == expected_target
+        assert (detail["target_name"], detail["target_value"]) == expected_target
+        assert (
+            dashboard["recent_scans"][0]["target_name"],
+            dashboard["recent_scans"][0]["target_value"],
+        ) == expected_target
     finally:
         await engine.dispose()
         os.remove(db_path)
