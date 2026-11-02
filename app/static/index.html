@@ -2440,7 +2440,7 @@
               <div x-show="!showAlerts">
                 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
                   <template x-for="brand in brands" :key="brand.id">
-                    <div class="card">
+                    <div class="card brand-protection-card">
                       <div class="flex justify-between items-center mb-4">
                         <div>
                           <div style="font-weight:600;" x-text="brand.name"></div>
@@ -2461,8 +2461,8 @@
                           <span x-text="t('scan')"></span>
                           <span x-show="brandRunning[brand.id]" class="spinner" style="width:14px;height:14px;"></span>
                         </button>
-                        <button class="btn btn-sm btn-secondary" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
-                        <button class="btn btn-sm btn-secondary" title="Manage owned/trusted domains" @click="showOwnedDomainsFor(brand)">🛡</button>
+                        <button class="btn btn-sm btn-secondary brand-protection-action" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
+                        <button class="btn btn-sm btn-secondary brand-protection-action" title="Manage owned/trusted domains" aria-label="Manage owned/trusted domains" @click="showOwnedDomainsFor(brand)">🛡</button>
                         <button class="btn btn-sm btn-danger" @click="deleteBrand(brand.id)">✕</button>
                       </div>
                       <!-- Advanced check actions -->
@@ -2491,7 +2491,7 @@
                         </div>
                         <!-- Row 2: File/import/recheck/export — flex-wrap so they never overflow -->
                         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-                          <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                          <button class="btn btn-sm btn-secondary brand-protection-action" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="triggerCheckFromFile(brand.id)"
                                   :disabled="brandRunning[brand.id]">
                             📄 Check from File
@@ -2499,19 +2499,19 @@
                           </button>
                           <input :id="`file-input-check-${brand.id}`" type="file" accept=".txt"
                                  style="display:none;" :disabled="brandRunning[brand.id]" @change="checkFromFile(brand.id, $event)" />
-                          <label class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                          <label class="btn btn-sm btn-secondary brand-protection-action" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                  :class="{ 'text-muted': brandRunning[brand.id] }"
                                  :style="brandRunning[brand.id] ? 'pointer-events:none;opacity:0.6;cursor:not-allowed;' : 'cursor:pointer;'">
                             📥 Import .txt
                             <input type="file" accept=".txt" style="display:none;" :disabled="brandRunning[brand.id]" @change="scanFromFile(brand.id, $event)" />
                           </label>
-                          <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                          <button class="btn btn-sm btn-secondary brand-protection-action" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="recheckAlive(brand.id)"
                                   :disabled="brandRunning[brand.id]">
                             🔄 Re-check
                             <span x-show="brandRunning[brand.id]" class="spinner" style="width:14px;height:14px;"></span>
                           </button>
-                          <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                          <button class="btn btn-sm btn-secondary brand-protection-action" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="activeBrand = brand; exportResults('csv')">
                             ⬇ CSV
                           </button>
