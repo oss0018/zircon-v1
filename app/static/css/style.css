@@ -869,6 +869,18 @@ body::before {
   cursor: not-allowed;
 }
 
+.brand-protection-card .brand-protection-action:not(:disabled):not(.text-muted) {
+  color: var(--accent-green);
+  border-color: rgba(0, 255, 157, 0.4);
+  background: rgba(0, 255, 157, 0.06);
+}
+
+.brand-protection-card .brand-protection-action:not(:disabled):not(.text-muted):hover {
+  border-color: var(--accent-green);
+  background: rgba(0, 255, 157, 0.14);
+  box-shadow: 0 0 8px rgba(0, 255, 157, 0.16);
+}
+
 /* ── Forms ───────────────────────────────────────────────────── */
 .form-group {
   display: flex;
