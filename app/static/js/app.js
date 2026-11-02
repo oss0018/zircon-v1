@@ -180,8 +180,9 @@ document.addEventListener('alpine:init', () => {
     },
 
     navigate(p) {
-      this.page = p;
-      if (p === 'deep-search' || p === 'threat-intel' || p === 'ti-dashboard' || p === 'infrastructure-intelligence') {
+      const page = p === 'ti-dashboard' ? 'threat-intel' : p;
+      this.page = page;
+      if (page === 'deep-search' || page === 'threat-intel' || page === 'infrastructure-intelligence') {
         this.csintOpen = true;
       }
       if (p === 'watchlist' || p === 'monitoring' || p === 'brands' || p === 'lookalike-domains' ||
