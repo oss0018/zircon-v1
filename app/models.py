@@ -272,6 +272,7 @@ class SocialListeningRule(Base):
     exclusions = Column(Text, default="[]")
     languages = Column(Text, default='["uk","ru","en"]')
     platforms = Column(Text, default="[]")
+    rss_feeds = Column(Text, default="[]")
     severity_threshold = Column(Integer, default=2)
     alert_on = Column(String(40), default="EVERY_MENTION")
     schedule_cron = Column(String(100), default="*/15 * * * *")
@@ -327,6 +328,20 @@ class SLMention(Base):
     published_at = Column(DateTime, nullable=True)
     collected_at = Column(DateTime, default=_utcnow)
     created_at = Column(DateTime, default=_utcnow)
+
+
+class SLMentionSnapshot(Base):
+    __tablename__ = "sl_mention_snapshots"
+    id = Column(Integer, primary_key=True)
+    mention_id = Column(Integer, ForeignKey("sl_mentions.id"), nullable=False, index=True)
+    source_platform = Column(String(50), nullable=False)
+    source_url = Column(Text, default="")
+    author_username = Column(String(200), default="")
+    content = Column(Text, default="")
+    content_sha256 = Column(String(64), nullable=False)
+    published_at = Column(DateTime, nullable=True)
+    captured_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    captured_at = Column(DateTime, default=_utcnow, nullable=False)
 
 
 class SLAlert(Base):

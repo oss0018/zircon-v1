@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import json
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import get_db
-from app.models import SLAlert, SLMention, SocialListeningRule, User
+from app.models import SLAlert, SLMention, SLMentionSnapshot, SocialListeningRule, User
 from app.schemas import (
     SLAlertOut,
     SLDashboardStats,
@@ -20,6 +21,7 @@ from app.schemas import (
     SLRuleCreate,
     SLRuleOut,
     SLRuleUpdate,
+    SLMentionSnapshotOut,
 )
 from app.services.social_listening.collector import SocialListeningCollector
 from app.utils.sanitize import sanitize_string
@@ -38,6 +40,13 @@ def _json_dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _snapshot_timestamp(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    return normalized.isoformat()
+
+
 def _rule_to_out(rule: SocialListeningRule) -> SLRuleOut:
     data = {
         "id": rule.id,
@@ -48,6 +57,7 @@ def _rule_to_out(rule: SocialListeningRule) -> SLRuleOut:
         "exclusions": _json_load(rule.exclusions, []),
         "languages": _json_load(rule.languages, ["uk", "ru", "en"]),
         "platforms": _json_load(rule.platforms, []),
+        "rss_feeds": _json_load(rule.rss_feeds, []),
         "severity_threshold": rule.severity_threshold,
         "alert_on": rule.alert_on,
         "schedule_cron": rule.schedule_cron,
@@ -59,6 +69,55 @@ def _rule_to_out(rule: SocialListeningRule) -> SLRuleOut:
         "updated_at": rule.updated_at,
     }
     return SLRuleOut.model_validate(data)
+
+
+def _snapshot_digest(
+    source_platform: str,
+    source_url: str,
+    author_username: str,
+    content: str,
+    published_at: Optional[datetime],
+    captured_by: Optional[int],
+    captured_at: datetime,
+) -> str:
+    payload = {
+        "source_platform": source_platform,
+        "source_url": source_url,
+        "author_username": author_username,
+        "content": content,
+        "published_at": _snapshot_timestamp(published_at),
+        "captured_by": captured_by,
+        "captured_at": _snapshot_timestamp(captured_at),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _snapshot_to_out(snapshot: SLMentionSnapshot) -> SLMentionSnapshotOut:
+    digest = _snapshot_digest(
+        snapshot.source_platform,
+        snapshot.source_url,
+        snapshot.author_username,
+        snapshot.content,
+        snapshot.published_at,
+        snapshot.captured_by,
+        snapshot.captured_at,
+    )
+    return SLMentionSnapshotOut.model_validate(
+        {
+            "id": snapshot.id,
+            "mention_id": snapshot.mention_id,
+            "source_platform": snapshot.source_platform,
+            "source_url": snapshot.source_url,
+            "author_username": snapshot.author_username,
+            "content": snapshot.content,
+            "content_sha256": snapshot.content_sha256,
+            "published_at": snapshot.published_at,
+            "captured_by": snapshot.captured_by,
+            "captured_at": snapshot.captured_at,
+            "integrity_valid": digest == snapshot.content_sha256,
+        }
+    )
 
 
 @router.get("/mentions", response_model=list[SLMentionOut])
@@ -182,6 +241,67 @@ async def get_mention(mention_id: int, db: AsyncSession = Depends(get_db), _: Us
     if not mention:
         raise HTTPException(status_code=404, detail="Not found")
     return mention
+
+
+@router.get(
+    "/mentions/{mention_id}/snapshots",
+    response_model=list[SLMentionSnapshotOut],
+)
+async def list_mention_snapshots(
+    mention_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    mention = (await db.execute(select(SLMention.id).where(SLMention.id == mention_id))).scalar_one_or_none()
+    if mention is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    snapshots = (
+        await db.execute(
+            select(SLMentionSnapshot)
+            .where(SLMentionSnapshot.mention_id == mention_id)
+            .order_by(desc(SLMentionSnapshot.captured_at), desc(SLMentionSnapshot.id))
+        )
+    ).scalars().all()
+    return [_snapshot_to_out(snapshot) for snapshot in snapshots]
+
+
+@router.post(
+    "/mentions/{mention_id}/snapshots",
+    response_model=SLMentionSnapshotOut,
+    status_code=201,
+)
+async def create_mention_snapshot(
+    mention_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mention = (await db.execute(select(SLMention).where(SLMention.id == mention_id))).scalar_one_or_none()
+    if mention is None:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    snapshot = SLMentionSnapshot(
+        mention_id=mention.id,
+        source_platform=mention.source_platform,
+        source_url=mention.source_url or "",
+        author_username=mention.author_username or "",
+        content=mention.content_raw or "",
+        published_at=mention.published_at,
+        captured_by=current_user.id,
+        captured_at=datetime.now(timezone.utc),
+    )
+    snapshot.content_sha256 = _snapshot_digest(
+        snapshot.source_platform,
+        snapshot.source_url,
+        snapshot.author_username,
+        snapshot.content,
+        snapshot.published_at,
+        snapshot.captured_by,
+        snapshot.captured_at,
+    )
+    db.add(snapshot)
+    await db.commit()
+    await db.refresh(snapshot)
+    return _snapshot_to_out(snapshot)
 
 
 @router.patch("/mentions/{mention_id}/status", response_model=SLMentionOut)
@@ -369,6 +489,7 @@ async def create_rule(
         exclusions=_json_dump(data.exclusions),
         languages=_json_dump(data.languages),
         platforms=_json_dump(data.platforms),
+        rss_feeds=_json_dump(data.rss_feeds),
         severity_threshold=data.severity_threshold,
         alert_on=data.alert_on,
         schedule_cron=data.schedule_cron,
@@ -404,7 +525,7 @@ async def update_rule(
 
     payload = data.model_dump(exclude_unset=True)
     for key, value in payload.items():
-        if key in {"brand_terms", "hashtags", "exclusions", "languages", "platforms"}:
+        if key in {"brand_terms", "hashtags", "exclusions", "languages", "platforms", "rss_feeds"}:
             setattr(rule, key, _json_dump(value))
         else:
             setattr(rule, key, value)

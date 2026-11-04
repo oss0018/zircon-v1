@@ -106,6 +106,18 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------ #
+    # Social Listening — Mastodon                                          #
+    # ------------------------------------------------------------------ #
+    mastodon_instance_url: str = Field(
+        default="https://mastodon.social",
+        validation_alias=AliasChoices("MASTODON_INSTANCE_URL", "ZIRCON_MASTODON_INSTANCE_URL"),
+    )
+    mastodon_access_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("MASTODON_ACCESS_TOKEN", "ZIRCON_MASTODON_ACCESS_TOKEN"),
+    )
+
+    # ------------------------------------------------------------------ #
     # Impersonation Monitoring                                             #
     # ------------------------------------------------------------------ #
     hibp_api_key: str = Field(
