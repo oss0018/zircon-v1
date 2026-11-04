@@ -472,12 +472,13 @@ def _migrate_deep_search_schema(conn) -> None:
 
 
 def _migrate_sl_rules(conn) -> None:
-    """Add alert_email and alert_telegram columns to sl_rules if missing."""
+    """Add current Social Listening rule columns to existing databases."""
     from sqlalchemy import inspect, text
 
     ALLOWED_NEW_COLS: dict[str, str] = {
         "alert_email": "VARCHAR(254) DEFAULT ''",
         "alert_telegram": "VARCHAR(100) DEFAULT ''",
+        "rss_feeds": "TEXT DEFAULT '[]'",
     }
 
     try:

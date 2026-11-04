@@ -63,6 +63,11 @@ Key settings:
 - `ZIRCON_TELEGRAM_BOT_TOKEN` — Telegram bot for alerts
 - `CTI_ALERT_EMAIL` / `CTI_ALERT_TELEGRAM` — destinations for certificate-expiry alerts from Infrastructure Intelligence (alerts are sent when an investigation finds a certificate expiring within 30 days)
 
+### Social Listening sources and post snapshots
+Social Listening supports Reddit, Google News/RSS, paste sites, X, Telegram, Habrahabr, Bluesky, Mastodon, and custom HTTPS RSS feeds. Bluesky search uses its public API. Mastodon public hashtag timelines use the configured instance; full-text search requires a read-only `MASTODON_ACCESS_TOKEN`. Set `MASTODON_INSTANCE_URL` to the instance to search (default: `https://mastodon.social`). Custom feed URLs are configured per rule, limited to 10 public HTTPS feeds, and redirects are not followed.
+
+Use **Snapshots** on a mention to preserve the collected text, author, source link, publication time, capture time, and SHA-256 integrity fingerprint. Snapshots are append-only in the API; open the saved source link to compare the live post with its saved copy. This stores the collected post text, not a rendered-page screenshot or an automatic live-availability check.
+
 ### Docker runtime for vulnerability scanners
 `Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, `nuclei`, `nmap`, and **OWASP ZAP** (`zap-baseline.py`, plus a headless JRE to run it), and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
 

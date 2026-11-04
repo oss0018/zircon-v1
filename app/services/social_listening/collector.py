@@ -9,6 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SLRawMention, SLMention, SocialListeningRule
+from app.services.social_listening.adapters.bluesky_adapter import BlueskyAdapter
+from app.services.social_listening.adapters.custom_rss_adapter import CustomRSSAdapter
+from app.services.social_listening.adapters.mastodon_adapter import MastodonAdapter
 from app.services.social_listening.adapters.paste_adapter import PasteAdapter
 from app.services.social_listening.adapters.reddit_adapter import RedditAdapter
 from app.services.social_listening.adapters.rss_adapter import RSSAdapter
@@ -34,6 +37,9 @@ class SocialListeningCollector:
             "pastebin": PasteAdapter(),
             "telegram": TelegramAdapter(),
             "twitter": TwitterAdapter(),
+            "bluesky": BlueskyAdapter(),
+            "mastodon": MastodonAdapter(),
+            "custom_rss": CustomRSSAdapter(),
             "habrahabr": RSSAdapter(
                 feed_url_template="https://habr.com/ru/search/feed/?query={term}&target_type=posts",
                 source_platform="habrahabr",

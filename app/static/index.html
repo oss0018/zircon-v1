@@ -7447,6 +7447,9 @@
                           <option value="twitter">X (Twitter)</option>
                           <option value="telegram">Telegram</option>
                           <option value="habrahabr">Habrahabr</option>
+                          <option value="bluesky">Bluesky</option>
+                          <option value="mastodon">Mastodon</option>
+                          <option value="custom_rss">Custom RSS</option>
                         </select>
                       </div>
                       <div class="form-group" style="min-width:120px;">
@@ -7530,12 +7533,15 @@
                               <td><span :class="mentionStatusColor(m.status)" x-text="m.status"></span></td>
                               <td class="text-sm text-muted" x-text="m.published_at ? formatDate(m.published_at) : '—'"></td>
                               <td>
-                                <select class="form-input" style="min-width:150px;" @change="updateMentionStatus(m.id, $event.target.value)">
-                                  <option value="new" :selected="m.status === 'new'">new</option>
-                                  <option value="investigating" :selected="m.status === 'investigating'">investigating</option>
-                                  <option value="resolved" :selected="m.status === 'resolved'">resolved</option>
-                                  <option value="false_positive" :selected="m.status === 'false_positive'">false_positive</option>
-                                </select>
+                                <div class="flex gap-1" style="flex-wrap:wrap;">
+                                  <select class="form-input" style="min-width:145px;" @change="updateMentionStatus(m.id, $event.target.value)">
+                                    <option value="new" :selected="m.status === 'new'">new</option>
+                                    <option value="investigating" :selected="m.status === 'investigating'">investigating</option>
+                                    <option value="resolved" :selected="m.status === 'resolved'">resolved</option>
+                                    <option value="false_positive" :selected="m.status === 'false_positive'">false_positive</option>
+                                  </select>
+                                  <button class="btn btn-sm btn-secondary" @click="openSnapshots(m)">Snapshots</button>
+                                </div>
                               </td>
                             </tr>
                           </template>
@@ -7701,7 +7707,15 @@
                             <label class="badge badge-gray"><input type="checkbox" value="twitter" x-model="ruleForm.platforms" style="margin-right:6px;"><span>X (Twitter)</span></label>
                             <label class="badge badge-gray"><input type="checkbox" value="telegram" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Telegram</span></label>
                             <label class="badge badge-gray"><input type="checkbox" value="habrahabr" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Habrahabr</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="bluesky" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Bluesky</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="mastodon" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Mastodon</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="custom_rss" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Custom RSS</span></label>
                           </div>
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Custom RSS feed URLs (HTTPS, one per line; up to 10)</label>
+                          <textarea class="form-input" x-model="ruleForm.rss_feeds" rows="3" placeholder="https://example.com/feed.xml"></textarea>
+                          <div class="text-muted text-sm" style="margin-top:6px;">Feeds are polled when Custom RSS is selected. Mastodon public hashtag feeds use your selected hashtags; full-text search requires a read-only MASTODON_ACCESS_TOKEN on the server.</div>
                         </div>
                         <div class="form-group">
                           <label class="form-label">Severity Threshold</label>
@@ -7781,6 +7795,45 @@
                         <button class="btn btn-primary" @click="saveQuickBrand()" :disabled="quickBrandLoading">
                           <span x-text="quickBrandLoading ? 'Saving…' : 'Save'"></span>
                         </button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="showSnapshotsModal">
+                  <div class="modal-overlay" @click.self="showSnapshotsModal = false">
+                    <div class="modal" style="max-width:760px;">
+                      <div class="modal-header">
+                        <div class="modal-title">Post snapshots</div>
+                        <button class="modal-close" @click="showSnapshotsModal = false">&times;</button>
+                      </div>
+                      <div class="modal-body">
+                        <div class="text-muted text-sm" style="margin-bottom:12px;">
+                          Saved text and a SHA-256 integrity fingerprint preserve what this feed collected. Open the source link to compare it with the current post; this is not a full-page screenshot or an automatic availability check.
+                        </div>
+                        <div class="flex justify-between items-center" style="margin-bottom:12px;">
+                          <span class="text-sm" x-text="snapshotMention ? platformLabel(snapshotMention.source_platform) + ' · ' + (snapshotMention.author_username || 'Unknown author') : ''"></span>
+                          <button class="btn btn-primary btn-sm" @click="saveMentionSnapshot()" :disabled="snapshotsSaving">
+                            <span x-text="snapshotsSaving ? 'Saving…' : 'Save snapshot now'"></span>
+                          </button>
+                        </div>
+                        <div x-show="snapshotsLoading" class="text-muted">Loading snapshots…</div>
+                        <template x-if="!snapshotsLoading && mentionSnapshots.length === 0">
+                          <div class="text-muted">No snapshots saved for this post.</div>
+                        </template>
+                        <template x-for="snapshot in mentionSnapshots" :key="snapshot.id">
+                          <div class="card" style="margin-bottom:12px;padding:12px;">
+                            <div class="flex justify-between items-center" style="gap:12px;flex-wrap:wrap;">
+                              <strong x-text="formatDate(snapshot.captured_at)"></strong>
+                              <span :class="snapshot.integrity_valid ? 'badge badge-green' : 'badge badge-red'" x-text="snapshot.integrity_valid ? 'Integrity verified' : 'Integrity check failed'"></span>
+                            </div>
+                            <div class="text-muted text-xs" style="margin-top:6px;word-break:break-all;" x-text="'SHA-256: ' + snapshot.content_sha256"></div>
+                            <pre x-text="snapshot.content" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;margin:10px 0;"></pre>
+                            <a x-show="snapshot.source_url" :href="snapshot.source_url" target="_blank" rel="noopener noreferrer" class="text-sm" style="color:var(--link);">Open original post</a>
+                          </div>
+                        </template>
+                      </div>
+                      <div class="modal-footer">
+                        <button class="btn btn-secondary" @click="showSnapshotsModal = false">Close</button>
                       </div>
                     </div>
                   </div>
