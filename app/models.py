@@ -74,6 +74,17 @@ class Integration(Base):
     created_at = Column(DateTime, default=_utcnow)
 
 
+class NotificationSettings(Base):
+    __tablename__ = "notification_settings"
+    id = Column(Integer, primary_key=True, default=1)
+    smtp_host = Column(String(255), default="")
+    smtp_port = Column(Integer, default=587)
+    smtp_user = Column(String(255), default="")
+    smtp_password_encrypted = Column(Text, default="")
+    telegram_bot_token_encrypted = Column(Text, default="")
+    telegram_chat_id = Column(String(255), default="")
+
+
 class SearchTemplate(Base):
     __tablename__ = "search_templates"
     id = Column(Integer, primary_key=True)

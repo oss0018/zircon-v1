@@ -5,6 +5,7 @@ services:
     env_file:
       - .env
     volumes:
+      - zircon_data:/app/data
       - nuclei_templates:/opt/nuclei-templates
     ports:
       - "8181:8181"
@@ -85,6 +86,7 @@ services:
       - redis
 
 volumes:
+  zircon_data:
   es_data:
   nuclei_templates:
   staging_tmp:

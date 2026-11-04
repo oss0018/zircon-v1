@@ -25,7 +25,7 @@ def _finding_data(finding: dict) -> dict:
 async def notify_expiring_certificates(target: str, findings: list[dict]) -> None:
     """Notify configured CTI channels when an investigation finds expiring certs."""
     configured_email = settings.cti_alert_email.strip()
-    configured_telegram = settings.cti_alert_telegram.strip()
+    configured_telegram = settings.cti_alert_telegram.strip() or settings.telegram_chat_id.strip()
     alert_email = configured_email if settings.smtp_host else ""
     alert_telegram = configured_telegram if settings.telegram_bot_token else ""
     if configured_email and not alert_email:

@@ -905,6 +905,18 @@ class DashboardStats(BaseModel):
     recent_searches: List[Any] = []
     file_types: dict = {}
 
+
+class NotificationSettingsUpdate(BaseModel):
+    smtp_host: str = Field(default="", max_length=255)
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_user: str = Field(default="", max_length=255)
+    smtp_password: str = Field(default="", max_length=4096)
+    telegram_token: str = Field(default="", max_length=4096)
+    telegram_chat_id: str = Field(default="", max_length=255)
+
+    model_config = {"extra": "forbid"}
+
+
 # ── Impersonation Monitoring ────────────────────────────────────────────────────
 
 def _parse_json_list(value):

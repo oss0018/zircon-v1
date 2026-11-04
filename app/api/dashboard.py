@@ -2,11 +2,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 
-from app.api.auth import get_current_user
+from app.api.auth import get_admin_user, get_current_user
 from app.database import get_db
 from app.models import (User, File, Integration, WatchlistItem, MonitoringJob,
-                        BrandAlert, Notification, SearchLog)
-from app.schemas import DashboardStats
+                        BrandAlert, Notification, SearchLog, NotificationSettings)
+from app.schemas import DashboardStats, NotificationSettingsUpdate
+from app.config import settings
+from app.services.notifications import apply_notification_settings
+from app.services.crypto import decrypt, encrypt
 
 router = APIRouter()
 
@@ -108,10 +111,60 @@ async def clear_cache(_: User = Depends(get_current_user)):
 
 
 @router.get("/settings")
-async def get_settings(_: User = Depends(get_current_user)):
-    return {}
+async def get_settings(
+    _: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    saved = await db.get(NotificationSettings, 1)
+    return {
+        "smtp_host": saved.smtp_host if saved else settings.smtp_host,
+        "smtp_port": saved.smtp_port if saved else settings.smtp_port,
+        "smtp_user": saved.smtp_user if saved else settings.smtp_user,
+        "smtp_password": "",
+        "telegram_token": "",
+        "telegram_chat_id": saved.telegram_chat_id if saved else settings.telegram_chat_id,
+        "smtp_password_configured": bool(
+            saved.smtp_password_encrypted if saved else settings.smtp_password
+        ),
+        "telegram_token_configured": bool(
+            saved.telegram_bot_token_encrypted if saved else settings.telegram_bot_token
+        ),
+    }
 
 
 @router.post("/settings")
-async def save_settings(data: dict, _: User = Depends(get_current_user)):
+async def save_settings(
+    data: NotificationSettingsUpdate,
+    _: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    saved = await db.get(NotificationSettings, 1)
+    if saved is None:
+        saved = NotificationSettings(id=1)
+        db.add(saved)
+
+    values = data.model_dump(exclude_unset=True)
+    saved.smtp_host = values.get("smtp_host", saved.smtp_host or settings.smtp_host)
+    saved.smtp_port = values.get("smtp_port", saved.smtp_port or settings.smtp_port)
+    saved.smtp_user = values.get("smtp_user", saved.smtp_user or settings.smtp_user)
+    if values.get("smtp_password"):
+        saved.smtp_password_encrypted = encrypt(values["smtp_password"])
+    elif not saved.smtp_password_encrypted:
+        saved.smtp_password_encrypted = encrypt(settings.smtp_password)
+    if values.get("telegram_token"):
+        saved.telegram_bot_token_encrypted = encrypt(values["telegram_token"])
+    elif not saved.telegram_bot_token_encrypted:
+        saved.telegram_bot_token_encrypted = encrypt(settings.telegram_bot_token)
+    saved.telegram_chat_id = values.get(
+        "telegram_chat_id", saved.telegram_chat_id or settings.telegram_chat_id
+    )
+    await db.commit()
+    apply_notification_settings({
+        "smtp_host": saved.smtp_host,
+        "smtp_port": saved.smtp_port,
+        "smtp_user": saved.smtp_user,
+        "smtp_password": decrypt(saved.smtp_password_encrypted),
+        "telegram_bot_token": decrypt(saved.telegram_bot_token_encrypted),
+        "telegram_chat_id": saved.telegram_chat_id,
+    })
     return {"ok": True}
