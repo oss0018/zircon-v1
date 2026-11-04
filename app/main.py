@@ -73,6 +73,8 @@ def start_http_redirect(http_port: int, https_port: int):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    from app.services.notifications import load_notification_settings
+    await load_notification_settings()
     await create_default_admin()
     from app.services.search_engine import search_engine
     search_engine.init_index()

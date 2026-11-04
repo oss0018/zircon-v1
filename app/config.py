@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
+    telegram_chat_id: str = ""
 
     # ------------------------------------------------------------------ #
     # Integrations (all use ZIRCON_ prefix)                               #

@@ -31,6 +31,8 @@ document.addEventListener('alpine:init', () => {
       smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '',
       telegram_token: '', telegram_chat_id: '',
     },
+    smtpPasswordConfigured: false,
+    telegramTokenConfigured: false,
     notifLoading: false,
     notifSaveLoading: false,
 
@@ -45,7 +47,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     async init() {
-      await this.loadNotifSettings();
+      if (this.isAdmin()) await this.loadNotifSettings();
     },
 
     async switchTab(tab) {
@@ -196,10 +198,17 @@ document.addEventListener('alpine:init', () => {
       try {
         const data = await api.get('/dashboard/settings');
         if (data && typeof data === 'object') {
-          Object.assign(this.notifSettings, data);
+          this.smtpPasswordConfigured = Boolean(data.smtp_password_configured);
+          this.telegramTokenConfigured = Boolean(data.telegram_token_configured);
+          Object.assign(this.notifSettings, {
+            smtp_host: data.smtp_host,
+            smtp_port: data.smtp_port,
+            smtp_user: data.smtp_user,
+            telegram_chat_id: data.telegram_chat_id,
+          });
         }
       } catch (e) {
-        // settings endpoint may return empty; ignore
+        showToast(e.message, 'error');
       } finally {
         this.notifLoading = false;
       }
@@ -209,6 +218,12 @@ document.addEventListener('alpine:init', () => {
       this.notifSaveLoading = true;
       try {
         await api.post('/dashboard/settings', this.notifSettings);
+        this.smtpPasswordConfigured = this.smtpPasswordConfigured
+          || Boolean(this.notifSettings.smtp_password);
+        this.telegramTokenConfigured = this.telegramTokenConfigured
+          || Boolean(this.notifSettings.telegram_token);
+        this.notifSettings.smtp_password = '';
+        this.notifSettings.telegram_token = '';
         showToast(t('success'), 'success');
       } catch (e) {
         showToast(e.message, 'error');

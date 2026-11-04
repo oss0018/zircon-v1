@@ -66,6 +66,8 @@ Key settings:
 ### Docker runtime for vulnerability scanners
 `Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, `nuclei`, `nmap`, and **OWASP ZAP** (`zap-baseline.py`, plus a headless JRE to run it), and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
 
+The Compose app stores its database and other runtime data in the persistent `zircon_data` volume. Notification settings saved in **Settings → Notification Settings** are loaded from that database at startup and remain available when the app container is updated.
+
 To verify the scanner tooling inside the built image:
 
 ```bash
