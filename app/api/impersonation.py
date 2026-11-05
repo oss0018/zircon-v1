@@ -62,6 +62,7 @@ TAKEDOWN_CONTACTS = {
     'facebook': {'method': 'form', 'url': 'https://www.facebook.com/help/contact/169486816475808', 'avg_response_hours': 72},
     'youtube': {'method': 'form', 'url': 'https://support.google.com/youtube/answer/2802057', 'avg_response_hours': 48},
     'google_play': {'method': 'form', 'url': 'https://play.google.com/about/ip.html', 'avg_response_hours': 72},
+    'app_store': {'method': 'form', 'url': 'https://www.apple.com/legal/intellectual-property/dispute-forms/app-store-content-dispute/', 'avg_response_hours': 72},
     'google_ads': {'method': 'form', 'url': 'https://support.google.com/google-ads/contact/trademark_complaint', 'avg_response_hours': 48},
     'yandex': {'method': 'email', 'abuse_email': 'abuse@yandex-team.ru', 'avg_response_hours': 48},
     'namecheap': {'method': 'email', 'abuse_email': 'abuse@namecheap.com', 'avg_response_hours': 24},

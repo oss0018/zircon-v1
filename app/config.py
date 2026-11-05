@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     whoosh_index_dir: str = "./data/index"
     uploads_dir: str = "./data/uploads"
     monitored_dir: str = "./data/monitored"
+    vulnscan_reports_dir: str = "./data/vulnscan_reports"
     deep_search_dir: str = "deep_search_data"
     deep_search_staging_dir: str = "/tmp/ds_staging"
     elasticsearch_url: str = ""
@@ -42,6 +43,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
+    telegram_chat_id: str = ""
 
     # ------------------------------------------------------------------ #
     # Integrations (all use ZIRCON_ prefix)                               #
@@ -101,6 +103,18 @@ class Settings(BaseSettings):
     twitter_bearer_token: str = Field(
         default="",
         validation_alias=AliasChoices("TWITTER_BEARER_TOKEN", "ZIRCON_TWITTER_BEARER_TOKEN"),
+    )
+
+    # ------------------------------------------------------------------ #
+    # Social Listening — Mastodon                                          #
+    # ------------------------------------------------------------------ #
+    mastodon_instance_url: str = Field(
+        default="https://mastodon.social",
+        validation_alias=AliasChoices("MASTODON_INSTANCE_URL", "ZIRCON_MASTODON_INSTANCE_URL"),
+    )
+    mastodon_access_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("MASTODON_ACCESS_TOKEN", "ZIRCON_MASTODON_ACCESS_TOKEN"),
     )
 
     # ------------------------------------------------------------------ #

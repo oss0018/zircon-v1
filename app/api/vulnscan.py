@@ -1,17 +1,36 @@
 import json
+import logging
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
-from app.database import get_db
+from app.config import settings
+from app.database import AsyncSessionLocal, get_db
 from app.models import VSScan, VSScanTarget, VSFinding, VSReport, VSCustomTemplate, User
 from app.services.vulnscan import VulnScanOrchestrator
+from app.services.vulnscan.reports import VALID_REPORT_FORMATS, generate_report
+from app.services.vulnscan.scanner_config import sanitize_scanner_config
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+REPORTS_DIR = Path(settings.vulnscan_reports_dir)
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+_REPORT_MEDIA_TYPES = {
+    "json": "application/json",
+    "csv": "text/csv",
+    "html": "text/html",
+    "kql": "text/plain",
+    "pdf": "application/pdf",
+}
 
 _VALID_TARGET_TYPES = {"web", "network", "api", "cidr"}
 _VALID_SCOPES = {"SELF", "INTERNAL", "THREAT_INTEL"}
@@ -30,6 +49,7 @@ class TargetCreate(BaseModel):
     tags: list[str] = []
     schedule_cron: str | None = None
     notify_channels: list[str] = ["email", "telegram"]
+    scanner_config: dict | None = None
 
 
 class TargetUpdate(BaseModel):
@@ -42,6 +62,7 @@ class TargetUpdate(BaseModel):
     schedule_cron: str | None = None
     notify_channels: list[str] | None = None
     active: bool | None = None
+    scanner_config: dict | None = None
 
 
 class ScanLaunchRequest(BaseModel):
@@ -51,6 +72,7 @@ class ScanLaunchRequest(BaseModel):
     notify_on_complete: bool = True
     report_formats: list[str] = ["json"]
     comment: str = ""
+    scanner_config: dict | None = None
 
 
 class FindingStatusUpdate(BaseModel):
@@ -79,9 +101,72 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def _run_scan_bg(scan_id: int) -> None:
+async def _generate_and_store_report(
+    db: AsyncSession,
+    scan: VSScan,
+    target: VSScanTarget,
+    findings: list[VSFinding],
+    fmt: str,
+    generated_by: int | None,
+) -> VSReport:
+    """Render a report for (scan, target, findings) and persist it under REPORTS_DIR."""
+    if fmt not in VALID_REPORT_FORMATS:
+        raise ValueError(f"Unsupported report format: {fmt}")
+
+    content, ext, _mime = generate_report(fmt, scan, target, findings)
+    filename = f"scan_{scan.id}_{fmt}_{uuid.uuid4().hex[:8]}.{ext}"
+    dest = REPORTS_DIR / filename
+    dest.write_bytes(content)
+
+    report = VSReport(
+        scan_id=scan.id,
+        format=fmt,
+        file_path=str(dest),
+        file_size_bytes=len(content),
+        generated_at=_utcnow(),
+        generated_by=generated_by,
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return report
+
+
+async def _run_scan_bg(
+    scan_id: int,
+    report_formats: list[str] | None = None,
+    generated_by: int | None = None,
+) -> None:
     orchestrator = VulnScanOrchestrator()
     await orchestrator.run(scan_id)
+
+    if not report_formats:
+        return
+
+    # Auto-generate any requested report formats now that the scan has finished.
+    async with AsyncSessionLocal() as db:
+        scan_result = await db.execute(select(VSScan).where(VSScan.id == scan_id))
+        scan = scan_result.scalar_one_or_none()
+        if not scan or scan.status != "completed":
+            return
+
+        target_result = await db.execute(select(VSScanTarget).where(VSScanTarget.id == scan.target_id))
+        target = target_result.scalar_one_or_none()
+        if not target:
+            return
+
+        findings_result = await db.execute(
+            select(VSFinding).where(VSFinding.scan_id == scan_id).order_by(VSFinding.severity_numeric.desc())
+        )
+        findings = findings_result.scalars().all()
+
+        for fmt in report_formats:
+            if fmt not in VALID_REPORT_FORMATS:
+                continue
+            try:
+                await _generate_and_store_report(db, scan, target, findings, fmt, generated_by)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to auto-generate %s report for scan %s: %s", fmt, scan_id, exc)
 
 
 @router.get("/targets")
@@ -107,6 +192,7 @@ async def list_targets(
             "schedule_cron": t.schedule_cron,
             "notify_channels": json.loads(t.notify_channels_json or "[]"),
             "active": t.active,
+            "scanner_config": json.loads(t.scanner_config_json or "{}"),
             "created_at": t.created_at.isoformat() if t.created_at else None,
             "updated_at": t.updated_at.isoformat() if t.updated_at else None,
         }
@@ -136,6 +222,7 @@ async def create_target(
         default_profile=body.default_profile,
         schedule_cron=body.schedule_cron,
         notify_channels_json=json.dumps(body.notify_channels),
+        scanner_config_json=json.dumps(sanitize_scanner_config(body.scanner_config)),
         created_by=current_user.id,
     )
     db.add(target)
@@ -171,6 +258,7 @@ async def get_target(
         "schedule_cron": target.schedule_cron,
         "notify_channels": json.loads(target.notify_channels_json or "[]"),
         "active": target.active,
+        "scanner_config": json.loads(target.scanner_config_json or "{}"),
         "last_scan": (
             {
                 "id": last_scan.id,
@@ -211,6 +299,8 @@ async def update_target(
             target.tags_json = json.dumps(value)
         elif key == "notify_channels":
             target.notify_channels_json = json.dumps(value)
+        elif key == "scanner_config":
+            target.scanner_config_json = json.dumps(sanitize_scanner_config(value))
         else:
             setattr(target, key, value)
 
@@ -249,6 +339,15 @@ async def launch_scan(
         raise HTTPException(status_code=400, detail="Invalid profile")
     if body.scope not in _VALID_SCOPES:
         raise HTTPException(status_code=400, detail="Invalid scope")
+    invalid_formats = [f for f in body.report_formats if f not in VALID_REPORT_FORMATS]
+    if invalid_formats:
+        raise HTTPException(status_code=400, detail=f"Invalid report_formats: {', '.join(invalid_formats)}")
+
+    # Per-launch scanner_config overrides the target's saved default, tool by tool
+    # (e.g. supplying only `nuclei` leaves the target's `zap` default untouched).
+    effective_config = json.loads(target.scanner_config_json or "{}")
+    if body.scanner_config is not None:
+        effective_config = {**effective_config, **sanitize_scanner_config(body.scanner_config)}
 
     scan = VSScan(
         target_id=target_id,
@@ -256,6 +355,7 @@ async def launch_scan(
         scope=body.scope,
         status="pending",
         scanners_used_json=json.dumps(body.scanners or []),
+        scanner_config_json=json.dumps(effective_config),
         initiated_by=current_user.id,
         comment=body.comment,
         created_at=_utcnow(),
@@ -264,7 +364,7 @@ async def launch_scan(
     await db.commit()
     await db.refresh(scan)
 
-    background_tasks.add_task(_run_scan_bg, scan.id)
+    background_tasks.add_task(_run_scan_bg, scan.id, body.report_formats, current_user.id)
 
     estimates = {"quick": 5, "standard": 15, "deep": 30}
     return {
@@ -284,7 +384,11 @@ async def list_scans(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    query = select(VSScan).order_by(VSScan.created_at.desc())
+    query = (
+        select(VSScan, VSScanTarget.name, VSScanTarget.target_value)
+        .outerjoin(VSScanTarget, VSScan.target_id == VSScanTarget.id)
+        .order_by(VSScan.created_at.desc())
+    )
     if target_id is not None:
         query = query.where(VSScan.target_id == target_id)
     if profile is not None:
@@ -293,11 +397,13 @@ async def list_scans(
         query = query.where(VSScan.status == status)
 
     result = await db.execute(query.limit(min(limit, 200)).offset(offset))
-    scans = result.scalars().all()
+    scans = result.all()
     return [
         {
             "id": s.id,
             "target_id": s.target_id,
+            "target_name": target_name,
+            "target_value": target_value,
             "profile": s.profile,
             "scope": s.scope,
             "status": s.status,
@@ -308,12 +414,14 @@ async def list_scans(
             "findings_medium": s.findings_medium,
             "findings_low": s.findings_low,
             "findings_info": s.findings_info,
+            "findings_new": s.findings_new,
+            "findings_fixed": s.findings_fixed,
             "overall_risk": s.overall_risk,
             "started_at": s.started_at.isoformat() if s.started_at else None,
             "completed_at": s.completed_at.isoformat() if s.completed_at else None,
             "created_at": s.created_at.isoformat() if s.created_at else None,
         }
-        for s in scans
+        for s, target_name, target_value in scans
     ]
 
 
@@ -323,10 +431,15 @@ async def get_scan(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    scan_result = await db.execute(select(VSScan).where(VSScan.id == scan_id))
-    scan = scan_result.scalar_one_or_none()
-    if not scan:
+    scan_result = await db.execute(
+        select(VSScan, VSScanTarget.name, VSScanTarget.target_value)
+        .outerjoin(VSScanTarget, VSScan.target_id == VSScanTarget.id)
+        .where(VSScan.id == scan_id)
+    )
+    scan_row = scan_result.one_or_none()
+    if not scan_row:
         raise HTTPException(status_code=404, detail="Scan not found")
+    scan, target_name, target_value = scan_row
 
     findings_result = await db.execute(select(VSFinding).where(VSFinding.scan_id == scan_id).order_by(VSFinding.id.desc()))
     findings = findings_result.scalars().all()
@@ -334,17 +447,22 @@ async def get_scan(
     return {
         "id": scan.id,
         "target_id": scan.target_id,
+        "target_name": target_name,
+        "target_value": target_value,
         "profile": scan.profile,
         "scope": scan.scope,
         "status": scan.status,
         "progress_pct": scan.progress_pct,
         "scanners_used": json.loads(scan.scanners_used_json or "[]"),
+        "scanner_config": json.loads(scan.scanner_config_json or "{}"),
         "findings_total": scan.findings_total,
         "findings_critical": scan.findings_critical,
         "findings_high": scan.findings_high,
         "findings_medium": scan.findings_medium,
         "findings_low": scan.findings_low,
         "findings_info": scan.findings_info,
+        "findings_new": scan.findings_new,
+        "findings_fixed": scan.findings_fixed,
         "overall_risk": scan.overall_risk,
         "error_message": scan.error_message,
         "started_at": scan.started_at.isoformat() if scan.started_at else None,
@@ -451,6 +569,126 @@ async def scan_summary(
         "severity_counts": severity_counts,
         "owasp_distribution": owasp_distribution,
     }
+
+
+class ReportGenerateRequest(BaseModel):
+    format: str = "json"
+
+
+@router.post("/scans/{scan_id}/reports", status_code=201)
+async def generate_scan_report(
+    scan_id: int,
+    body: ReportGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    fmt = body.format.lower()
+    if fmt not in VALID_REPORT_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid format. Must be one of: {', '.join(sorted(VALID_REPORT_FORMATS))}",
+        )
+
+    scan_result = await db.execute(select(VSScan).where(VSScan.id == scan_id))
+    scan = scan_result.scalar_one_or_none()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    target_result = await db.execute(select(VSScanTarget).where(VSScanTarget.id == scan.target_id))
+    target = target_result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+
+    findings_result = await db.execute(
+        select(VSFinding).where(VSFinding.scan_id == scan_id).order_by(VSFinding.severity_numeric.desc())
+    )
+    findings = findings_result.scalars().all()
+
+    report = await _generate_and_store_report(db, scan, target, findings, fmt, current_user.id)
+
+    return {
+        "id": report.id,
+        "scan_id": report.scan_id,
+        "format": report.format,
+        "file_size_bytes": report.file_size_bytes,
+        "generated_at": report.generated_at.isoformat() if report.generated_at else None,
+        "download_url": f"/api/v1/vulnscan/reports/{report.id}/download",
+    }
+
+
+@router.get("/scans/{scan_id}/reports")
+async def list_scan_reports(
+    scan_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    scan_result = await db.execute(select(VSScan).where(VSScan.id == scan_id))
+    if not scan_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    result = await db.execute(
+        select(VSReport).where(VSReport.scan_id == scan_id).order_by(VSReport.generated_at.desc())
+    )
+    reports = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "scan_id": r.scan_id,
+            "format": r.format,
+            "file_size_bytes": r.file_size_bytes,
+            "generated_at": r.generated_at.isoformat() if r.generated_at else None,
+            "generated_by": r.generated_by,
+            "download_url": f"/api/v1/vulnscan/reports/{r.id}/download",
+        }
+        for r in reports
+    ]
+
+
+@router.get("/reports/{report_id}/download")
+async def download_report(
+    report_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    result = await db.execute(select(VSReport).where(VSReport.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    path = Path(report.file_path)
+    # Defense in depth: only serve files that actually live inside REPORTS_DIR.
+    if not path.exists() or REPORTS_DIR.resolve() not in path.resolve().parents:
+        raise HTTPException(status_code=404, detail="Report file not found on disk")
+
+    filename = f"vulnscan_scan_{report.scan_id}_report.{report.format}"
+    return FileResponse(
+        str(path),
+        filename=filename,
+        media_type=_REPORT_MEDIA_TYPES.get(report.format, "application/octet-stream"),
+    )
+
+
+@router.delete("/reports/{report_id}")
+async def delete_report(
+    report_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    result = await db.execute(select(VSReport).where(VSReport.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    path = Path(report.file_path)
+    try:
+        if REPORTS_DIR.resolve() in path.resolve().parents:
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    await db.delete(report)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/findings/{finding_id}")
@@ -644,8 +882,13 @@ async def dashboard_summary(
     for severity, count in severity_rows:
         findings_by_severity[severity] = count
 
-    scans_result = await db.execute(select(VSScan).order_by(VSScan.created_at.desc()).limit(10))
-    scans = scans_result.scalars().all()
+    scans_result = await db.execute(
+        select(VSScan, VSScanTarget.name, VSScanTarget.target_value)
+        .outerjoin(VSScanTarget, VSScan.target_id == VSScanTarget.id)
+        .order_by(VSScan.created_at.desc())
+        .limit(10)
+    )
+    scans = scans_result.all()
 
     return {
         "total_targets": total_targets,
@@ -654,6 +897,8 @@ async def dashboard_summary(
             {
                 "id": s.id,
                 "target_id": s.target_id,
+                "target_name": target_name,
+                "target_value": target_value,
                 "status": s.status,
                 "profile": s.profile,
                 "overall_risk": s.overall_risk,
@@ -661,6 +906,6 @@ async def dashboard_summary(
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "completed_at": s.completed_at.isoformat() if s.completed_at else None,
             }
-            for s in scans
+            for s, target_name, target_value in scans
         ],
     }

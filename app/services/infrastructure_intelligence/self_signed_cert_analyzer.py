@@ -136,7 +136,7 @@ class SelfSignedCertAnalyzer:
                 now = datetime.now(timezone.utc)
                 is_self_signed = subject == issuer and bool(subject)
                 is_expired = (not_after < now) if not_after else False
-                days_until_expiry = int((not_after - now).days) if not_after else 0
+                days_until_expiry = int((not_after - now).days) if not_after else None
 
                 # SANs
                 san_list: list[str] = []
@@ -247,7 +247,9 @@ class SelfSignedCertAnalyzer:
         """
         is_self_signed = cert_data.get("is_self_signed", False)
         is_expired = cert_data.get("is_expired", False)
-        days_until_expiry = cert_data.get("days_until_expiry", 9999)
+        days_until_expiry = cert_data.get("days_until_expiry")
+        if not isinstance(days_until_expiry, int):
+            days_until_expiry = 9999
         hostname_valid = cert_data.get("hostname_valid")
         chain_valid = cert_data.get("chain_valid")
         ip = cert_data.get("ip", "")

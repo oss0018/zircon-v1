@@ -24,12 +24,8 @@ def _port_severity(port: int) -> int:
 class NetworkIntelligenceModule:
     def __init__(self, keys: dict[str, str]):
         self._keys = keys
-        from app.services.osint.fofa import FOFAClient
-        from app.services.osint.zoomeye import ZoomEyeClient
         from app.services.osint.criminalip import CriminalIPClient
 
-        self.fofa = FOFAClient(api_key=keys.get("fofa", "")) if keys.get("fofa") else None
-        self.zoomeye = ZoomEyeClient(api_key=keys.get("zoomeye", "")) if keys.get("zoomeye") else None
         self.criminalip = CriminalIPClient(api_key=keys.get("criminalip", "")) if keys.get("criminalip") else None
 
     def _has(self, service: str) -> bool:
@@ -118,80 +114,6 @@ class NetworkIntelligenceModule:
                 }
             ),
         }
-
-    # ------------------------------------------------------------------
-    # FOFA
-    # ------------------------------------------------------------------
-
-    async def query_fofa(self, target: str, target_type: str) -> list[dict]:
-        if not self.fofa:
-            return []
-        findings: list[dict] = []
-        try:
-            res = await self.fofa.search(target, target_type)
-            for row in (res.get("results") or []):
-                if not isinstance(row, list) or len(row) < 3:
-                    continue
-                host = row[0] if len(row) > 0 else ""
-                ip = row[1] if len(row) > 1 else ""
-                port = row[2] if len(row) > 2 else None
-                protocol = row[3] if len(row) > 3 else ""
-                title = row[4] if len(row) > 4 else ""
-                server = row[5] if len(row) > 5 else ""
-                if not ip or not port:
-                    continue
-                findings.append(
-                    self._make_port_finding(
-                        ip,
-                        int(port),
-                        {
-                            "transport": protocol or "tcp",
-                            "product": server,
-                            "data": title,
-                            "host": host,
-                            "server": server,
-                        },
-                        "fofa",
-                    )
-                )
-        except Exception as exc:
-            logger.debug("FOFA query error: %s", exc)
-        return findings
-
-    # ------------------------------------------------------------------
-    # ZoomEye
-    # ------------------------------------------------------------------
-
-    async def query_zoomeye(self, target: str, target_type: str) -> list[dict]:
-        if not self.zoomeye:
-            return []
-        findings: list[dict] = []
-        try:
-            res = await self.zoomeye.search(target, target_type)
-            for match in (res.get("matches") or []):
-                if not isinstance(match, dict):
-                    continue
-                ip = match.get("ip") or match.get("ipinfo", {}).get("ip")
-                port_info = match.get("portinfo") or {}
-                port = port_info.get("port") or match.get("port")
-                if not ip or not port:
-                    continue
-                findings.append(
-                    self._make_port_finding(
-                        ip,
-                        int(port),
-                        {
-                            "transport": port_info.get("service", "tcp"),
-                            "product": port_info.get("app", ""),
-                            "version": port_info.get("version", ""),
-                            "data": port_info.get("banner", ""),
-                        },
-                        "zoomeye",
-                    )
-                )
-        except Exception as exc:
-            logger.debug("ZoomEye query error: %s", exc)
-        return findings
 
     # ------------------------------------------------------------------
     # Criminal IP

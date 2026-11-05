@@ -74,6 +74,17 @@ class Integration(Base):
     created_at = Column(DateTime, default=_utcnow)
 
 
+class NotificationSettings(Base):
+    __tablename__ = "notification_settings"
+    id = Column(Integer, primary_key=True, default=1)
+    smtp_host = Column(String(255), default="")
+    smtp_port = Column(Integer, default=587)
+    smtp_user = Column(String(255), default="")
+    smtp_password_encrypted = Column(Text, default="")
+    telegram_bot_token_encrypted = Column(Text, default="")
+    telegram_chat_id = Column(String(255), default="")
+
+
 class SearchTemplate(Base):
     __tablename__ = "search_templates"
     id = Column(Integer, primary_key=True)
@@ -261,6 +272,7 @@ class SocialListeningRule(Base):
     exclusions = Column(Text, default="[]")
     languages = Column(Text, default='["uk","ru","en"]')
     platforms = Column(Text, default="[]")
+    rss_feeds = Column(Text, default="[]")
     severity_threshold = Column(Integer, default=2)
     alert_on = Column(String(40), default="EVERY_MENTION")
     schedule_cron = Column(String(100), default="*/15 * * * *")
@@ -316,6 +328,20 @@ class SLMention(Base):
     published_at = Column(DateTime, nullable=True)
     collected_at = Column(DateTime, default=_utcnow)
     created_at = Column(DateTime, default=_utcnow)
+
+
+class SLMentionSnapshot(Base):
+    __tablename__ = "sl_mention_snapshots"
+    id = Column(Integer, primary_key=True)
+    mention_id = Column(Integer, ForeignKey("sl_mentions.id"), nullable=False, index=True)
+    source_platform = Column(String(50), nullable=False)
+    source_url = Column(Text, default="")
+    author_username = Column(String(200), default="")
+    content = Column(Text, default="")
+    content_sha256 = Column(String(64), nullable=False)
+    published_at = Column(DateTime, nullable=True)
+    captured_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    captured_at = Column(DateTime, default=_utcnow, nullable=False)
 
 
 class SLAlert(Base):
@@ -629,7 +655,10 @@ class LookalikeRule(Base):
     brand_terms = Column(Text, default="[]")                 # JSON list of terms
     # Generation config
     algorithms = Column(Text, default="[]")                  # JSON list; empty = all
-    tld_list = Column(String(20), default="top100")          # top30|top100|top500|full1500
+    tld_list = Column(String(20), default="top100")          # top30|top100|top500|full1500|
+                                                              # generic|country_code|sponsored|
+                                                              # infrastructure|restricted_generic|
+                                                              # test|idn|all
     attack_words = Column(String(20), default="core")        # core|extended
     include_idn = Column(Boolean, default=True)
     include_bitsquatting = Column(Boolean, default=True)
@@ -763,6 +792,7 @@ class VSScanTarget(Base):
     scope = Column(String(20), nullable=False, default="SELF")       # SELF | INTERNAL | THREAT_INTEL
     tags_json = Column(Text, default="[]")
     default_profile = Column(String(20), nullable=False, default="standard")
+    scanner_config_json = Column(Text, default="{}")  # per-tool tuning defaults (nuclei/zap/testssl/nikto)
     schedule_cron = Column(String(100), nullable=True)
     notify_channels_json = Column(Text, default='["email","telegram"]')
     active = Column(Boolean, default=True)
@@ -781,6 +811,7 @@ class VSScan(Base):
     status = Column(String(20), nullable=False, default="pending")
     # pending | running | completed | failed | cancelled
     scanners_used_json = Column(Text, default="[]")
+    scanner_config_json = Column(Text, default="{}")  # snapshot of per-tool tuning actually used for this run
     progress_pct = Column(Integer, default=0)
     findings_total = Column(Integer, default=0)
     findings_critical = Column(Integer, default=0)
@@ -812,11 +843,11 @@ class VSFinding(Base):
     target_id = Column(Integer, ForeignKey("vs_scan_targets.id"), nullable=False)
 
     # Classification
-    scanner_source = Column(String(30), nullable=False)        # nuclei|openvas|zap|nikto|testssl|headers|dns_sec
+    scanner_source = Column(String(30), nullable=False)        # nuclei|openvas|zap|nikto|testssl|headers|dns_sec|nmap
     scanner_finding_id = Column(String(255), default="")
     title = Column(Text, nullable=False)
     description = Column(Text, default="")
-    finding_type = Column(String(50), nullable=False)          # CVE|MISCONFIGURATION|EXPOSURE|MISSING_HEADER|SSL_ISSUE|INJECTION|INFORMATION_DISCLOSURE
+    finding_type = Column(String(50), nullable=False)          # CVE|MISCONFIGURATION|EXPOSURE|MISSING_HEADER|SSL_ISSUE|INJECTION|INFORMATION_DISCLOSURE|OPEN_PORT
     owasp_category = Column(String(5), nullable=True)
 
     # Severity

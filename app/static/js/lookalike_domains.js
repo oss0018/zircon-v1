@@ -131,7 +131,15 @@
           top30: 'Top 30',
           top100: 'Top 100',
           top500: 'Top 500',
-          full1500: 'Full 1500',
+          full1500: 'Full 1500 (all TLDs)',
+          generic: 'Generic (gTLD)',
+          country_code: 'Country-Code (ccTLD)',
+          sponsored: 'Sponsored (sTLD)',
+          restricted_generic: 'Restricted Generic',
+          infrastructure: 'Infrastructure (.arpa)',
+          test: 'Test / Developer',
+          idn: 'Internationalized (IDN)',
+          all: 'All categories combined',
         };
         return labels[value] || value || '—';
       },

@@ -333,20 +333,122 @@ async def _scan_m2_apps(rule: dict) -> list:
 
 
 async def _scan_m2_appstore(rule: dict) -> list:
-    """M2 Phase 2: Apple App Store Impersonation Detection — stub.
+    """M2: Apple App Store — detect fake brand apps via Apple's iTunes Search API.
 
-    Monitors for fake brand apps on Apple App Store. Detects impersonation in
-    app name, icon, and description.
+    Searches the App Store by brand name and flags apps with ≥75% name
+    similarity that are **not** published by a known official developer,
+    matched against ``official_developer_ids`` (checked against the app's
+    numeric ``artistId``, developer name, or ``bundleId`` — case-insensitive,
+    so operators can list whichever identifier they have on hand).
 
-    Integration: App Store Connect API or Apify App Store scraper.
-    Required env vars: APPSTORE_KEY_ID, APPSTORE_ISSUER_ID, APPSTORE_PRIVATE_KEY
-    or APIFY_TOKEN (for Apify App Store scraper actor)
+    The iTunes Search API (https://itunes.apple.com/search) is public and
+    free; unlike the App Store Connect API it requires no credentials, so
+    this scan runs automatically whenever M2 is enabled. Apple does not
+    expose iOS entitlements/permissions via this API, so — unlike the
+    Google Play scanner — there is no suspicious-permissions signal here.
+
+    Output type: ``fake_mobile_app``
     """
-    logger.info(
-        "[IMP M2] Apple App Store scan stub for '%s'. Configure App Store Connect API/Apify to enable real detection.",
-        rule["brand_name"],
-    )
-    return []
+    brand = (rule.get("brand_name") or "").strip()
+    if not brand:
+        return []
+
+    try:
+        from rapidfuzz import fuzz as _fuzz  # type: ignore
+    except ImportError:
+        _fuzz = None
+
+    official_ids = {
+        str(i).strip().lower()
+        for i in (rule.get("official_developer_ids") or [])
+        if str(i).strip()
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://itunes.apple.com/search",
+                params={"term": brand, "country": "us", "entity": "software", "limit": 20},
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "[IMP M2] Apple App Store search returned %s for '%s'",
+                    resp.status_code,
+                    brand,
+                )
+                return []
+            data = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[IMP M2] Apple App Store search failed for '%s': %s", brand, exc)
+        return []
+
+    results = data.get("results") if isinstance(data, dict) else None
+
+    findings: list[dict] = []
+    brand_lower = brand.lower()
+
+    for app in (results or []):
+        if not isinstance(app, dict):
+            continue
+
+        app_id = str(app.get("trackId") or "")
+        app_name = str(app.get("trackName") or app.get("trackCensoredName") or "")
+        bundle_id = str(app.get("bundleId") or "")
+        developer = str(app.get("sellerName") or app.get("artistName") or "")
+        artist_id = str(app.get("artistId") or "")
+        app_url = str(app.get("trackViewUrl") or "")
+
+        # Skip apps from known official developers
+        if (
+            (artist_id and artist_id.lower() in official_ids)
+            or (developer and developer.lower() in official_ids)
+            or (bundle_id and bundle_id.lower() in official_ids)
+        ):
+            continue
+
+        # Name similarity
+        if _fuzz:
+            name_sim = max(
+                _fuzz.ratio(brand_lower, app_name.lower()),
+                _fuzz.partial_ratio(brand_lower, app_name.lower()),
+            )
+        else:
+            name_sim = 100.0 if brand_lower in app_name.lower() else 0.0
+
+        if name_sim < 75:
+            continue
+
+        rating_count = int(app.get("userRatingCount") or 0)
+        threat_score = min(int(name_sim), 95)
+
+        findings.append(
+            {
+                "module": "m2",
+                "platform": "app_store",
+                "finding_type": "fake_mobile_app",
+                "target_url": app_url or (f"https://apps.apple.com/app/id{app_id}" if app_id else ""),
+                "target_identifier": bundle_id or app_id,
+                "display_name": app_name,
+                "description": (
+                    f"App Store app '{app_name}' (bundle: {bundle_id or 'unknown'}) matches brand "
+                    f"'{brand}' (name similarity {int(name_sim)}%). Developer: {developer or 'unknown'}. "
+                    f"Ratings: {rating_count}."
+                ),
+                "threat_score": threat_score,
+                "signals": [f"name_similarity:{int(name_sim)}"],
+                "evidence": {
+                    "track_id": app_id,
+                    "bundle_id": bundle_id,
+                    "developer": developer,
+                    "artist_id": artist_id,
+                    "name_similarity": int(name_sim),
+                    "rating_count": rating_count,
+                    "average_rating": app.get("averageUserRating"),
+                },
+            }
+        )
+
+    return findings
 
 
 async def _scan_m3_email(rule: dict) -> list:

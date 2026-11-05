@@ -41,7 +41,8 @@ document.addEventListener('alpine:init', () => {
       hashtags: '',
       exclusions: '',
       languages: ['uk', 'ru', 'en'],
-      platforms: ['reddit', 'rss', 'paste', 'twitter', 'telegram'],
+      platforms: ['reddit', 'rss', 'paste', 'twitter', 'telegram', 'bluesky', 'mastodon'],
+      rss_feeds: '',
       severity_threshold: 2,
       alert_on: 'EVERY_MENTION',
       schedule_cron: '*/15 * * * *',
@@ -52,6 +53,11 @@ document.addEventListener('alpine:init', () => {
     },
     brands: [],
     runningRules: {},
+    snapshotMention: null,
+    mentionSnapshots: [],
+    snapshotsLoading: false,
+    snapshotsSaving: false,
+    showSnapshotsModal: false,
 
     async init() {
       this.loading = true;
@@ -163,7 +169,8 @@ document.addEventListener('alpine:init', () => {
         hashtags: '',
         exclusions: '',
         languages: ['uk', 'ru', 'en'],
-        platforms: ['reddit', 'rss', 'paste', 'twitter', 'telegram'],
+        platforms: ['reddit', 'rss', 'paste', 'twitter', 'telegram', 'bluesky', 'mastodon'],
+        rss_feeds: '',
         severity_threshold: 2,
         alert_on: 'EVERY_MENTION',
         schedule_cron: '*/15 * * * *',
@@ -185,6 +192,7 @@ document.addEventListener('alpine:init', () => {
         exclusions: (rule.exclusions || []).join(', '),
         languages: [...(rule.languages || [])],
         platforms: [...(rule.platforms || [])],
+        rss_feeds: (rule.rss_feeds || []).join('\n'),
         severity_threshold: Number(rule.severity_threshold || 2),
         alert_on: rule.alert_on || 'EVERY_MENTION',
         schedule_cron: rule.schedule_cron || '*/15 * * * *',
@@ -238,6 +246,13 @@ document.addEventListener('alpine:init', () => {
         .filter(Boolean);
     },
 
+    parseLines(value) {
+      return (value || '')
+        .split(/\r?\n/)
+        .map(v => v.trim())
+        .filter(Boolean);
+    },
+
     async saveRule() {
       try {
         const payload = {
@@ -248,6 +263,7 @@ document.addEventListener('alpine:init', () => {
           exclusions: this.parseCsv(this.ruleForm.exclusions),
           languages: this.ruleForm.languages || [],
           platforms: this.ruleForm.platforms || [],
+          rss_feeds: this.parseLines(this.ruleForm.rss_feeds),
           severity_threshold: Number(this.ruleForm.severity_threshold || 2),
           alert_on: this.ruleForm.alert_on || 'EVERY_MENTION',
           schedule_cron: (this.ruleForm.schedule_cron || '').trim() || '*/15 * * * *',
@@ -322,6 +338,36 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    async openSnapshots(mention) {
+      this.snapshotMention = mention;
+      this.showSnapshotsModal = true;
+      this.snapshotsLoading = true;
+      try {
+        this.mentionSnapshots = await api.get(`/social-listening/mentions/${mention.id}/snapshots`);
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.snapshotsLoading = false;
+      }
+    },
+
+    async saveMentionSnapshot() {
+      if (!this.snapshotMention || this.snapshotsSaving) return;
+      this.snapshotsSaving = true;
+      try {
+        const snapshot = await api.post(
+          `/social-listening/mentions/${this.snapshotMention.id}/snapshots`,
+          {},
+        );
+        this.mentionSnapshots = [snapshot, ...this.mentionSnapshots];
+        showToast('Post snapshot saved', 'success');
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.snapshotsSaving = false;
+      }
+    },
+
     async acknowledgeAlert(id) {
       try {
         await api.post(`/social-listening/alerts/${id}/acknowledge`, {});
@@ -363,6 +409,9 @@ document.addEventListener('alpine:init', () => {
         twitter: 'badge badge-purple',
         telegram: 'badge badge-green',
         habrahabr: 'badge badge-blue',
+        bluesky: 'badge badge-blue',
+        mastodon: 'badge badge-purple',
+        custom_rss: 'badge badge-blue',
       };
       return map[key] || 'badge badge-gray';
     },
@@ -376,6 +425,9 @@ document.addEventListener('alpine:init', () => {
         twitter: 'X (Twitter)',
         telegram: 'Telegram',
         habrahabr: 'Habrahabr',
+        bluesky: 'Bluesky',
+        mastodon: 'Mastodon',
+        custom_rss: 'Custom RSS',
       };
       return map[key] || String(platform || 'unknown');
     },

@@ -269,7 +269,7 @@ There are **no blockers** preventing the system from running. All Phase 2 additi
 | M1 | TikTok (Apify) | `APIFY_API_KEY` | ❌ Phase 2 stub |
 | M1 | LinkedIn (Apify) | `APIFY_API_KEY` | ❌ Phase 2 stub |
 | M2 | VirusTotal | `VIRUSTOTAL_API_KEY` | ✅ Integrations |
-| M2 | Apple App Store | *(itunes-search or App Store Connect)* | ❌ Phase 2 stub |
+| M2 | Apple App Store | *(none — public iTunes Search API)* | ✅ live |
 | M3 | checkdmarc (DNS) | *(none)* | ✅ live |
 | M3 | Honeypot Mailbox (IMAP) | `HONEYPOT_IMAP_HOST`, `HONEYPOT_IMAP_USER`, `HONEYPOT_IMAP_PASSWORD` | ✅ live |
 | M3 | Inbound Headers | `MSGRAPH_CLIENT_ID`, `MSGRAPH_CLIENT_SECRET` | ❌ Phase 2 stub |

@@ -4,6 +4,8 @@ from datetime import datetime
 from pydantic_core import PydanticCustomError
 import html as _html
 import json
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 
 
 def _sanitize(v: str, max_length: int = 2048) -> str:
@@ -549,6 +551,7 @@ class SLRuleCreate(BaseModel):
     exclusions: List[str] = []
     languages: List[str] = ["uk", "ru", "en"]
     platforms: List[str] = []
+    rss_feeds: List[str] = Field(default_factory=list, max_length=10)
     severity_threshold: int = Field(2, ge=1, le=5)
     alert_on: str = "EVERY_MENTION"
     schedule_cron: str = "*/15 * * * *"
@@ -566,6 +569,39 @@ class SLRuleCreate(BaseModel):
     @classmethod
     def sanitize_list_fields(cls, v: List[str]) -> List[str]:
         return [_sanitize(str(item).strip(), max_length=200) for item in v if str(item).strip()]
+
+    @field_validator("rss_feeds")
+    @classmethod
+    def validate_rss_feeds(cls, feeds: List[str]) -> List[str]:
+        validated = []
+        for feed in feeds:
+            value = str(feed).strip()
+            parsed = urlsplit(value)
+            host = (parsed.hostname or "").rstrip(".").lower()
+            try:
+                address = ip_address(host)
+            except ValueError:
+                address = None
+            try:
+                port = parsed.port
+            except ValueError:
+                port = -1
+            if (
+                len(value) > 2048
+                or parsed.scheme != "https"
+                or not host
+                or port not in (None, 443)
+                or parsed.username
+                or parsed.password
+                or host == "localhost"
+                or host.endswith((".localhost", ".local"))
+                or (address is not None and not address.is_global)
+            ):
+                raise ValueError("Custom RSS feeds must use a public HTTPS URL")
+            validated.append(value)
+        if len(set(validated)) != len(validated):
+            raise ValueError("Custom RSS feed URLs must be unique")
+        return validated
 
     @field_validator("alert_email")
     @classmethod
@@ -587,6 +623,7 @@ class SLRuleUpdate(BaseModel):
     exclusions: Optional[List[str]] = None
     languages: Optional[List[str]] = None
     platforms: Optional[List[str]] = None
+    rss_feeds: Optional[List[str]] = Field(None, max_length=10)
     severity_threshold: Optional[int] = Field(None, ge=1, le=5)
     alert_on: Optional[str] = None
     schedule_cron: Optional[str] = None
@@ -608,6 +645,13 @@ class SLRuleUpdate(BaseModel):
         if v is None:
             return v
         return [_sanitize(str(item).strip(), max_length=200) for item in v if str(item).strip()]
+
+    @field_validator("rss_feeds")
+    @classmethod
+    def validate_optional_rss_feeds(cls, feeds: Optional[List[str]]) -> Optional[List[str]]:
+        if feeds is None:
+            return feeds
+        return SLRuleCreate.validate_rss_feeds(feeds)
 
     @field_validator("alert_email")
     @classmethod
@@ -634,6 +678,7 @@ class SLRuleOut(BaseModel):
     exclusions: List[str] = []
     languages: List[str] = []
     platforms: List[str] = []
+    rss_feeds: List[str] = []
     severity_threshold: int
     alert_on: str
     schedule_cron: str
@@ -677,6 +722,20 @@ class SLMentionOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SLMentionSnapshotOut(BaseModel):
+    id: int
+    mention_id: int
+    source_platform: str
+    source_url: str
+    author_username: str
+    content: str
+    content_sha256: str
+    published_at: Optional[datetime] = None
+    captured_by: Optional[int] = None
+    captured_at: datetime
+    integrity_valid: bool
 
 
 class SLMentionStatusUpdate(BaseModel):
@@ -904,6 +963,18 @@ class DashboardStats(BaseModel):
     unread_notifications: int
     recent_searches: List[Any] = []
     file_types: dict = {}
+
+
+class NotificationSettingsUpdate(BaseModel):
+    smtp_host: str = Field(default="", max_length=255)
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_user: str = Field(default="", max_length=255)
+    smtp_password: str = Field(default="", max_length=4096)
+    telegram_token: str = Field(default="", max_length=4096)
+    telegram_chat_id: str = Field(default="", max_length=255)
+
+    model_config = {"extra": "forbid"}
+
 
 # ── Impersonation Monitoring ────────────────────────────────────────────────────
 

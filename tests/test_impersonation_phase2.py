@@ -239,14 +239,13 @@ async def test_phase2_scanner_stubs_return_empty_list():
         _scan_m1_tiktok,
         _scan_m1_linkedin,
         _scan_m1_youtube,
-        _scan_m2_appstore,
         _scan_m5_darkweb,
         _scan_m3_inbound_headers,
     )
     rule = {'brand_name': 'TestBrand', 'official_domains': ['testbrand.com'], 'executive_names': []}
     for stub in (
         _scan_m1_tiktok, _scan_m1_linkedin, _scan_m1_youtube,
-        _scan_m2_appstore, _scan_m5_darkweb,
+        _scan_m5_darkweb,
         _scan_m3_inbound_headers,
     ):
         result = await stub(rule)
@@ -273,6 +272,17 @@ async def test_m3_honeypot_no_longer_a_stub():
             'official_domains': ['testbrand.com'],
             'executive_names': [],
         })
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_m2_appstore_no_longer_a_stub():
+    """M2 Apple App Store was implemented in Phase 2b; it now calls the live
+    iTunes Search API instead of returning an empty stub list unconditionally."""
+    from app.services.impersonation.scanner import _scan_m2_appstore
+    rule = {'brand_name': '', 'official_domains': ['testbrand.com'], 'executive_names': []}
+    result = await _scan_m2_appstore(rule)
+    assert isinstance(result, list)
     assert result == []
 
 

@@ -17,62 +17,6 @@ from app.middleware.security_headers import SecurityHeadersMiddleware
 _SPA_HTML_CACHE: str = ""
 
 
-async def seed_ti_default_dashboard():
-    """Seed a default 'Threat Intelligence Overview' dashboard if none exists."""
-    import json
-    from app.database import AsyncSessionLocal
-    from app.models import TIDashboard, TIWidget
-    from sqlalchemy import select
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(TIDashboard).limit(1))
-        if result.scalar_one_or_none():
-            return  # Already seeded
-
-        dashboard = TIDashboard(
-            name="Threat Intelligence Overview",
-            slug="ti-overview",
-            scope="global",
-            is_default=True,
-        )
-        db.add(dashboard)
-        await db.flush()  # get dashboard.id without committing
-
-        widgets = [
-            TIWidget(
-                dashboard_id=dashboard.id,
-                type="ti_stats",
-                title="Overview",
-                params_json="{}",
-                layout_json=json.dumps({"x": 0, "y": 0, "w": 12, "h": 1}),
-            ),
-            TIWidget(
-                dashboard_id=dashboard.id,
-                type="ti_quick_search",
-                title="Quick IOC Search",
-                params_json="{}",
-                layout_json=json.dumps({"x": 0, "y": 1, "w": 12, "h": 2}),
-            ),
-            TIWidget(
-                dashboard_id=dashboard.id,
-                type="ti_recent_lookups",
-                title="Recent Lookups",
-                params_json=json.dumps({"limit": 10}),
-                layout_json=json.dumps({"x": 0, "y": 2, "w": 7, "h": 3}),
-            ),
-            TIWidget(
-                dashboard_id=dashboard.id,
-                type="ti_source_distribution",
-                title="Lookups by Source (7d)",
-                params_json="{}",
-                layout_json=json.dumps({"x": 7, "y": 2, "w": 5, "h": 3}),
-            ),
-        ]
-        db.add_all(widgets)
-        await db.commit()
-        print("[init] Default TI dashboard seeded: 'Threat Intelligence Overview'")
-
-
 async def create_default_admin():
     from app.database import AsyncSessionLocal
     from app.models import User
@@ -129,9 +73,9 @@ def start_http_redirect(http_port: int, https_port: int):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    from app.services.notifications import load_notification_settings
+    await load_notification_settings()
     await create_default_admin()
-    await seed_ti_default_dashboard()
-
     from app.services.search_engine import search_engine
     search_engine.init_index()
 

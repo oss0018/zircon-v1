@@ -24,7 +24,6 @@
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/deep_search.js"></script>
   <script src="/static/js/threat_intel.js"></script>
-  <script src="/static/js/ti_dashboard.js"></script>
   <script src="/static/js/storage_sources.js"></script>
   <script src="/static/js/infra_intel.js"></script>
   <script src="/static/js/vulnscan.js"></script>
@@ -120,7 +119,7 @@
 
             <div class="nav-item" :class="page === 'vulnscan' ? 'active' : ''" @click="navigate('vulnscan')" @contextmenu.prevent="openPageInNewWindow('vulnscan')">
               <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l8 4v6c0 5.25-3.438 9.813-8 11-4.562-1.187-8-5.75-8-11V6l8-4z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.5 12.5l2 2 3-4"/></svg>
-              <span>Vuln Scanner</span>
+              <span x-text="t('vulnerability_scanner')"></span>
             </div>
 
             <!-- ── Brand Protection Section (collapsible) ── -->
@@ -187,12 +186,6 @@
                   </svg>
                   <span>Threat Intelligence</span>
                 </div>
-                <div class="nav-sub-item" :class="page === 'ti-dashboard' ? 'active' : ''" @click="navigate('ti-dashboard')" @contextmenu.prevent="openPageInNewWindow('ti-dashboard')">
-                  <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-                  </svg>
-                  <span>TI Dashboard</span>
-                </div>
               </div>
             </template>
 
@@ -251,7 +244,7 @@
           <div class="topbar">
             <div class="topbar-title">
               <span class="pulse" style="margin-right:8px;"></span>
-              <span x-text="page === 'lookalike-domains' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'social-listening' ? 'Brand Protection › Social Listening' : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'ti-dashboard' ? 'CSINT › TI Dashboard' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'storage-sources' ? 'System › ' + t('storage_sources') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
+              <span x-text="page === 'lookalike-domains' ? 'Brand Protection › ' + t('look_alike_domains') : page === 'monitoring' ? 'Brand Protection › ' + t('monitoring') : page === 'watchlist' ? 'Brand Protection › ' + t('watchlist') : page === 'impersonation-monitoring' ? 'Brand Protection › ' + t('impersonation_monitoring') : page === 'logo-content-misuse' ? 'Brand Protection › ' + t('logo_content_misuse') : page === 'social-listening' ? 'Brand Protection › Social Listening' : page === 'deep-search' ? 'CSINT › Deep Search' : page === 'threat-intel' ? 'CSINT › Threat Intelligence' : page === 'integrations' ? 'System › ' + t('integrations') : page === 'storage-sources' ? 'System › ' + t('storage_sources') : page === 'infrastructure-intelligence' ? 'OSINT › ' + t('infrastructure_intelligence') : t(page)"></span>
             </div>
             <div class="topbar-actions">
               <span class="text-muted text-sm" x-text="new Date().toLocaleDateString()"></span>
@@ -263,92 +256,141 @@
 
             <!-- ── DASHBOARD ──────────────────────────────────── -->
             <div x-show="page === 'dashboard'" x-data="dashboardPage" x-init="init()">
-              <div class="stats-grid">
-                <div class="stat-card" @click="navigate('files')" title="View files">
-                  <div class="stat-label" x-text="t('total_files')"></div>
-                  <div class="stat-value" x-text="stat('total_files')"></div>
+              <div class="dashboard-header">
+                <div>
+                  <div class="dashboard-eyebrow">ZIRCON / OPERATIONS</div>
+                  <h1 x-text="t('dashboard_heading')"></h1>
+                  <p x-text="t('dashboard_subtitle')"></p>
                 </div>
-                <div class="stat-card" @click="navigate('files')" title="View indexed files">
-                  <div class="stat-label" x-text="t('indexed_files')"></div>
-                  <div class="stat-value text-blue" x-text="stat('indexed_files')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('search')" title="Go to search">
-                  <div class="stat-label" x-text="t('total_searches')"></div>
-                  <div class="stat-value" x-text="stat('total_searches')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('integrations')" title="View integrations">
-                  <div class="stat-label" x-text="t('active_integrations')"></div>
-                  <div class="stat-value text-blue" x-text="stat('active_integrations')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('watchlist')" title="View watchlist">
-                  <div class="stat-label" x-text="t('watchlist_items')"></div>
-                  <div class="stat-value" x-text="stat('watchlist_items')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('brands')" title="View brand alerts">
-                  <div class="stat-label" x-text="t('brand_alerts')"></div>
-                  <div class="stat-value text-red" x-text="stat('brand_alerts_new')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('monitoring')" title="View monitoring jobs">
-                  <div class="stat-label" x-text="t('monitoring_jobs')"></div>
-                  <div class="stat-value" x-text="stat('active_monitoring_jobs')"></div>
-                </div>
-                <div class="stat-card" @click="navigate('notifications'); $dispatch('load-stats')" title="View notifications">
-                  <div class="stat-label" x-text="t('unread_notifications')"></div>
-                  <div class="stat-value text-red" x-text="stat('unread_notifications')"></div>
+                <div class="dashboard-header-actions">
+                  <span class="dashboard-updated" x-show="lastUpdatedAt" x-text="lastUpdatedLabel()"></span>
+                  <button class="btn btn-secondary" @click="load()" :disabled="loading">
+                    <span x-show="loading" class="spinner" style="width:14px;height:14px;"></span>
+                    <span x-text="t('refresh')"></span>
+                  </button>
+                  <button class="btn btn-primary" @click="showWidgetSettings = !showWidgetSettings"
+                          :aria-expanded="showWidgetSettings" aria-controls="dashboard-widget-settings"
+                          x-text="t('customize_dashboard')"></button>
                 </div>
               </div>
 
-              <div class="grid-2" style="gap:20px;">
-                <div class="card">
-                  <div class="card-title" x-text="t('recent_searches')"></div>
-                  <template x-if="stats && stats.recent_searches.length === 0">
-                    <p class="text-muted text-sm" x-text="t('no_data')"></p>
-                  </template>
-                  <template x-for="s in (stats ? stats.recent_searches : [])" :key="s.query + s.created_at">
-                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-color);cursor:pointer;"
-                         @click="navigate('search')" title="Click to search again">
-                      <span class="text-sm truncate text-green" x-text="s.query" style="max-width:200px;"></span>
-                      <span class="badge badge-gray" x-text="s.results_count + ' results'"></span>
-                    </div>
+              <div id="dashboard-widget-settings" class="card dashboard-settings" x-show="showWidgetSettings" x-cloak>
+                <div class="dashboard-settings-heading">
+                  <div>
+                    <div class="card-title" x-text="t('dashboard_widgets')"></div>
+                    <p class="text-muted text-sm" x-text="t('dashboard_widgets_hint')"></p>
+                  </div>
+                  <button class="btn btn-sm btn-secondary" @click="resetWidgets()" x-text="t('reset')"></button>
+                </div>
+                <div class="dashboard-widget-options">
+                  <template x-for="option in widgetOptions" :key="option.id">
+                    <label class="dashboard-widget-option">
+                      <input type="checkbox" :checked="widgetVisibility[option.id]"
+                             @change="toggleWidget(option.id, $event.target.checked)">
+                      <span x-text="t(option.label)"></span>
+                    </label>
                   </template>
                 </div>
+              </div>
 
-                <div class="card">
-                  <div class="card-title" x-text="t('file_types')"></div>
-                  <!-- Loading state -->
-                  <div x-show="loading" style="padding:20px 0;text-align:center;">
-                    <span class="spinner" style="width:18px;height:18px;"></span>
+              <div x-show="widgetVisibility.priority_metrics" class="stats-grid dashboard-stats-grid">
+                <template x-for="widget in metricWidgets()" :key="widget.id">
+                  <button class="stat-card dashboard-stat-card" @click="navigate(widget.page)" :title="t(widget.label)">
+                    <span class="stat-label" x-text="t(widget.label)"></span>
+                    <span class="stat-value" :class="widget.tone" x-text="stat(widget.statKey)"></span>
+                  </button>
+                </template>
+              </div>
+
+              <div class="dashboard-widgets">
+                <section class="card dashboard-widget" x-show="widgetVisibility.alert_feed">
+                  <div class="dashboard-widget-heading">
+                    <div>
+                      <div class="card-title" x-text="t('alert_feed')"></div>
+                      <p class="text-muted text-xs" x-text="t('alert_feed_hint')"></p>
+                    </div>
+                    <button class="btn btn-sm btn-secondary" @click="navigate('notifications')" x-text="t('view_all')"></button>
                   </div>
-                  <!-- Error state -->
-                  <div x-show="!loading && loadError" style="padding:20px 0;text-align:center;">
-                    <p class="text-muted text-sm">Failed to load data.</p>
-                    <button class="btn btn-sm btn-secondary" style="margin-top:8px;" @click="load()">Retry</button>
+                  <p x-show="notificationError" class="dashboard-inline-error" x-text="notificationError"></p>
+                  <div x-show="!notificationError && notifications.length === 0" class="dashboard-empty" x-text="t('no_recent_alerts')"></div>
+                  <template x-for="notification in notifications" :key="notification.id">
+                    <button class="dashboard-alert-row" :class="{ 'is-unread': !notification.read }"
+                            @click="notification.read ? navigate('notifications') : markNotificationRead(notification.id)">
+                      <span class="dashboard-alert-dot" :class="'dashboard-alert-dot--' + notification.type"></span>
+                      <span class="dashboard-alert-copy">
+                        <strong x-text="notification.title"></strong>
+                        <span x-text="notification.message"></span>
+                      </span>
+                      <time x-text="formatDashboardDate(notification.created_at)"></time>
+                    </button>
+                  </template>
+                </section>
+
+                <section class="card dashboard-widget" x-show="widgetVisibility.threat_geo">
+                  <div class="dashboard-widget-heading">
+                    <div>
+                      <div class="card-title" x-text="t('threat_geography')"></div>
+                      <p class="text-muted text-xs" x-text="t('threat_geography_hint')"></p>
+                    </div>
+                    <span class="badge badge-blue" x-text="indicatorCountLabel()"></span>
                   </div>
-                  <!-- Empty state -->
-                  <div x-show="!loading && !loadError && (!stats || Object.keys(stats.file_types || {}).length === 0)"
-                       style="padding:20px 0;text-align:center;">
-                    <p class="text-muted text-sm" x-text="t('no_data')"></p>
+                  <p x-show="indicatorError" class="dashboard-inline-error" x-text="indicatorError"></p>
+                  <div x-show="!indicatorError && countryRows.length === 0" class="dashboard-empty" x-text="t(indicatorsLoaded ? 'no_geolocated_indicators' : 'loading')"></div>
+                  <div x-show="!indicatorError && countryRows.length > 0" class="dashboard-country-list">
+                    <template x-for="country in countryRows" :key="country.code">
+                      <div class="dashboard-country-row">
+                        <span class="dashboard-country-code" x-text="country.code"></span>
+                        <span class="dashboard-country-name" x-text="country.name"></span>
+                        <span class="dashboard-country-bar"><span :style="'width:' + country.percentage + '%'"></span></span>
+                        <strong x-text="country.count"></strong>
+                      </div>
+                    </template>
                   </div>
-                  <!-- File types donut chart (canvas always in DOM; x-show keeps it hidden until data arrives) -->
-                  <div x-show="!loading && !loadError && stats && Object.keys(stats.file_types || {}).length > 0"
-                       style="height:200px;position:relative;">
+                  <div class="dashboard-data-note" x-text="t('threat_geography_note')"></div>
+                </section>
+
+                <section class="card dashboard-widget" x-show="widgetVisibility.recent_searches">
+                  <div class="dashboard-widget-heading">
+                    <div class="card-title" x-text="t('recent_searches')"></div>
+                    <button class="btn btn-sm btn-secondary" @click="navigate('search')" x-text="t('view_all')"></button>
+                  </div>
+                  <div x-show="!stats || !stats.recent_searches || stats.recent_searches.length === 0" class="dashboard-empty" x-text="t('no_data')"></div>
+                  <template x-for="s in (stats && stats.recent_searches ? stats.recent_searches : [])" :key="s.query + s.created_at">
+                    <button class="dashboard-search-row" @click="navigate('search')">
+                      <span class="dashboard-search-query" x-text="s.query"></span>
+                      <span class="badge badge-gray" x-text="s.results_count + ' ' + t('results').toLowerCase()"></span>
+                    </button>
+                  </template>
+                </section>
+
+                <section class="card dashboard-widget" x-show="widgetVisibility.file_types">
+                  <div class="dashboard-widget-heading">
+                    <div class="card-title" x-text="t('file_types')"></div>
+                    <button class="btn btn-sm btn-secondary" @click="navigate('files')" x-text="t('view_all')"></button>
+                  </div>
+                  <div x-show="loading" class="dashboard-empty"><span class="spinner" style="width:18px;height:18px;"></span></div>
+                  <div x-show="!loading && !loadError && (!stats || Object.keys(stats.file_types || {}).length === 0)" class="dashboard-empty" x-text="t('no_data')"></div>
+                  <div x-show="!loading && !loadError && stats && Object.keys(stats.file_types || {}).length > 0" class="dashboard-chart">
                     <canvas id="file-types-chart"></canvas>
                   </div>
-                </div>
-              </div>
+                  <div x-show="loadError" class="dashboard-empty">
+                    <p class="dashboard-inline-error" x-text="t('dashboard_load_error')"></p>
+                    <button class="btn btn-sm btn-secondary" @click="load()" x-text="t('retry')"></button>
+                  </div>
+                </section>
 
-              <!-- Quick Actions -->
-              <div class="card" style="margin-top:20px;">
-                <div class="card-title">Quick Actions</div>
-                <div class="flex gap-2" style="flex-wrap:wrap;">
-                  <button class="btn btn-secondary" @click="reindexAll()" :disabled="reindexing">
-                    <span x-show="reindexing" class="spinner" style="width:14px;height:14px;"></span>
-                    <span x-text="reindexing ? 'Reindexing...' : 'Reindex All'"></span>
-                  </button>
-                  <button class="btn btn-secondary" @click="navigate('brands')">Scan All Brands</button>
-                  <button class="btn btn-secondary" @click="navigate('search')">View All Searches</button>
-                </div>
-                <div x-show="reindexMsg" class="alert alert-success" style="margin-top:12px;" x-text="reindexMsg"></div>
+                <section class="card dashboard-widget" x-show="widgetVisibility.quick_actions">
+                  <div class="card-title" x-text="t('quick_actions')"></div>
+                  <div class="dashboard-quick-actions">
+                    <button class="btn btn-secondary" @click="navigate('search')" x-text="t('search')"></button>
+                    <button class="btn btn-secondary" @click="navigate('threat-intel')" x-text="t('threat_intelligence')"></button>
+                    <button class="btn btn-secondary" @click="navigate('brands')" x-text="t('brand_protection')"></button>
+                    <button class="btn btn-secondary" @click="reindexAll()" :disabled="reindexing">
+                      <span x-text="reindexing ? t('reindexing') : t('reindex')"></span>
+                    </button>
+                  </div>
+                  <div x-show="reindexMsg" class="alert alert-success" style="margin-top:12px;" x-text="reindexMsg"></div>
+                </section>
               </div>
             </div>
 
@@ -1982,10 +2024,22 @@
                     <div class="form-group">
                       <label class="form-label">TLD List</label>
                       <select class="form-select" x-model="ruleForm.tld_list" @change="scheduleRulePreview()">
-                        <option value="top30">Top 30</option>
-                        <option value="top100">Top 100</option>
-                        <option value="top500">Top 500</option>
-                        <option value="full1500">Full 1500</option>
+                        <optgroup label="Quick tiers">
+                          <option value="top30">Top 30</option>
+                          <option value="top100">Top 100</option>
+                          <option value="top500">Top 500</option>
+                          <option value="full1500">Full 1500 (all TLDs)</option>
+                        </optgroup>
+                        <optgroup label="By category">
+                          <option value="generic">Generic (gTLD)</option>
+                          <option value="country_code">Country-Code (ccTLD)</option>
+                          <option value="sponsored">Sponsored (sTLD)</option>
+                          <option value="restricted_generic">Restricted Generic</option>
+                          <option value="infrastructure">Infrastructure (.arpa)</option>
+                          <option value="test">Test / Developer</option>
+                          <option value="idn">Internationalized (IDN)</option>
+                          <option value="all">All categories combined</option>
+                        </optgroup>
                       </select>
                     </div>
                     <div class="form-group">
@@ -2379,7 +2433,7 @@
               <div x-show="!showAlerts">
                 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
                   <template x-for="brand in brands" :key="brand.id">
-                    <div class="card">
+                    <div class="card brand-protection-card">
                       <div class="flex justify-between items-center mb-4">
                         <div>
                           <div style="font-weight:600;" x-text="brand.name"></div>
@@ -2400,8 +2454,8 @@
                           <span x-text="t('scan')"></span>
                           <span x-show="brandRunning[brand.id]" class="spinner" style="width:14px;height:14px;"></span>
                         </button>
-                        <button class="btn btn-sm btn-secondary" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
-                        <button class="btn btn-sm btn-secondary" title="Manage owned/trusted domains" @click="showOwnedDomainsFor(brand)">🛡</button>
+                        <button class="btn btn-sm btn-secondary brand-protection-action" @click="loadBrandAlerts(brand)" x-text="t('alerts')"></button>
+                        <button class="btn btn-sm btn-secondary brand-protection-action" title="Manage owned/trusted domains" aria-label="Manage owned/trusted domains" @click="showOwnedDomainsFor(brand)">🛡</button>
                         <button class="btn btn-sm btn-danger" @click="deleteBrand(brand.id)">✕</button>
                       </div>
                       <!-- Advanced check actions -->
@@ -2430,7 +2484,7 @@
                         </div>
                         <!-- Row 2: File/import/recheck/export — flex-wrap so they never overflow -->
                         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-                          <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                          <button class="btn btn-sm btn-secondary brand-protection-action" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="triggerCheckFromFile(brand.id)"
                                   :disabled="brandRunning[brand.id]">
                             📄 Check from File
@@ -2438,19 +2492,19 @@
                           </button>
                           <input :id="`file-input-check-${brand.id}`" type="file" accept=".txt"
                                  style="display:none;" :disabled="brandRunning[brand.id]" @change="checkFromFile(brand.id, $event)" />
-                          <label class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                          <label class="btn btn-sm btn-secondary brand-protection-action" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                  :class="{ 'text-muted': brandRunning[brand.id] }"
                                  :style="brandRunning[brand.id] ? 'pointer-events:none;opacity:0.6;cursor:not-allowed;' : 'cursor:pointer;'">
                             📥 Import .txt
                             <input type="file" accept=".txt" style="display:none;" :disabled="brandRunning[brand.id]" @change="scanFromFile(brand.id, $event)" />
                           </label>
-                          <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                          <button class="btn btn-sm btn-secondary brand-protection-action" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="recheckAlive(brand.id)"
                                   :disabled="brandRunning[brand.id]">
                             🔄 Re-check
                             <span x-show="brandRunning[brand.id]" class="spinner" style="width:14px;height:14px;"></span>
                           </button>
-                          <button class="btn btn-sm btn-secondary" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
+                          <button class="btn btn-sm btn-secondary brand-protection-action" style="font-size:11px;padding:3px 8px;white-space:nowrap;"
                                   @click="activeBrand = brand; exportResults('csv')">
                             ⬇ CSV
                           </button>
@@ -3542,7 +3596,7 @@
                         @click="switchTab('users')" x-text="t('users')"></button>
                 <button class="btn btn-sm" :class="activeTab==='watched_folders'?'btn-primary':'btn-secondary'"
                         @click="switchTab('watched_folders')" x-text="t('watched_folders')"></button>
-                <button class="btn btn-sm" :class="activeTab==='notifications'?'btn-primary':'btn-secondary'"
+                <button x-show="isAdmin()" class="btn btn-sm" :class="activeTab==='notifications'?'btn-primary':'btn-secondary'"
                         @click="switchTab('notifications')" x-text="t('notification_settings')"></button>
                 <button class="btn btn-sm" :class="activeTab==='system'?'btn-primary':'btn-secondary'"
                         @click="switchTab('system')" x-text="t('system')"></button>
@@ -3722,7 +3776,7 @@
               </div>
 
               <!-- ── Notifications Tab ── -->
-              <div x-show="activeTab==='notifications'" class="card" style="max-width:540px;">
+              <div x-show="activeTab==='notifications' && isAdmin()" class="card" style="max-width:540px;">
                 <div class="card-title" x-text="t('notification_settings')"></div>
 
                 <div style="font-weight:600;margin-bottom:8px;margin-top:8px;">SMTP</div>
@@ -3740,13 +3794,15 @@
                 </div>
                 <div class="form-group">
                   <label class="form-label" x-text="t('password')"></label>
-                  <input class="form-input" type="password" x-model="notifSettings.smtp_password" />
+                  <input class="form-input" type="password" x-model="notifSettings.smtp_password"
+                         :placeholder="smtpPasswordConfigured ? 'Saved — leave blank to keep current password' : ''" />
                 </div>
 
                 <div style="font-weight:600;margin-bottom:8px;margin-top:16px;">Telegram</div>
                 <div class="form-group">
                   <label class="form-label">Bot Token</label>
-                  <input class="form-input" type="text" x-model="notifSettings.telegram_token" />
+                  <input class="form-input" type="password" x-model="notifSettings.telegram_token"
+                         :placeholder="telegramTokenConfigured ? 'Saved — leave blank to keep current token' : ''" />
                 </div>
                 <div class="form-group">
                   <label class="form-label">Chat ID</label>
@@ -5998,234 +6054,7 @@
 
             </div><!-- /threat-intel -->
 
-            <!-- ── TI DASHBOARD (Variant B) ──────────────────────── -->
-            <div x-show="page === 'ti-dashboard'" x-data="tiDashboardPage" x-init="init()">
 
-              <!-- Breadcrumbs -->
-              <div class="flex items-center gap-1 mb-4 text-sm" style="color:var(--text-muted);">
-                <span>CSINT</span>
-                <span style="margin:0 4px;">›</span>
-                <span style="color:var(--accent-green);">TI Dashboard</span>
-                <span x-show="dataLoading" class="spinner" style="width:12px;height:12px;margin-left:8px;"></span>
-              </div>
-
-              <!-- Loading dashboards -->
-              <template x-if="loading">
-                <div class="card text-center" style="color:var(--text-muted);padding:40px;">
-                  <div class="spinner" style="width:24px;height:24px;margin:0 auto 12px;"></div>
-                  <div>Loading dashboards…</div>
-                </div>
-              </template>
-
-              <!-- No dashboards -->
-              <template x-if="!loading && dashboards.length === 0">
-                <div class="card text-center" style="color:var(--text-muted);padding:40px;">
-                  <div style="font-size:32px;margin-bottom:12px;">📊</div>
-                  <div>No dashboards found.</div>
-                </div>
-              </template>
-
-              <!-- Dashboard selector (visible only when multiple dashboards exist) -->
-              <template x-if="!loading && dashboards.length > 1">
-                <div class="ti-db-selector">
-                  <template x-for="d in dashboards" :key="d.id">
-                    <button class="ti-db-tab"
-                            :class="currentDashboard && currentDashboard.id === d.id ? 'active' : ''"
-                            @click="selectDashboard(d)"
-                            x-text="d.name"></button>
-                  </template>
-                </div>
-              </template>
-
-              <!-- Dashboard grid -->
-              <template x-if="!loading && currentDashboard">
-                <div>
-                  <!-- Render rows (grouped by y coordinate) -->
-                  <template x-for="(row, rowIdx) in widgetRows()" :key="rowIdx">
-                    <div class="ti-dashboard-row">
-                      <template x-for="widget in row" :key="widget.id">
-                        <div :style="`grid-column: span ${widget._layout.w}`">
-
-                          <!-- ── Widget: ti_stats ─────────────────── -->
-                          <template x-if="widget.type === 'ti_stats'">
-                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
-                              <div class="stat-card" style="cursor:default;">
-                                <div class="stat-label">🔌 Active Sources</div>
-                                <div class="stat-value text-green" x-text="statValue('active_sources')"></div>
-                              </div>
-                              <div class="stat-card" style="cursor:default;">
-                                <div class="stat-label">🔎 Lookups (7d)</div>
-                                <div class="stat-value" x-text="statValue('lookups_7d')"></div>
-                              </div>
-                              <div class="stat-card" style="cursor:default;">
-                                <div class="stat-label">📋 History</div>
-                                <div class="stat-value" x-text="statValue('history')"></div>
-                              </div>
-                              <div class="stat-card" style="cursor:default;">
-                                <div class="stat-label">🆓 Free Sources</div>
-                                <div class="stat-value text-green" x-text="statValue('free_connectors')"></div>
-                              </div>
-                            </div>
-                          </template>
-
-                          <!-- ── Widget: ti_quick_search ─────────── -->
-                          <template x-if="widget.type === 'ti_quick_search'">
-                            <div class="ti-widget-card">
-                              <div class="ti-widget-title" x-text="widget.title || 'Quick IOC Search'"></div>
-                              <div class="flex gap-2 flex-wrap">
-                                <input class="form-input" type="text" x-model="qsIoc"
-                                       placeholder="IP, domain, hash, URL, email…"
-                                       style="flex:3;min-width:180px;" maxlength="512"
-                                       @keyup.enter="runQuickSearch()" />
-                                <select class="form-select" x-model="qsIocType" style="width:115px;">
-                                  <template x-for="tp in iocTypes" :key="tp">
-                                    <option :value="tp" x-text="tp.charAt(0).toUpperCase() + tp.slice(1)"></option>
-                                  </template>
-                                </select>
-                                <button class="btn btn-primary" @click="runQuickSearch()"
-                                        :disabled="qsLoading || !qsIoc.trim()" style="min-width:96px;">
-                                  <span x-show="qsLoading" class="spinner" style="width:13px;height:13px;"></span>
-                                  <span x-text="qsLoading ? 'Searching…' : '🔍 Search'"></span>
-                                </button>
-                                <button class="btn btn-secondary" x-show="qsResult || qsError"
-                                        @click="clearQuickSearch()">✕ Clear</button>
-                              </div>
-                              <div x-show="qsError" class="alert alert-error text-sm mt-3" x-text="qsError"></div>
-                              <!-- Quick result summary -->
-                              <template x-if="qsResult && qsResult.normalized">
-                                <div class="ti-qs-result">
-                                  <div class="flex items-center gap-3">
-                                    <div style="font-size:28px;line-height:1;" x-text="verdictIcon(qsResult.normalized.verdict)"></div>
-                                    <div>
-                                      <div style="font-weight:700;font-size:14px;" x-text="qsResult.ioc"></div>
-                                      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
-                                        <span class="ti-threat-badge"
-                                              :class="'ti-threat-' + (qsResult.normalized.verdict || 'none')"
-                                              x-text="(qsResult.normalized.verdict || 'unknown').toUpperCase()"></span>
-                                        <span class="badge badge-gray" x-text="qsResult.ioc_type"></span>
-                                      </div>
-                                    </div>
-                                    <template x-if="confidencePct(qsResult.normalized.confidence) !== null">
-                                      <div style="margin-left:auto;text-align:right;">
-                                        <div style="font-size:11px;color:var(--text-muted);">Confidence</div>
-                                        <div style="font-weight:700;" x-text="confidencePct(qsResult.normalized.confidence) + '%'"></div>
-                                      </div>
-                                    </template>
-                                  </div>
-                                  <div x-show="qsResult.normalized.summary"
-                                       class="text-sm mt-2"
-                                       style="color:var(--text-secondary);"
-                                       x-text="qsResult.normalized.summary"></div>
-                                  <div class="mt-2">
-                                    <button class="btn btn-sm btn-secondary" @click="navigate('threat-intel')">
-                                      Open in TI Lookup →
-                                    </button>
-                                  </div>
-                                </div>
-                              </template>
-                            </div>
-                          </template>
-
-                          <!-- ── Widget: ti_recent_lookups ───────── -->
-                          <template x-if="widget.type === 'ti_recent_lookups'">
-                            <div class="ti-widget-card">
-                              <div class="ti-widget-title flex items-center justify-between">
-                                <span x-text="widget.title || 'Recent Lookups'"></span>
-                                <button class="btn btn-sm btn-secondary" @click="loadData()"
-                                        title="Refresh" style="padding:2px 8px;">↺</button>
-                              </div>
-                              <template x-if="tiHistory.length === 0">
-                                <div class="text-muted text-sm text-center" style="padding:20px 0;">
-                                  No lookups yet — use TI Lookup or Quick Search to start.
-                                </div>
-                              </template>
-                              <template x-if="tiHistory.length > 0">
-                                <table class="table" style="font-size:12px;">
-                                  <thead>
-                                    <tr>
-                                      <th>IOC</th>
-                                      <th>Type</th>
-                                      <th>Sources</th>
-                                      <th>When</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    <template x-for="row in tiHistory.slice(0, parseParams(widget).limit || 10)" :key="row.id">
-                                      <tr class="cursor-pointer" @click="navigate('threat-intel')" title="Open TI Lookup">
-                                        <td class="text-green font-mono"
-                                            style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
-                                            x-text="row.ioc_value"></td>
-                                        <td><span class="badge badge-gray" x-text="row.ioc_type"></span></td>
-                                        <td class="text-muted" x-text="(row.sources || []).length + ' src'"></td>
-                                        <td class="text-muted" x-text="formatDate(row.created_at)"></td>
-                                      </tr>
-                                    </template>
-                                  </tbody>
-                                </table>
-                              </template>
-                            </div>
-                          </template>
-
-                          <!-- ── Widget: ti_source_distribution ──── -->
-                          <template x-if="widget.type === 'ti_source_distribution'">
-                            <div class="ti-widget-card">
-                              <div class="ti-widget-title" x-text="widget.title || 'Lookups by Source (7d)'"></div>
-                              <!-- Loading -->
-                              <div x-show="dataLoading" style="height:220px;display:flex;align-items:center;justify-content:center;">
-                                <span class="spinner" style="width:22px;height:22px;"></span>
-                              </div>
-                              <!-- Empty -->
-                              <div x-show="!dataLoading && !hasTiSourceStats()"
-                                   class="text-muted text-sm text-center" style="height:220px;display:flex;align-items:center;justify-content:center;">
-                                No source data for the past 7 days.
-                              </div>
-                              <!-- Chart canvas (always in DOM) -->
-                              <div x-show="!dataLoading && hasTiSourceStats()"
-                                   style="height:220px;position:relative;">
-                                <canvas :id="'tid-chart-' + widget.id"></canvas>
-                              </div>
-                            </div>
-                          </template>
-
-                          <!-- ── Widget: ti_top_sources ───────────── -->
-                          <template x-if="widget.type === 'ti_top_sources'">
-                            <div class="ti-widget-card">
-                              <div class="ti-widget-title" x-text="widget.title || 'Top Sources (7d)'"></div>
-                              <!-- Loading -->
-                              <div x-show="dataLoading" style="height:220px;display:flex;align-items:center;justify-content:center;">
-                                <span class="spinner" style="width:22px;height:22px;"></span>
-                              </div>
-                              <!-- Empty -->
-                              <div x-show="!dataLoading && !hasTiSourceStats()"
-                                   class="text-muted text-sm text-center" style="height:220px;display:flex;align-items:center;justify-content:center;">
-                                No source data for the past 7 days.
-                              </div>
-                              <!-- Chart canvas (always in DOM) -->
-                              <div x-show="!dataLoading && hasTiSourceStats()"
-                                   style="height:220px;position:relative;">
-                                <canvas :id="'tid-chart-' + widget.id"></canvas>
-                              </div>
-                            </div>
-                          </template>
-
-                          <!-- ── Widget: unknown type fallback ────── -->
-                          <template x-if="!isKnownType(widget.type)">
-                            <div class="ti-widget-card">
-                              <div class="ti-widget-title" x-text="widget.title || widget.type"></div>
-                              <div class="text-muted text-sm">
-                                Widget type "<span x-text="widget.type"></span>" is not yet implemented.
-                              </div>
-                            </div>
-                          </template>
-
-                        </div><!-- /widget column -->
-                      </template>
-                    </div><!-- /row -->
-                  </template>
-                </div>
-              </template>
-
-            </div><!-- /ti-dashboard -->
             <!-- ── IMPERSONATION MONITORING ───────────────────────── -->
             <div x-show="page === 'impersonation-monitoring'" x-data="impersonationPage" x-init="init()">
               <div class="flex justify-between items-center mb-4">
@@ -6988,16 +6817,17 @@
                             <th>Module</th>
                             <th>Type</th>
                             <th>Entity</th>
+                            <th>Certificate validity</th>
                             <th>Source</th>
                             <th>Details</th>
                           </tr>
                         </thead>
                         <tbody>
                           <template x-if="investigationLoading">
-                            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
+                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
                           </template>
                           <template x-if="!investigationLoading && filteredFindings().length === 0">
-                            <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr>
+                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr>
                           </template>
                           <template x-for="finding in filteredFindings()" :key="finding.id">
                             <tr>
@@ -7010,6 +6840,18 @@
                               <td><span class="badge badge-blue" x-text="finding.module"></span></td>
                               <td x-text="finding.finding_type"></td>
                               <td style="max-width:260px;word-break:break-word;" x-text="finding.entity"></td>
+                              <td>
+                                <template x-if="finding.module === 'cert'">
+                                  <div>
+                                    <div class="text-xs" x-text="certificateValidity(finding)"></div>
+                                    <span x-show="certificateExpiryLabel(finding)"
+                                          class="badge"
+                                          :class="severityClass(finding.severity)"
+                                          x-text="certificateExpiryLabel(finding)"></span>
+                                  </div>
+                                </template>
+                                <span x-show="finding.module !== 'cert'" class="text-muted">—</span>
+                              </td>
                               <td x-text="finding.source"></td>
                               <td>
                                 <details>
@@ -7030,7 +6872,7 @@
             <div x-show="page === 'vulnscan'" x-data="vulnscanApp()" x-init="init()">
               <div class="flex justify-between items-center mb-4">
                 <div>
-                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;">Vuln Scanner</h2>
+                  <h2 style="font-size:1.1rem;font-weight:600;color:var(--text-primary);margin:0 0 4px;" x-text="t('vulnerability_scanner')"></h2>
                 </div>
                 <div class="flex gap-2">
                   <button class="btn btn-secondary btn-sm" @click="loadDashboard(); loadScans(); loadAllFindings();">Refresh</button>
@@ -7080,7 +6922,10 @@
                         <template x-for="scan in (dashboardStats && dashboardStats.recent_scans ? dashboardStats.recent_scans : [])" :key="scan.id">
                           <tr>
                             <td x-text="scan.id"></td>
-                            <td x-text="scan.target_id"></td>
+                            <td>
+                              <div style="font-weight:600;" x-text="scan.target_name || 'Target ' + scan.target_id"></div>
+                              <div class="text-muted text-xs" x-text="scan.target_value || '—'"></div>
+                            </td>
                             <td><span :class="statusBadgeClass(scan.status)" x-text="scan.status"></span></td>
                             <td x-text="profileLabel(scan.profile)"></td>
                             <td x-text="scan.overall_risk || '—'"></td>
@@ -7156,7 +7001,10 @@
                       <template x-for="scan in scans" :key="scan.id">
                         <tr>
                           <td x-text="scan.id"></td>
-                          <td x-text="scan.target_id"></td>
+                          <td>
+                            <div style="font-weight:600;" x-text="scan.target_name || 'Target ' + scan.target_id"></div>
+                            <div class="text-muted text-xs" x-text="scan.target_value || '—'"></div>
+                          </td>
                           <td><span :class="statusBadgeClass(scan.status)" x-text="scan.status"></span></td>
                           <td style="min-width:140px;">
                             <div style="background:var(--border);height:8px;border-radius:999px;overflow:hidden;">
@@ -7271,6 +7119,49 @@
                   </div>
                   <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input class="form-input" x-model="targetForm.tags" placeholder="prod, critical" /></div>
                   <div class="form-group"><label class="form-label">Schedule Cron</label><input class="form-input" x-model="targetForm.schedule_cron" placeholder="0 3 * * *" /></div>
+                  <div class="form-group" style="border-top:1px solid var(--border-color);padding-top:10px;margin-top:4px;">
+                    <div class="flex items-center justify-between" style="cursor:pointer;" @click="targetScannerOptionsOpen = !targetScannerOptionsOpen">
+                      <label class="form-label" style="margin:0;cursor:pointer;">Scanner Options (defaults for this target)</label>
+                      <span class="text-muted text-sm" x-text="targetScannerOptionsOpen ? '▲' : '▼'"></span>
+                    </div>
+                    <div x-show="targetScannerOptionsOpen" style="margin-top:8px;">
+                      <div class="text-muted text-sm" style="margin-bottom:8px;">Tune Nuclei, ZAP, testssl.sh, and Nikto beyond the quick/standard/deep bundles. Leave blank to use profile defaults.</div>
+                      <div class="form-group">
+                        <label class="form-label text-sm">Nuclei severity filter</label>
+                        <div class="flex gap-3" style="flex-wrap:wrap;">
+                          <template x-for="sev in ['critical','high','medium','low','info']" :key="sev">
+                            <label class="text-sm flex items-center gap-1" style="cursor:pointer;">
+                              <input type="checkbox" :checked="targetForm.scanner_config.nuclei.severity.includes(sev)"
+                                     @change="$event.target.checked ? targetForm.scanner_config.nuclei.severity.push(sev) : targetForm.scanner_config.nuclei.severity = targetForm.scanner_config.nuclei.severity.filter(s => s !== sev)" />
+                              <span x-text="sev"></span>
+                            </label>
+                          </template>
+                        </div>
+                        <input class="form-input" style="margin-top:6px;" x-model="targetForm.scanner_config.nuclei.tags" placeholder="Custom Nuclei template tags (comma-separated)" />
+                      </div>
+                      <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="form-group"><label class="form-label text-sm">ZAP spider minutes</label><input class="form-input" type="number" min="1" max="10" x-model.number="targetForm.scanner_config.zap.spider_minutes" placeholder="profile default" /></div>
+                        <div class="form-group"><label class="form-label text-sm">ZAP max scan minutes</label><input class="form-input" type="number" min="1" max="30" x-model.number="targetForm.scanner_config.zap.max_minutes" placeholder="profile default" /></div>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label text-sm">testssl.sh checks</label>
+                        <div class="flex gap-3" style="flex-wrap:wrap;">
+                          <label class="text-sm flex items-center gap-1" style="cursor:pointer;"><input type="checkbox" x-model="targetForm.scanner_config.testssl.fast" /> <span>Fast mode</span></label>
+                          <template x-for="chk in ['protocols','vulnerabilities','headers']" :key="chk">
+                            <label class="text-sm flex items-center gap-1" style="cursor:pointer;">
+                              <input type="checkbox" :checked="targetForm.scanner_config.testssl.checks.includes(chk)"
+                                     @change="$event.target.checked ? targetForm.scanner_config.testssl.checks.push(chk) : targetForm.scanner_config.testssl.checks = targetForm.scanner_config.testssl.checks.filter(c => c !== chk)" />
+                              <span x-text="chk"></span>
+                            </label>
+                          </template>
+                        </div>
+                      </div>
+                      <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="form-group"><label class="form-label text-sm">Nikto tuning codes</label><input class="form-input" x-model="targetForm.scanner_config.nikto.tuning" placeholder="e.g. 1239 (blank = all)" /></div>
+                        <div class="form-group"><label class="form-label text-sm">Nikto max time (seconds)</label><input class="form-input" type="number" min="30" max="600" x-model.number="targetForm.scanner_config.nikto.max_time" placeholder="120" /></div>
+                      </div>
+                    </div>
+                  </div>
                   <div class="flex gap-2"><button class="btn btn-primary" @click="saveTarget()">Save</button><button class="btn btn-secondary" @click="targetFormVisible = false">Cancel</button></div>
                 </div>
               </div>
@@ -7284,6 +7175,61 @@
                     <div class="form-group"><label class="form-label">Scope</label><select class="form-select" x-model="launchModal.scope"><option value="SELF">SELF</option><option value="INTERNAL">INTERNAL</option><option value="THREAT_INTEL">THREAT_INTEL</option></select></div>
                   </div>
                   <div class="form-group"><label class="form-label">Comment</label><textarea class="form-input" rows="3" x-model="launchModal.comment"></textarea></div>
+                  <div class="form-group">
+                    <label class="form-label">Auto-generate Reports on Completion</label>
+                    <div class="flex gap-3" style="flex-wrap:wrap;">
+                      <template x-for="fmt in ['json','csv','html','kql','pdf']" :key="fmt">
+                        <label class="text-sm flex items-center gap-1" style="cursor:pointer;">
+                          <input type="checkbox" :value="fmt" :checked="launchModal.reportFormats.includes(fmt)"
+                                 @change="$event.target.checked ? launchModal.reportFormats.push(fmt) : launchModal.reportFormats = launchModal.reportFormats.filter(f => f !== fmt)" />
+                          <span x-text="reportFormatLabel(fmt)"></span>
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="form-group" style="border-top:1px solid var(--border-color);padding-top:10px;margin-top:4px;">
+                    <div class="flex items-center justify-between" style="cursor:pointer;" @click="launchScannerOptionsOpen = !launchScannerOptionsOpen">
+                      <label class="form-label" style="margin:0;cursor:pointer;">Scanner Options</label>
+                      <span class="text-muted text-sm" x-text="launchScannerOptionsOpen ? '▲' : '▼'"></span>
+                    </div>
+                    <div x-show="launchScannerOptionsOpen" style="margin-top:8px;">
+                      <div class="text-muted text-sm" style="margin-bottom:8px;">Pre-filled from the target's saved defaults. Tune Nuclei, ZAP, testssl.sh, and Nikto for just this scan; leave blank to use profile defaults.</div>
+                      <div class="form-group">
+                        <label class="form-label text-sm">Nuclei severity filter</label>
+                        <div class="flex gap-3" style="flex-wrap:wrap;">
+                          <template x-for="sev in ['critical','high','medium','low','info']" :key="sev">
+                            <label class="text-sm flex items-center gap-1" style="cursor:pointer;">
+                              <input type="checkbox" :checked="launchModal.scanner_config.nuclei.severity.includes(sev)"
+                                     @change="$event.target.checked ? launchModal.scanner_config.nuclei.severity.push(sev) : launchModal.scanner_config.nuclei.severity = launchModal.scanner_config.nuclei.severity.filter(s => s !== sev)" />
+                              <span x-text="sev"></span>
+                            </label>
+                          </template>
+                        </div>
+                        <input class="form-input" style="margin-top:6px;" x-model="launchModal.scanner_config.nuclei.tags" placeholder="Custom Nuclei template tags (comma-separated)" />
+                      </div>
+                      <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="form-group"><label class="form-label text-sm">ZAP spider minutes</label><input class="form-input" type="number" min="1" max="10" x-model.number="launchModal.scanner_config.zap.spider_minutes" placeholder="profile default" /></div>
+                        <div class="form-group"><label class="form-label text-sm">ZAP max scan minutes</label><input class="form-input" type="number" min="1" max="30" x-model.number="launchModal.scanner_config.zap.max_minutes" placeholder="profile default" /></div>
+                      </div>
+                      <div class="form-group">
+                        <label class="form-label text-sm">testssl.sh checks</label>
+                        <div class="flex gap-3" style="flex-wrap:wrap;">
+                          <label class="text-sm flex items-center gap-1" style="cursor:pointer;"><input type="checkbox" x-model="launchModal.scanner_config.testssl.fast" /> <span>Fast mode</span></label>
+                          <template x-for="chk in ['protocols','vulnerabilities','headers']" :key="chk">
+                            <label class="text-sm flex items-center gap-1" style="cursor:pointer;">
+                              <input type="checkbox" :checked="launchModal.scanner_config.testssl.checks.includes(chk)"
+                                     @change="$event.target.checked ? launchModal.scanner_config.testssl.checks.push(chk) : launchModal.scanner_config.testssl.checks = launchModal.scanner_config.testssl.checks.filter(c => c !== chk)" />
+                              <span x-text="chk"></span>
+                            </label>
+                          </template>
+                        </div>
+                      </div>
+                      <div class="grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                        <div class="form-group"><label class="form-label text-sm">Nikto tuning codes</label><input class="form-input" x-model="launchModal.scanner_config.nikto.tuning" placeholder="e.g. 1239 (blank = all)" /></div>
+                        <div class="form-group"><label class="form-label text-sm">Nikto max time (seconds)</label><input class="form-input" type="number" min="30" max="600" x-model.number="launchModal.scanner_config.nikto.max_time" placeholder="120" /></div>
+                      </div>
+                    </div>
+                  </div>
                   <div class="flex gap-2"><button class="btn btn-primary" :disabled="launchSubmitting" @click="submitLaunchScan()"><span x-text="launchSubmitting ? 'Submitting…' : 'Launch'"></span></button><button class="btn btn-secondary" @click="launchModal.visible = false">Cancel</button></div>
                 </div>
               </div>
@@ -7302,9 +7248,16 @@
                       </div>
 
                       <div class="card mb-3" style="padding:12px;">
+                        <div class="text-muted text-sm">Scanned Target</div>
+                        <div style="font-weight:600;" x-text="selectedScan.target_name || 'Target ' + selectedScan.target_id"></div>
+                        <div class="text-muted text-sm" style="word-break:break-word;" x-text="selectedScan.target_value || '—'"></div>
+                      </div>
+
+                      <div class="card mb-3" style="padding:12px;">
                         <div class="flex gap-2" style="flex-wrap:wrap;">
                           <button class="btn btn-sm" :class="activeScanTab === 'overview' ? 'btn-primary' : 'btn-secondary'" @click="activeScanTab = 'overview'">Overview</button>
                           <button class="btn btn-sm" :class="activeScanTab === 'findings' ? 'btn-primary' : 'btn-secondary'" @click="activeScanTab = 'findings'">Findings</button>
+                          <button class="btn btn-sm" :class="activeScanTab === 'reports' ? 'btn-primary' : 'btn-secondary'" @click="activeScanTab = 'reports'">Reports</button>
                         </div>
                       </div>
 
@@ -7312,6 +7265,8 @@
                         <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" x-text="selectedScan.findings_total || 0"></div></div>
                         <div class="stat-card"><div class="stat-label">Critical</div><div class="stat-value" style="color:var(--danger);" x-text="selectedScan.findings_critical || 0"></div></div>
                         <div class="stat-card"><div class="stat-label">High</div><div class="stat-value" style="color:var(--warning);" x-text="selectedScan.findings_high || 0"></div></div>
+                        <div class="stat-card"><div class="stat-label">New</div><div class="stat-value" x-text="selectedScan.findings_new || 0"></div></div>
+                        <div class="stat-card"><div class="stat-label">Fixed</div><div class="stat-value" style="color:var(--accent-green);" x-text="selectedScan.findings_fixed || 0"></div></div>
                         <div class="stat-card"><div class="stat-label">Risk</div><div class="stat-value" x-text="selectedScan.overall_risk || '—'"></div></div>
                       </div>
 
@@ -7337,6 +7292,43 @@
                                   <td><span :class="statusBadgeClass(finding.status)" x-text="finding.status"></span></td>
                                   <td x-text="scannerLabel(finding.scanner_source)"></td>
                                   <td><button class="btn btn-sm btn-primary" @click="openFindingDetail(finding)">Detail</button></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div x-show="activeScanTab === 'reports'" class="card" style="padding:12px;">
+                        <div class="flex justify-between items-center mb-3" style="gap:8px;flex-wrap:wrap;">
+                          <div class="text-muted text-sm">Generate a downloadable report for this scan</div>
+                          <div class="flex gap-2" style="flex-wrap:wrap;">
+                            <select class="form-select" style="min-width:110px;" x-model="reportFormat">
+                              <option value="json">JSON</option>
+                              <option value="csv">CSV</option>
+                              <option value="html">HTML</option>
+                              <option value="kql">KQL</option>
+                              <option value="pdf">PDF</option>
+                            </select>
+                            <button class="btn btn-sm btn-primary" :disabled="reportGenerating" @click="generateReport()">
+                              <span x-text="reportGenerating ? 'Generating…' : 'Generate Report'"></span>
+                            </button>
+                          </div>
+                        </div>
+                        <div class="table-wrapper">
+                          <table>
+                            <thead><tr><th>Format</th><th>Size</th><th>Generated</th><th>Actions</th></tr></thead>
+                            <tbody>
+                              <template x-if="!scanReports || scanReports.length === 0"><tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted);">No reports generated yet.</td></tr></template>
+                              <template x-for="report in scanReports" :key="report.id">
+                                <tr>
+                                  <td><span class="badge badge-gray" x-text="reportFormatLabel(report.format)"></span></td>
+                                  <td x-text="report.file_size_bytes ? Math.ceil(report.file_size_bytes / 1024) + ' KB' : '—'"></td>
+                                  <td x-text="report.generated_at ? formatDate(report.generated_at) : '—'"></td>
+                                  <td class="flex gap-2">
+                                    <button class="btn btn-sm btn-primary" @click="downloadReport(report)">Download</button>
+                                    <button class="btn btn-sm btn-secondary" @click="deleteReport(report)">Delete</button>
+                                  </td>
                                 </tr>
                               </template>
                             </tbody>
@@ -7455,6 +7447,9 @@
                           <option value="twitter">X (Twitter)</option>
                           <option value="telegram">Telegram</option>
                           <option value="habrahabr">Habrahabr</option>
+                          <option value="bluesky">Bluesky</option>
+                          <option value="mastodon">Mastodon</option>
+                          <option value="custom_rss">Custom RSS</option>
                         </select>
                       </div>
                       <div class="form-group" style="min-width:120px;">
@@ -7538,12 +7533,15 @@
                               <td><span :class="mentionStatusColor(m.status)" x-text="m.status"></span></td>
                               <td class="text-sm text-muted" x-text="m.published_at ? formatDate(m.published_at) : '—'"></td>
                               <td>
-                                <select class="form-input" style="min-width:150px;" @change="updateMentionStatus(m.id, $event.target.value)">
-                                  <option value="new" :selected="m.status === 'new'">new</option>
-                                  <option value="investigating" :selected="m.status === 'investigating'">investigating</option>
-                                  <option value="resolved" :selected="m.status === 'resolved'">resolved</option>
-                                  <option value="false_positive" :selected="m.status === 'false_positive'">false_positive</option>
-                                </select>
+                                <div class="flex gap-1" style="flex-wrap:wrap;">
+                                  <select class="form-input" style="min-width:145px;" @change="updateMentionStatus(m.id, $event.target.value)">
+                                    <option value="new" :selected="m.status === 'new'">new</option>
+                                    <option value="investigating" :selected="m.status === 'investigating'">investigating</option>
+                                    <option value="resolved" :selected="m.status === 'resolved'">resolved</option>
+                                    <option value="false_positive" :selected="m.status === 'false_positive'">false_positive</option>
+                                  </select>
+                                  <button class="btn btn-sm btn-secondary" @click="openSnapshots(m)">Snapshots</button>
+                                </div>
                               </td>
                             </tr>
                           </template>
@@ -7709,7 +7707,15 @@
                             <label class="badge badge-gray"><input type="checkbox" value="twitter" x-model="ruleForm.platforms" style="margin-right:6px;"><span>X (Twitter)</span></label>
                             <label class="badge badge-gray"><input type="checkbox" value="telegram" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Telegram</span></label>
                             <label class="badge badge-gray"><input type="checkbox" value="habrahabr" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Habrahabr</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="bluesky" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Bluesky</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="mastodon" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Mastodon</span></label>
+                            <label class="badge badge-gray"><input type="checkbox" value="custom_rss" x-model="ruleForm.platforms" style="margin-right:6px;"><span>Custom RSS</span></label>
                           </div>
+                        </div>
+                        <div class="form-group">
+                          <label class="form-label">Custom RSS feed URLs (HTTPS, one per line; up to 10)</label>
+                          <textarea class="form-input" x-model="ruleForm.rss_feeds" rows="3" placeholder="https://example.com/feed.xml"></textarea>
+                          <div class="text-muted text-sm" style="margin-top:6px;">Feeds are polled when Custom RSS is selected. Mastodon public hashtag feeds use your selected hashtags; full-text search requires a read-only MASTODON_ACCESS_TOKEN on the server.</div>
                         </div>
                         <div class="form-group">
                           <label class="form-label">Severity Threshold</label>
@@ -7789,6 +7795,45 @@
                         <button class="btn btn-primary" @click="saveQuickBrand()" :disabled="quickBrandLoading">
                           <span x-text="quickBrandLoading ? 'Saving…' : 'Save'"></span>
                         </button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="showSnapshotsModal">
+                  <div class="modal-overlay" @click.self="showSnapshotsModal = false">
+                    <div class="modal" style="max-width:760px;">
+                      <div class="modal-header">
+                        <div class="modal-title">Post snapshots</div>
+                        <button class="modal-close" @click="showSnapshotsModal = false">&times;</button>
+                      </div>
+                      <div class="modal-body">
+                        <div class="text-muted text-sm" style="margin-bottom:12px;">
+                          Saved text and a SHA-256 integrity fingerprint preserve what this feed collected. Open the source link to compare it with the current post; this is not a full-page screenshot or an automatic availability check.
+                        </div>
+                        <div class="flex justify-between items-center" style="margin-bottom:12px;">
+                          <span class="text-sm" x-text="snapshotMention ? platformLabel(snapshotMention.source_platform) + ' · ' + (snapshotMention.author_username || 'Unknown author') : ''"></span>
+                          <button class="btn btn-primary btn-sm" @click="saveMentionSnapshot()" :disabled="snapshotsSaving">
+                            <span x-text="snapshotsSaving ? 'Saving…' : 'Save snapshot now'"></span>
+                          </button>
+                        </div>
+                        <div x-show="snapshotsLoading" class="text-muted">Loading snapshots…</div>
+                        <template x-if="!snapshotsLoading && mentionSnapshots.length === 0">
+                          <div class="text-muted">No snapshots saved for this post.</div>
+                        </template>
+                        <template x-for="snapshot in mentionSnapshots" :key="snapshot.id">
+                          <div class="card" style="margin-bottom:12px;padding:12px;">
+                            <div class="flex justify-between items-center" style="gap:12px;flex-wrap:wrap;">
+                              <strong x-text="formatDate(snapshot.captured_at)"></strong>
+                              <span :class="snapshot.integrity_valid ? 'badge badge-green' : 'badge badge-red'" x-text="snapshot.integrity_valid ? 'Integrity verified' : 'Integrity check failed'"></span>
+                            </div>
+                            <div class="text-muted text-xs" style="margin-top:6px;word-break:break-all;" x-text="'SHA-256: ' + snapshot.content_sha256"></div>
+                            <pre x-text="snapshot.content" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;margin:10px 0;"></pre>
+                            <a x-show="snapshot.source_url" :href="snapshot.source_url" target="_blank" rel="noopener noreferrer" class="text-sm" style="color:var(--link);">Open original post</a>
+                          </div>
+                        </template>
+                      </div>
+                      <div class="modal-footer">
+                        <button class="btn btn-secondary" @click="showSnapshotsModal = false">Close</button>
                       </div>
                     </div>
                   </div>

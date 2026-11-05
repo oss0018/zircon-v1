@@ -14,6 +14,7 @@ from app.services.vulnscan.scanners import (
     DNSSecScanner,
     HeaderScanner,
     NiktoScanner,
+    NmapScanner,
     NucleiScanner,
     OpenVASScanner,
     TestSSLScanner,
@@ -23,9 +24,13 @@ from app.services.vulnscan.scanners import (
 
 PROFILE_SCANNERS = {
     "quick": ["headers", "dns_sec", "testssl", "nikto"],
-    "standard": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive"],
-    "deep": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive", "openvas"],
+    "standard": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive", "nmap"],
+    "deep": ["headers", "dns_sec", "testssl", "nikto", "nuclei", "zap_passive", "openvas", "nmap"],
 }
+
+# Findings already in one of these states are considered closed and are excluded
+# from the "fixed" delta computed at the end of each scan (see _mark_fixed_findings).
+_CLOSED_FINDING_STATUSES = ("remediated", "false_positive")
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +48,9 @@ class VulnScanOrchestrator:
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
         return value, host, port
 
-    async def _run_scanner(self, scanner: str, target: VSScanTarget, profile: str) -> list[dict]:
+    async def _run_scanner(
+        self, scanner: str, target: VSScanTarget, profile: str, scanner_config: dict
+    ) -> list[dict]:
         target_url, host, port = self._target_parts(target.target_value)
 
         if scanner == "headers":
@@ -51,16 +58,45 @@ class VulnScanOrchestrator:
         if scanner == "dns_sec":
             return await DNSSecScanner.scan(host)
         if scanner == "testssl":
-            return await TestSSLScanner.scan(host, port)
+            return await TestSSLScanner.scan(host, port, scanner_config.get("testssl"))
         if scanner == "nikto":
-            return await NiktoScanner.scan(target.target_value)
+            return await NiktoScanner.scan(target.target_value, scanner_config.get("nikto"))
         if scanner == "nuclei":
-            return await NucleiScanner.scan(target.target_value, profile)
+            return await NucleiScanner.scan(target.target_value, profile, scanner_config.get("nuclei"))
         if scanner == "zap_passive":
-            return await ZAPPassiveScanner.scan(target_url)
+            return await ZAPPassiveScanner.scan(target_url, profile, scanner_config.get("zap"))
         if scanner == "openvas":
             return await OpenVASScanner.scan(target.target_value, profile)
+        if scanner == "nmap":
+            return await NmapScanner.scan(target.target_value, profile)
         return []
+
+    @staticmethod
+    async def _mark_fixed_findings(
+        db,
+        target: VSScanTarget,
+        current_fingerprints: set[str],
+    ) -> int:
+        """Close out findings for this target that were not re-detected in the
+        current scan.
+
+        Any previously-tracked, still-open finding whose fingerprint doesn't
+        appear among this run's results is treated as resolved: it is flipped
+        to "remediated" and counted towards the scan's findings_fixed total.
+        Findings already closed (remediated/false_positive) are left alone so
+        they aren't recounted on every subsequent scan.
+        """
+        result = await db.execute(
+            select(VSFinding).where(
+                VSFinding.target_id == target.id,
+                VSFinding.fingerprint.notin_(current_fingerprints),
+                VSFinding.status.notin_(_CLOSED_FINDING_STATUSES),
+            )
+        )
+        fixed_findings = result.scalars().all()
+        for finding in fixed_findings:
+            finding.status = "remediated"
+        return len(fixed_findings)
 
     async def run(self, scan_id: int) -> None:
         async with AsyncSessionLocal() as db:
@@ -81,6 +117,7 @@ class VulnScanOrchestrator:
                     return
 
                 scanners = PROFILE_SCANNERS.get(scan.profile, PROFILE_SCANNERS["standard"])
+                scanner_config = json.loads(scan.scanner_config_json or "{}")
                 scan.status = "running"
                 scan.started_at = started_at
                 scan.scanners_used_json = json.dumps(scanners)
@@ -94,7 +131,9 @@ class VulnScanOrchestrator:
                 total_scanners = max(len(scanners), 1)
                 for idx, scanner_name in enumerate(scanners, start=1):
                     try:
-                        raw_findings.extend(await self._run_scanner(scanner_name, target, scan.profile))
+                        raw_findings.extend(
+                            await self._run_scanner(scanner_name, target, scan.profile, scanner_config)
+                        )
                     except Exception:
                         logger.exception("Scanner %s failed for scan %s", scanner_name, scan_id)
                     finally:
@@ -123,7 +162,8 @@ class VulnScanOrchestrator:
                 scan.findings_low = sum(1 for f in persisted if f.severity == "LOW")
                 scan.findings_info = sum(1 for f in persisted if f.severity == "INFO")
                 scan.findings_new = len(new_findings)
-                scan.findings_fixed = 0
+                current_fingerprints = {f.fingerprint for f in normalized_findings}
+                scan.findings_fixed = await self._mark_fixed_findings(db, target, current_fingerprints)
                 scan.findings_persisted = len(persisted)
 
                 if scan.findings_critical:

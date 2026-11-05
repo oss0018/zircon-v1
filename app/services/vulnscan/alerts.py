@@ -34,7 +34,10 @@ def _resolve_destinations(channels: set[str]) -> tuple[str, str]:
     if "email" in channels and settings.smtp_host:
         alert_email = getenv("VULNSCAN_ALERT_EMAIL", getenv("CTI_ALERT_EMAIL", "")).strip()
     if "telegram" in channels and settings.telegram_bot_token:
-        alert_telegram = getenv("VULNSCAN_ALERT_TELEGRAM", getenv("CTI_ALERT_TELEGRAM", "")).strip()
+        alert_telegram = (
+            getenv("VULNSCAN_ALERT_TELEGRAM", getenv("CTI_ALERT_TELEGRAM", "")).strip()
+            or settings.telegram_chat_id
+        )
 
     return alert_email, alert_telegram
 

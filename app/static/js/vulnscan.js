@@ -15,13 +15,23 @@ document.addEventListener('alpine:init', () => {
       default_profile: 'standard',
       tags: '',
       schedule_cron: '',
+      scanner_config: {
+        nuclei: { severity: [], tags: '' },
+        zap: { spider_minutes: null, max_minutes: null },
+        testssl: { fast: false, checks: [] },
+        nikto: { tuning: '', max_time: null },
+      },
     },
     targetFormVisible: false,
+    targetScannerOptionsOpen: false,
     editingTarget: null,
 
     scans: [],
     selectedScan: null,
     scanFindings: [],
+    scanReports: [],
+    reportFormat: 'json',
+    reportGenerating: false,
     scanDrawerVisible: false,
     activeScanTab: 'overview',
     findingsFilter: { severity: '', status: '', scanner: '' },
@@ -39,8 +49,16 @@ document.addEventListener('alpine:init', () => {
       profile: 'standard',
       scope: 'SELF',
       comment: '',
+      reportFormats: ['json'],
+      scanner_config: {
+        nuclei: { severity: [], tags: '' },
+        zap: { spider_minutes: null, max_minutes: null },
+        testssl: { fast: false, checks: [] },
+        nikto: { tuning: '', max_time: null },
+      },
     },
     launchSubmitting: false,
+    launchScannerOptionsOpen: false,
 
     templates: [],
     templateForm: {
@@ -61,6 +79,49 @@ document.addEventListener('alpine:init', () => {
         this.loadTemplates(),
       ]);
       await this.loadAllFindings();
+    },
+
+    _defaultScannerConfig() {
+      return {
+        nuclei: { severity: [], tags: '' },
+        zap: { spider_minutes: null, max_minutes: null },
+        testssl: { fast: false, checks: [] },
+        nikto: { tuning: '', max_time: null },
+      };
+    },
+
+    _mergeScannerConfig(saved) {
+      const defaults = this._defaultScannerConfig();
+      const src = saved && typeof saved === 'object' ? saved : {};
+      return {
+        nuclei: { ...defaults.nuclei, ...(src.nuclei || {}) },
+        zap: { ...defaults.zap, ...(src.zap || {}) },
+        testssl: { ...defaults.testssl, ...(src.testssl || {}) },
+        nikto: { ...defaults.nikto, ...(src.nikto || {}) },
+      };
+    },
+
+    _cleanScannerConfigForSubmit(cfg) {
+      const num = v => (v === '' || v === null || v === undefined || Number.isNaN(v) ? null : Number(v));
+      const str = v => (typeof v === 'string' ? v.trim() : '');
+      return {
+        nuclei: {
+          severity: Array.isArray(cfg.nuclei.severity) ? cfg.nuclei.severity.slice() : [],
+          tags: str(cfg.nuclei.tags),
+        },
+        zap: {
+          spider_minutes: num(cfg.zap.spider_minutes),
+          max_minutes: num(cfg.zap.max_minutes),
+        },
+        testssl: {
+          fast: !!cfg.testssl.fast,
+          checks: Array.isArray(cfg.testssl.checks) ? cfg.testssl.checks.slice() : [],
+        },
+        nikto: {
+          tuning: str(cfg.nikto.tuning),
+          max_time: num(cfg.nikto.max_time),
+        },
+      };
     },
 
     async loadDashboard() {
@@ -91,7 +152,9 @@ document.addEventListener('alpine:init', () => {
         default_profile: 'standard',
         tags: '',
         schedule_cron: '',
+        scanner_config: this._defaultScannerConfig(),
       };
+      this.targetScannerOptionsOpen = false;
       this.targetFormVisible = true;
     },
 
@@ -105,7 +168,9 @@ document.addEventListener('alpine:init', () => {
         default_profile: t.default_profile || 'standard',
         tags: Array.isArray(t.tags) ? t.tags.join(', ') : '',
         schedule_cron: t.schedule_cron || '',
+        scanner_config: this._mergeScannerConfig(t.scanner_config),
       };
+      this.targetScannerOptionsOpen = false;
       this.targetFormVisible = true;
     },
 
@@ -125,6 +190,7 @@ document.addEventListener('alpine:init', () => {
           .map(s => s.trim())
           .filter(Boolean),
         schedule_cron: this.targetForm.schedule_cron.trim() || null,
+        scanner_config: this._cleanScannerConfigForSubmit(this.targetForm.scanner_config),
       };
       try {
         if (this.editingTarget && this.editingTarget.id) {
@@ -167,6 +233,7 @@ document.addEventListener('alpine:init', () => {
       try {
         this.selectedScan = await api.get(`/vulnscan/scans/${scan.id}`);
         this.scanFindings = await api.get(`/vulnscan/scans/${scan.id}/findings?limit=500`);
+        await this.loadScanReports(scan.id);
         this.scanDrawerVisible = true;
         this.activeScanTab = 'overview';
         if (this.selectedScan.status === 'pending' || this.selectedScan.status === 'running') {
@@ -183,6 +250,7 @@ document.addEventListener('alpine:init', () => {
       this.scanDrawerVisible = false;
       this.selectedScan = null;
       this.scanFindings = [];
+      this.scanReports = [];
       this.stopPolling();
     },
 
@@ -210,11 +278,64 @@ document.addEventListener('alpine:init', () => {
           if (current.status === 'completed' || current.status === 'failed' || current.status === 'cancelled') {
             this.stopPolling();
             await this.loadAllFindings();
+            await this.loadScanReports(id);
           }
         } catch (_) {
           this.stopPolling();
         }
       }, 5000);
+    },
+
+    async loadScanReports(scanId) {
+      try {
+        this.scanReports = await api.get(`/vulnscan/scans/${scanId}/reports`);
+      } catch (e) {
+        this.scanReports = [];
+      }
+    },
+
+    async generateReport() {
+      if (!this.selectedScan) return;
+      this.reportGenerating = true;
+      try {
+        await api.post(`/vulnscan/scans/${this.selectedScan.id}/reports`, { format: this.reportFormat });
+        showToast('Report generated', 'success');
+        await this.loadScanReports(this.selectedScan.id);
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.reportGenerating = false;
+      }
+    },
+
+    downloadReport(report) {
+      const token = localStorage.getItem('zircon_token') || sessionStorage.getItem('zircon_token') || '';
+      const url = `/api/v1/vulnscan/reports/${report.id}/download`;
+      // Use fetch to include the auth header, then trigger a client-side download.
+      fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => {
+          if (!r.ok) throw new Error(`Download failed: ${r.status}`);
+          return r.blob();
+        })
+        .then(blob => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `vulnscan_scan_${report.scan_id}_report.${report.format}`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        })
+        .catch(e => showToast(e.message, 'error'));
+    },
+
+    async deleteReport(report) {
+      if (!confirm(t('confirm_delete'))) return;
+      try {
+        await api.delete(`/vulnscan/reports/${report.id}`);
+        showToast('Report deleted', 'success');
+        await this.loadScanReports(report.scan_id);
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
     },
 
     stopPolling() {
@@ -232,7 +353,10 @@ document.addEventListener('alpine:init', () => {
         profile: target.default_profile || 'standard',
         scope: target.scope || 'SELF',
         comment: '',
+        reportFormats: ['json'],
+        scanner_config: this._mergeScannerConfig(target.scanner_config),
       };
+      this.launchScannerOptionsOpen = false;
     },
 
     async submitLaunchScan() {
@@ -243,6 +367,8 @@ document.addEventListener('alpine:init', () => {
           profile: this.launchModal.profile,
           scope: this.launchModal.scope,
           comment: this.launchModal.comment,
+          report_formats: this.launchModal.reportFormats || [],
+          scanner_config: this._cleanScannerConfigForSubmit(this.launchModal.scanner_config),
         });
         showToast('Scan launched', 'success');
         this.launchModal.visible = false;
@@ -443,9 +569,14 @@ document.addEventListener('alpine:init', () => {
         testssl_scanner: 'testssl.sh',
         nuclei: 'Nuclei',
         nikto: 'Nikto',
+        nmap: 'Nmap',
         zap_passive: 'ZAP Passive',
         openvas: 'OpenVAS',
       })[scanner] || scanner || '—';
+    },
+
+    reportFormatLabel(format) {
+      return ({ json: 'JSON', csv: 'CSV', html: 'HTML', kql: 'KQL', pdf: 'PDF' })[format] || (format || '').toUpperCase();
     },
   }));
 });

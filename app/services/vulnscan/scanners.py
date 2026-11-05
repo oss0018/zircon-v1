@@ -1,7 +1,11 @@
 import json
 import asyncio
+import html
+import re
 import shutil
+import tempfile
 import uuid
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -9,6 +13,8 @@ import httpx
 import dns.dnssec
 import dns.rdatatype
 import dns.resolver
+
+from app.services.vulnscan.scanner_config import VALID_NUCLEI_SEVERITIES
 
 
 def _as_url(target: str) -> str:
@@ -482,15 +488,23 @@ class DNSSecScanner:
         return findings
 
 
+_TESTSSL_CHECK_FLAGS = {
+    "protocols": "--protocols",
+    "vulnerabilities": "--vulnerable",
+    "headers": "--headers",
+}
+
+
 class TestSSLScanner:
     @staticmethod
-    async def scan(hostname: str, port: int = 443) -> list[dict]:
+    async def scan(hostname: str, port: int = 443, config: dict | None = None) -> list[dict]:
+        config = config or {}
         base_url = _as_url(hostname)
         parsed = urlparse(base_url)
         safe_host = parsed.hostname or hostname
         scheme = parsed.scheme or "https"
         target_url, host, resolved_port = _target_parts(f"{scheme}://{safe_host}:{port}")
-        temp_path = Path(f"/tmp/testssl_{uuid.uuid4().hex}.json")
+        temp_path = Path(tempfile.gettempdir()) / f"testssl_{uuid.uuid4().hex}.json"
         findings: list[dict] = []
         testssl_bin = shutil.which("testssl.sh") or shutil.which("testssl")
         if not testssl_bin:
@@ -502,18 +516,28 @@ class TestSSLScanner:
                 resolved_port,
             )
 
+        cmd = [
+            testssl_bin,
+            "--jsonfile",
+            str(temp_path),
+            "--quiet",
+            "--color",
+            "0",
+            "--warnings",
+            "off",
+        ]
+        if config.get("fast") is True:
+            cmd.append("--fast")
+        for check in config.get("checks") or []:
+            flag = _TESTSSL_CHECK_FLAGS.get(check)
+            if flag:
+                cmd.append(flag)
+        cmd.append(f"{safe_host}:{port}")
+
         try:
             try:
                 process = await asyncio.create_subprocess_exec(
-                    testssl_bin,
-                    "--jsonfile",
-                    str(temp_path),
-                    "--quiet",
-                    "--color",
-                    "0",
-                    "--warnings",
-                    "off",
-                    f"{safe_host}:{port}",
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -629,29 +653,45 @@ class TestSSLScanner:
                 pass
 
 
+_NIKTO_TUNING_CHARS = set("0123456789abcx")
+
+
 class NiktoScanner:
     @staticmethod
-    async def scan(target: str) -> list[dict]:
+    async def scan(target: str, config: dict | None = None) -> list[dict]:
+        config = config or {}
         target_url, host, port = _target_parts(target)
-        temp_path = Path(f"/tmp/nikto_{uuid.uuid4().hex}.json")
+        temp_path = Path(tempfile.gettempdir()) / f"nikto_{uuid.uuid4().hex}.json"
         findings: list[dict] = []
         nikto_bin = shutil.which("nikto") or shutil.which("nikto.pl")
         if not nikto_bin:
             return _tool_not_available_finding("Nikto", "nikto", target_url, host, port)
 
+        max_time_seconds = 120
+        raw_max_time = config.get("max_time")
+        if isinstance(raw_max_time, (int, float)) and not isinstance(raw_max_time, bool):
+            max_time_seconds = max(30, min(600, int(raw_max_time)))
+
+        cmd = [
+            nikto_bin,
+            "-h",
+            target_url,
+            "-Format",
+            "json",
+            "-output",
+            str(temp_path),
+            "-nointeractive",
+            "-maxtime",
+            f"{max_time_seconds}s",
+        ]
+        tuning = str(config.get("tuning") or "").strip().lower()
+        if tuning and all(c in _NIKTO_TUNING_CHARS for c in tuning):
+            cmd.extend(["-Tuning", tuning])
+
         try:
             try:
                 process = await asyncio.create_subprocess_exec(
-                    nikto_bin,
-                    "-h",
-                    target_url,
-                    "-Format",
-                    "json",
-                    "-output",
-                    str(temp_path),
-                    "-nointeractive",
-                    "-maxtime",
-                    "120s",
+                    *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -661,7 +701,7 @@ class NiktoScanner:
                 return []
 
             try:
-                await asyncio.wait_for(process.wait(), timeout=150)
+                await asyncio.wait_for(process.wait(), timeout=max_time_seconds + 30)
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
@@ -733,7 +773,8 @@ class NiktoScanner:
 
 class NucleiScanner:
     @staticmethod
-    async def scan(target: str, profile: str) -> list[dict]:
+    async def scan(target: str, profile: str, config: dict | None = None) -> list[dict]:
+        config = config or {}
         target_url, host, port = _target_parts(target)
         profile_tags = {
             "quick": ["cve", "exposure", "misconfiguration", "default-login", "ssl"],
@@ -750,14 +791,29 @@ class NucleiScanner:
             ],
             "deep": [],
         }
-        tags = profile_tags.get(profile, profile_tags["standard"])
         nuclei_bin = shutil.which("nuclei")
         if not nuclei_bin:
             return _tool_not_available_finding("Nuclei", "nuclei", target_url, host, port)
 
         cmd = [nuclei_bin, "-target", target]
-        if profile != "deep" and tags:
-            cmd.extend(["-tags", ",".join(tags)])
+        custom_tags = str(config.get("tags") or "").strip()
+        if custom_tags:
+            tags = [t.strip() for t in custom_tags.split(",") if t.strip()]
+            if tags:
+                cmd.extend(["-tags", ",".join(tags)])
+        elif profile != "deep":
+            tags = profile_tags.get(profile, profile_tags["standard"])
+            if tags:
+                cmd.extend(["-tags", ",".join(tags)])
+
+        severities = config.get("severity")
+        if isinstance(severities, list):
+            valid_severities = sorted(
+                {s.lower() for s in severities if isinstance(s, str) and s.lower() in VALID_NUCLEI_SEVERITIES}
+            )
+            if valid_severities:
+                cmd.extend(["-severity", ",".join(valid_severities)])
+
         cmd.extend(
             [
                 "-json",
@@ -878,41 +934,361 @@ class NucleiScanner:
             return []
 
 
-class ZAPPassiveScanner:
+_NMAP_HIGH_RISK_PORTS = {23, 3389, 5900, 27017}       # telnet, rdp, vnc, mongodb
+_NMAP_MEDIUM_RISK_PORTS = {21, 445, 3306, 5432, 6379, 9200}  # ftp, smb, mysql, postgres, redis, elasticsearch
+_NMAP_CVE_RE = re.compile(r"cve-\d{4}-\d{4,7}", re.IGNORECASE)
+
+
+def _nmap_port_severity(port: int) -> str:
+    if port in _NMAP_HIGH_RISK_PORTS:
+        return "HIGH"
+    if port in _NMAP_MEDIUM_RISK_PORTS:
+        return "MEDIUM"
+    return "INFO"
+
+
+def _nmap_script_findings(
+    script_el: "ET.Element",
+    target_url: str,
+    host_ip: str,
+    port_num: int | None,
+) -> list[dict]:
+    """Turn an NSE `vuln`-category <script> element into findings.
+
+    Nmap's shared `vulns.lua` library (used by essentially every script in the
+    stock `vuln` category) always prefixes positive hits with a "VULNERABLE"
+    marker in the human-readable output, so that substring is a reliable,
+    tool-agnostic signal without needing a bespoke parser per NSE script.
+    """
+    output = (script_el.get("output") or "").strip()
+    if "VULNERABLE" not in output.upper():
+        return []
+
+    script_id = script_el.get("id", "nmap-vuln-script")
+    cve_ids = sorted({m.upper() for m in _NMAP_CVE_RE.findall(output)})
+    references = (
+        [f"https://nvd.nist.gov/vuln/detail/{cve}" for cve in cve_ids]
+        if cve_ids
+        else ["https://nmap.org/nsedoc/categories/vuln.html"]
+    )
+
+    return [
+        {
+            **_base_finding(
+                "nmap",
+                f"nmap-{script_id}-{port_num if port_num is not None else 'host'}",
+                f"Nmap NSE: {script_id}",
+                output[:2000],
+                "CVE" if cve_ids else "EXPOSURE",
+                "HIGH",
+                target_url,
+                host_ip,
+                port_num,
+            ),
+            "cve_ids_json": json.dumps(cve_ids),
+            "references_json": json.dumps(references),
+        }
+    ]
+
+
+class NmapScanner:
     @staticmethod
-    async def scan(target_url: str) -> list[dict]:
-        # TODO: replace with real subprocess call
+    async def scan(target: str, profile: str) -> list[dict]:
+        target_url, host, _default_port = _target_parts(target)
+        temp_path = Path(tempfile.gettempdir()) / f"nmap_{uuid.uuid4().hex}.xml"
+        findings: list[dict] = []
+        nmap_bin = shutil.which("nmap")
+        if not nmap_bin:
+            return _tool_not_available_finding("Nmap", "nmap", target_url, host, None)
+
+        if profile == "deep":
+            port_args = ["--top-ports", "1000"]
+            timeout = 600
+            script_timeout = "90s"
+            host_timeout = "8m"
+        else:
+            port_args = ["--top-ports", "100"]
+            timeout = 300
+            script_timeout = "45s"
+            host_timeout = "4m"
+
+        try:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    nmap_bin,
+                    "-Pn",
+                    "-sV",
+                    "-T4",
+                    *port_args,
+                    "--script",
+                    "vuln",
+                    "--script-timeout",
+                    script_timeout,
+                    "--host-timeout",
+                    host_timeout,
+                    "-oX",
+                    str(temp_path),
+                    host,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                return _tool_not_available_finding("Nmap", "nmap", target_url, host, None)
+            except Exception:
+                return []
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return _scan_timeout_finding("Nmap", "nmap", target_url, host, None)
+
+            root = None
+            if temp_path.exists():
+                try:
+                    root = ET.parse(str(temp_path)).getroot()
+                except (ET.ParseError, OSError):
+                    root = None
+
+            if root is not None:
+                for host_el in root.findall("host"):
+                    addr_el = host_el.find("address")
+                    host_ip = addr_el.get("addr") if addr_el is not None else host
+
+                    hostscript_el = host_el.find("hostscript")
+                    if hostscript_el is not None:
+                        for script_el in hostscript_el.findall("script"):
+                            findings.extend(
+                                _nmap_script_findings(script_el, target_url, host_ip, None)
+                            )
+
+                    ports_el = host_el.find("ports")
+                    if ports_el is None:
+                        continue
+                    for port_el in ports_el.findall("port"):
+                        state_el = port_el.find("state")
+                        if state_el is None or state_el.get("state") != "open":
+                            continue
+                        try:
+                            port_num = int(port_el.get("portid", "0") or 0)
+                        except ValueError:
+                            continue
+
+                        service_el = port_el.find("service")
+                        service_name = service_el.get("name", "") if service_el is not None else ""
+                        product = service_el.get("product", "") if service_el is not None else ""
+                        version = service_el.get("version", "") if service_el is not None else ""
+                        banner = " ".join(part for part in (product, version) if part).strip()
+
+                        findings.append(
+                            {
+                                **_base_finding(
+                                    "nmap",
+                                    f"nmap-open-port-{port_num}",
+                                    f"Open port {port_num}/tcp ({service_name or 'unknown'})",
+                                    (
+                                        f"Nmap detected an open {service_name or 'unknown'} "
+                                        f"service on port {port_num}"
+                                        + (f" ({banner})" if banner else "")
+                                        + "."
+                                    ),
+                                    "OPEN_PORT",
+                                    _nmap_port_severity(port_num),
+                                    target_url,
+                                    host_ip,
+                                    port_num,
+                                ),
+                                "references_json": json.dumps(["https://nmap.org/book/man-port-scanning-basics.html"]),
+                            }
+                        )
+
+                        for script_el in port_el.findall("script"):
+                            findings.extend(
+                                _nmap_script_findings(script_el, target_url, host_ip, port_num)
+                            )
+
+            return findings
+        except Exception:
+            return []
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+_ZAP_RISK_SEVERITY = {
+    "0": "INFO",
+    "1": "LOW",
+    "2": "MEDIUM",
+    "3": "HIGH",
+}
+
+
+def _strip_html(value: str) -> str:
+    """Best-effort plain-text rendering of ZAP's HTML-flavoured report fields."""
+    text = re.sub(r"<[^>]+>", " ", value or "")
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def _zap_alert_finding(alert: dict, target_url: str, host: str, port: int | None) -> dict:
+    risk_code = str(alert.get("riskcode", "1"))
+    severity = _ZAP_RISK_SEVERITY.get(risk_code, "LOW")
+    name = str(alert.get("name") or alert.get("alert") or "ZAP finding").strip()
+    description = _strip_html(str(alert.get("desc", ""))) or name
+    solution = _strip_html(str(alert.get("solution", "")))
+    plugin_id = str(alert.get("pluginid") or alert.get("id") or "0")
+
+    instances = alert.get("instances")
+    first_instance = instances[0] if isinstance(instances, list) and instances else {}
+    evidence = first_instance.get("evidence") if isinstance(first_instance, dict) else None
+    affected_parameter = first_instance.get("param") if isinstance(first_instance, dict) else None
+
+    name_lower = name.lower()
+    if "sql" in name_lower:
+        finding_type = "SQLI"
+    elif "cross site scripting" in name_lower or "cross-site scripting" in name_lower or "xss" in name_lower:
+        finding_type = "XSS"
+    elif "disclosure" in name_lower or "information" in name_lower:
+        finding_type = "EXPOSURE"
+    else:
+        finding_type = "MISCONFIGURATION"
+
+    references = [
+        _strip_html(line)
+        for line in re.split(r"<br ?/?>|\n", str(alert.get("reference", "")))
+        if _strip_html(line)
+    ] or ["https://www.zaproxy.org/"]
+
+    cwe_id = alert.get("cweid")
+    cwe_ids = [f"CWE-{cwe_id}"] if cwe_id not in (None, "", -1, "-1", "0") else []
+    wasc_id = alert.get("wascid")
+
+    return {
+        **_base_finding(
+            "zap",
+            f"zap-{plugin_id}",
+            name[:255],
+            description,
+            finding_type,
+            severity,
+            target_url,
+            host,
+            port,
+            cwe_ids,
+        ),
+        "remediation_summary": solution or "Review the ZAP finding and apply the recommended mitigation.",
+        "references_json": json.dumps(references),
+        "evidence": evidence,
+        "affected_parameter": affected_parameter,
+        "wasc_id": str(wasc_id) if wasc_id not in (None, "", -1, "-1") else None,
+    }
+
+
+class ZAPPassiveScanner:
+    """Runs a real OWASP ZAP baseline scan (spider + passive rules only, no
+    active attacks) via the `zap-baseline.py` CLI shipped with ZAP, and
+    parses its JSON report. Degrades to a TOOL_NOT_AVAILABLE finding when ZAP
+    isn't installed, matching every other scanner in this module instead of
+    fabricating a finding.
+    """
+
+    @staticmethod
+    async def scan(target_url: str, profile: str = "standard", config: dict | None = None) -> list[dict]:
+        config = config or {}
         normalized_url, host, port = _target_parts(target_url)
-        return [
-            _base_finding(
-                "zap",
-                "zap-passive-001",
-                "Cookie without SameSite",
-                "Passive scan found cookie without SameSite attribute.",
-                "MISCONFIGURATION",
-                "LOW",
-                normalized_url,
-                host,
-                port,
-            )
-        ]
+        temp_path = Path(tempfile.gettempdir()) / f"zap_{uuid.uuid4().hex}.json"
+        findings: list[dict] = []
+        zap_bin = shutil.which("zap-baseline.py")
+        if not zap_bin:
+            return _tool_not_available_finding("OWASP ZAP", "zap", normalized_url, host, port)
+
+        if profile == "deep":
+            spider_minutes, max_minutes = 3, 8
+        else:
+            spider_minutes, max_minutes = 1, 4
+
+        raw_spider = config.get("spider_minutes")
+        if isinstance(raw_spider, (int, float)) and not isinstance(raw_spider, bool):
+            spider_minutes = max(1, min(10, int(raw_spider)))
+        raw_max = config.get("max_minutes")
+        if isinstance(raw_max, (int, float)) and not isinstance(raw_max, bool):
+            max_minutes = max(1, min(30, int(raw_max)))
+        # Wall-clock guard needs headroom beyond ZAP's own -T budget for startup/teardown.
+        timeout = max_minutes * 60 + 120
+
+        try:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    zap_bin,
+                    "-t",
+                    normalized_url,
+                    "-J",
+                    str(temp_path),
+                    "-m",
+                    str(spider_minutes),
+                    "-T",
+                    str(max_minutes),
+                    "-I",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                return _tool_not_available_finding("OWASP ZAP", "zap", normalized_url, host, port)
+            except Exception:
+                return []
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                return _scan_timeout_finding("OWASP ZAP", "zap", normalized_url, host, port)
+
+            sites: list[dict] = []
+            if temp_path.exists():
+                try:
+                    payload = json.loads(temp_path.read_text(encoding="utf-8"))
+                    raw_sites = payload.get("site", []) if isinstance(payload, dict) else []
+                    sites = raw_sites if isinstance(raw_sites, list) else []
+                except (json.JSONDecodeError, OSError):
+                    sites = []
+
+            for site in sites:
+                if not isinstance(site, dict):
+                    continue
+                alerts = site.get("alerts")
+                if not isinstance(alerts, list):
+                    continue
+                for alert in alerts:
+                    if isinstance(alert, dict):
+                        findings.append(_zap_alert_finding(alert, normalized_url, host, port))
+
+            return findings
+        except Exception:
+            return []
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 class OpenVASScanner:
+    """OpenVAS / Greenbone Vulnerability Manager (GVM) scanning.
+
+    A real OpenVAS scan requires a running `gvmd` daemon reachable over the
+    GMP protocol, plus provisioned scan configs and port lists - a stateful
+    create-target -> create-task -> start -> poll -> fetch-report lifecycle
+    that can run for tens of minutes, unlike the other scanners in this
+    module which are bounded one-shot CLI calls. Zircon doesn't bundle or
+    manage a GVM daemon, so rather than fabricate a finding (as this scanner
+    previously did) we honestly report it as unavailable, exactly like the
+    other scanners do when their underlying tool is missing.
+    """
+
     @staticmethod
     async def scan(target: str, profile: str) -> list[dict]:
-        # TODO: replace with real subprocess call
         target_url, host, port = _target_parts(target)
-        return [
-            _base_finding(
-                "openvas",
-                "openvas-001",
-                "Outdated service vulnerability",
-                "OpenVAS detected a known vulnerable service version.",
-                "EXPOSURE",
-                "HIGH",
-                target_url,
-                host,
-                port,
-            )
-        ]
+        return _tool_not_available_finding("OpenVAS/GVM", "openvas", target_url, host, port)

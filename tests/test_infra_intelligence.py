@@ -220,6 +220,88 @@ def test_cert_run_non_domain_returns_empty():
     assert result == []
 
 
+def test_certificate_without_expiry_date_is_not_marked_expiring():
+    from app.services.infrastructure_intelligence.self_signed_cert_analyzer import SelfSignedCertAnalyzer
+
+    finding = SelfSignedCertAnalyzer()._classify_finding({
+        "ip": "192.0.2.10",
+        "port": 443,
+        "is_self_signed": False,
+        "is_expired": False,
+        "days_until_expiry": None,
+        "hostname_valid": True,
+        "chain_valid": True,
+    })
+
+    assert finding["finding_type"] == "certificate"
+    assert finding["severity"] == 1
+
+
+def test_certificate_transparency_findings_include_expiry_state():
+    from datetime import datetime, timedelta, timezone
+    from app.services.infrastructure_intelligence.cert_intelligence import CertIntelligenceModule
+    import asyncio
+
+    expires_soon = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+    expires_later = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+
+    class FakeClient:
+        async def search(self, _domain, _query_type):
+            return {
+                "certificates": [
+                    {"common_name": "soon.example.com", "not_after": expires_soon},
+                    {"common_name": "later.example.com", "not_after": expires_later},
+                ]
+            }
+
+    module = CertIntelligenceModule({})
+    module._client = lambda _service: FakeClient()
+    findings = asyncio.run(module.search_ct_logs("example.com"))
+
+    assert findings[0]["finding_type"] == "expiring_cert"
+    assert findings[0]["severity"] == 4
+    assert findings[0]["data_json"]["days_until_expiry"] <= 7
+    assert findings[0]["data_json"]["not_after"] == expires_soon
+    assert findings[1]["finding_type"] == "certificate"
+    assert findings[1]["data_json"]["days_until_expiry"] > 30
+
+
+def test_certificate_expiry_alert_uses_configured_cti_destinations(monkeypatch):
+    import asyncio
+    from app.services.infrastructure_intelligence import cert_alerts
+
+    sent = []
+
+    async def fake_notify(*args):
+        sent.append(args)
+
+    monkeypatch.setattr(cert_alerts.settings, "cti_alert_email", "alerts@example.com")
+    monkeypatch.setattr(cert_alerts.settings, "cti_alert_telegram", "")
+    monkeypatch.setattr(cert_alerts.settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(cert_alerts, "notify", fake_notify)
+
+    asyncio.run(cert_alerts.notify_expiring_certificates("portal.example.com", [
+        {
+            "module": "cert",
+            "entity": "portal.example.com:443",
+            "data_json": {
+                "not_after": "2026-10-25T00:00:00+00:00",
+                "days_until_expiry": 2,
+            },
+        },
+        {
+            "module": "cert",
+            "entity": "other.example.com:443",
+            "data_json": {"days_until_expiry": 90},
+        },
+    ]))
+
+    assert len(sent) == 1
+    assert sent[0][2:] == ("alerts@example.com", "")
+    assert "2 days remaining" in sent[0][1]
+    assert "portal.example.com:443" in sent[0][1]
+
+
 def test_orchestrator_domain_runs_post_gather_cert_analysis():
     import asyncio
     from types import SimpleNamespace
@@ -284,7 +366,8 @@ def test_orchestrator_domain_runs_post_gather_cert_analysis():
     fake_network_instance = SimpleNamespace(run=AsyncMock(return_value=[network_finding]))
     fake_cert_instance = SimpleNamespace(
         run=AsyncMock(return_value=[]),
-        analyze_self_signed=AsyncMock(return_value=[cert_finding]),
+        analyze_self_signed=AsyncMock(return_value=[]),
+        analyze_endpoints=AsyncMock(return_value=[cert_finding]),
     )
 
     def fake_import_class(path):
@@ -313,7 +396,115 @@ def test_orchestrator_domain_runs_post_gather_cert_analysis():
             )
         )
 
-    fake_cert_instance.analyze_self_signed.assert_awaited_once_with(["1.2.3.4"])
+    # For domain investigations the discovered network finding carries a port,
+    # so the orchestrator routes it through the endpoint-aware (hostname-SNI)
+    # analysis path rather than the bare-IP self-signed path.
+    fake_cert_instance.analyze_endpoints.assert_awaited_once_with([("1.2.3.4", 443, "example.com")])
+    fake_cert_instance.analyze_self_signed.assert_not_awaited()
+    assert summary["cert"] == 1
+    assert any(getattr(obj, "module", None) == "cert" for obj in db.added)
+    assert any(getattr(obj, "finding_type", None) == "self_signed_cert" for obj in db.added)
+
+
+def test_orchestrator_falls_back_to_self_signed_when_no_port_discovered():
+    """When a discovered network finding has no port, post-gather cert analysis
+    should fall back to bare-IP self-signed analysis instead of the
+    endpoint-aware path (which requires a port)."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.infrastructure_intelligence.orchestrator import InfraOrchestrator
+
+    class FakeResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar_one_or_none(self):
+            return self._value
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._value
+
+    class FakeDB:
+        def __init__(self):
+            self.investigation = SimpleNamespace(
+                id=1,
+                status="pending",
+                started_at=None,
+                completed_at=None,
+                summary_json=None,
+                error_message=None,
+            )
+            self.added = []
+            self.execute_calls = 0
+            self.commit = AsyncMock()
+            self.flush = AsyncMock()
+
+        async def execute(self, _query):
+            self.execute_calls += 1
+            if self.execute_calls == 1:
+                return FakeResult(self.investigation)
+            return FakeResult([])
+
+        def add(self, obj):
+            self.added.append(obj)
+
+    network_finding = {
+        "entity": "5.6.7.8",
+        "module": "network",
+        "finding_type": "asn_range_member",
+        "severity": 1,
+        "source": "bgpview",
+        "data_json": {"ip": "5.6.7.8"},
+    }
+    cert_finding = {
+        "entity": "5.6.7.8",
+        "module": "cert",
+        "finding_type": "self_signed_cert",
+        "severity": 3,
+        "source": "tls_handshake",
+        "data_json": {"ip": "5.6.7.8", "is_self_signed": True},
+    }
+
+    fake_network_instance = SimpleNamespace(run=AsyncMock(return_value=[network_finding]))
+    fake_cert_instance = SimpleNamespace(
+        run=AsyncMock(return_value=[]),
+        analyze_self_signed=AsyncMock(return_value=[cert_finding]),
+        analyze_endpoints=AsyncMock(return_value=[]),
+    )
+
+    def fake_import_class(path):
+        if path.endswith("network_intelligence.DNSIntelligenceModule"):
+            return lambda keys: SimpleNamespace(run=AsyncMock(return_value=[]))
+        if path.endswith("network_intelligence.NetworkIntelligenceModule"):
+            return lambda keys: fake_network_instance
+        if path.endswith("cert_intelligence.CertIntelligenceModule"):
+            return lambda keys: fake_cert_instance
+        if path.endswith("cloud_osint.CloudOSINTModule"):
+            return lambda keys: SimpleNamespace(run=AsyncMock(return_value=[]))
+        return lambda keys: SimpleNamespace(run=AsyncMock(return_value=[]))
+
+    orch = InfraOrchestrator()
+    db = FakeDB()
+
+    with patch.object(orch, "_load_keys", new=AsyncMock(return_value={})), \
+         patch("app.services.infrastructure_intelligence.orchestrator._import_class", side_effect=fake_import_class):
+        summary = asyncio.run(
+            orch.run_investigation(
+                investigation_id=1,
+                target="example.com",
+                target_type="domain",
+                modules=["network", "cert"],
+                db=db,
+            )
+        )
+
+    fake_cert_instance.analyze_self_signed.assert_awaited_once_with(["5.6.7.8"])
+    fake_cert_instance.analyze_endpoints.assert_not_awaited()
     assert summary["cert"] == 1
     assert any(getattr(obj, "module", None) == "cert" for obj in db.added)
     assert any(getattr(obj, "finding_type", None) == "self_signed_cert" for obj in db.added)
