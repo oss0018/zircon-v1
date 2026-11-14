@@ -250,6 +250,12 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("VIRUSTOTAL_API_KEY", "ZIRCON_VIRUSTOTAL_API_KEY"),
     )
+    companies_house_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "COMPANIES_HOUSE_API_KEY", "ZIRCON_COMPANIES_HOUSE_API_KEY"
+        ),
+    )
     greynoise_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("GREYNOISE_API_KEY", "ZIRCON_GREYNOISE_API_KEY"),

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Any, Dict, Literal
 from datetime import datetime
 from pydantic_core import PydanticCustomError
@@ -182,6 +182,32 @@ class SearchResult(BaseModel):
     score: float = 0.0
     data: Any
     cached: bool = False
+
+
+class EntityRegistryCompareRequest(BaseModel):
+    query: Optional[str] = Field(None, min_length=1, max_length=200)
+    uk_company_number: Optional[str] = Field(None, min_length=1, max_length=8)
+    delaware_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    delaware_entity_number: Optional[str] = Field(None, min_length=1, max_length=32)
+    delaware_status: Optional[str] = Field(None, max_length=100)
+    delaware_incorporated_on: Optional[str] = Field(None, max_length=32)
+    delaware_registered_address: Optional[str] = Field(None, max_length=1000)
+
+    @field_validator(
+        "query", "uk_company_number", "delaware_name", "delaware_entity_number",
+        "delaware_status", "delaware_incorporated_on", "delaware_registered_address",
+    )
+    @classmethod
+    def sanitize_registry_fields(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _sanitize(value.strip(), max_length=1000)
+
+    @model_validator(mode="after")
+    def require_uk_lookup(self):
+        if not self.query and not self.uk_company_number:
+            raise ValueError("Provide a company name or UK company number")
+        return self
 
 
 class SearchTemplateCreate(BaseModel):
