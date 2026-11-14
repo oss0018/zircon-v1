@@ -73,6 +73,14 @@ The authenticated `POST /api/v1/entity-registry/compare` endpoint searches the o
 
 Delaware search is not automated in this MVP: the response links to the official [Delaware Division of Corporations entity search](https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx), and any Delaware details included in the comparison are explicitly marked user-provided and unverified. Name similarity is a triage aid, not proof that two records represent the same legal entity.
 
+### Court case search (US + UK)
+The authenticated `POST /api/v1/case-law/search` endpoint searches US opinions through the [CourtListener API](https://www.courtlistener.com/help/api/rest/v4/search/) and UK published decisions through The National Archives' [Find Case Law Atom API](https://caselaw.nationalarchives.gov.uk/atom.xml). Supply a `query` and optional `limit` (1-10); each source reports its status independently, so a temporary failure from one does not hide results from the other. Configure `COURTLISTENER_API_TOKEN` (or `ZIRCON_COURTLISTENER_API_TOKEN`) to enable US search; without it, the UK search still runs and the US source reports that it is unavailable.
+
+This searches published opinions and judgments, not complete US or UK dockets, and coverage varies by court. Find Case Law's Open Justice Licence requires permission for bulk computational analysis; obtain the required permission before using the data for that purpose. US search terms are sent to CourtListener, which may log queries, so do not submit confidential or sensitive personal information.
+
+### Market regulator enforcement records (US + UK)
+The authenticated `POST /api/v1/regulators/search` endpoint searches matching releases in the SEC's recent litigation RSS feed and accepts optional FCA enforcement details entered by the user. Configure `SEC_USER_AGENT` (or `ZIRCON_SEC_USER_AGENT`) with an identifying application name and contact email, as required by SEC fair-access guidance. SEC results are limited to entries currently present in that feed, not a complete history of Commission actions. FCA search is manual in this MVP: use the official [FCA enforcement search](https://www.fca.org.uk/news/search-results?category=Enforcement); submitted FCA details are marked user-provided and unverified, and links are accepted only from official FCA HTTPS hosts.
+
 ### Docker runtime for vulnerability scanners
 `Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, `nuclei`, `nmap`, and **OWASP ZAP** (`zap-baseline.py`, plus a headless JRE to run it), and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
 

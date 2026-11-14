@@ -31,6 +31,7 @@
   <script src="/static/js/social_listening.js"></script>
   <script src="/static/js/lookalike_domains.js"></script>
   <script src="/static/js/impersonation.js"></script>
+  <script src="/static/js/legal_research.js"></script>
 
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container"></div>
@@ -115,6 +116,11 @@
             <div class="nav-item" :class="page === 'infrastructure-intelligence' ? 'active' : ''" @click="navigate('infrastructure-intelligence')" @contextmenu.prevent="openPageInNewWindow('infrastructure-intelligence')">
               <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
               <span x-text="t('infrastructure_intelligence')"></span>
+            </div>
+
+            <div class="nav-item" :class="page === 'legal-research' ? 'active' : ''" @click="navigate('legal-research')" @contextmenu.prevent="openPageInNewWindow('legal-research')">
+              <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>
+              <span x-text="t('legal_research')"></span>
             </div>
 
             <div class="nav-item" :class="page === 'vulnscan' ? 'active' : ''" @click="navigate('vulnscan')" @contextmenu.prevent="openPageInNewWindow('vulnscan')">
@@ -8133,6 +8139,275 @@
               </template>
 
             </div><!-- /logo-content-misuse -->
+
+            <!-- ── LEGAL RESEARCH ───────────────────────────────────── -->
+            <div x-show="page === 'legal-research'" x-data="legalResearchPage" x-init="init()">
+              <div class="dashboard-header">
+                <div>
+                  <div class="dashboard-eyebrow">ZIRCON / DUE DILIGENCE</div>
+                  <h1 x-text="t('legal_research')"></h1>
+                  <p x-text="t('legal_research_intro')"></p>
+                </div>
+              </div>
+
+              <div class="flex gap-2 mb-4" role="tablist">
+                <button class="btn btn-sm" :class="activeTab === 'entities' ? 'btn-primary' : 'btn-secondary'"
+                        role="tab" :aria-selected="activeTab === 'entities'" @click="activeTab = 'entities'"
+                        x-text="t('legal_entities')"></button>
+                <button class="btn btn-sm" :class="activeTab === 'cases' ? 'btn-primary' : 'btn-secondary'"
+                        role="tab" :aria-selected="activeTab === 'cases'" @click="activeTab = 'cases'"
+                        x-text="t('court_cases')"></button>
+                <button class="btn btn-sm" :class="activeTab === 'regulators' ? 'btn-primary' : 'btn-secondary'"
+                        role="tab" :aria-selected="activeTab === 'regulators'" @click="activeTab = 'regulators'"
+                        x-text="t('regulator_records')"></button>
+              </div>
+
+              <section x-show="activeTab === 'entities'" role="tabpanel">
+                <form class="card mb-4" @submit.prevent="compareEntities()">
+                  <h2 class="card-title" x-text="t('legal_entities')"></h2>
+                  <p class="text-muted mb-4" x-text="t('registry_source_note')"></p>
+                  <div class="grid grid-2 gap-4">
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('company_or_case_query')"></label>
+                      <input class="form-input" x-model="entityForm.query" maxlength="200"
+                             :placeholder="t('company_name_placeholder')" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('uk_company_number')"></label>
+                      <input class="form-input" x-model="entityForm.uk_company_number" maxlength="8" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('delaware_company_name')"></label>
+                      <input class="form-input" x-model="entityForm.delaware_name" maxlength="200" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('delaware_entity_number')"></label>
+                      <input class="form-input" x-model="entityForm.delaware_entity_number" maxlength="32" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('delaware_status')"></label>
+                      <input class="form-input" x-model="entityForm.delaware_status" maxlength="100" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('incorporation_date')"></label>
+                      <input class="form-input" type="date" x-model="entityForm.delaware_incorporated_on" />
+                    </div>
+                    <div class="form-group" style="grid-column:1/-1;">
+                      <label class="form-label" x-text="t('registered_address')"></label>
+                      <input class="form-input" x-model="entityForm.delaware_registered_address" maxlength="1000" />
+                    </div>
+                  </div>
+                  <div class="mt-4">
+                    <button class="btn btn-primary" type="submit" :disabled="entityLoading">
+                      <span x-text="entityLoading ? t('loading') : t('compare_registries')"></span>
+                    </button>
+                  </div>
+                  <div x-show="entityError" class="alert alert-error mt-4" x-text="entityError"></div>
+                </form>
+
+                <div x-show="entityResult" class="card">
+                  <h2 class="card-title" x-text="t('results')"></h2>
+                  <p class="alert alert-info" x-text="entityResult?.delaware_record_notice"></p>
+                  <p class="alert alert-warning" x-text="entityResult?.comparison_notice"></p>
+                  <div class="grid grid-2 gap-4">
+                    <div>
+                      <h3 x-text="t('uk_companies_house_results')"></h3>
+                      <template x-for="(record, index) in (entityResult?.uk_results || [])" :key="record.company_number || index">
+                        <article class="card mb-3">
+                          <h4 x-text="record.name || t('unknown_name')"></h4>
+                          <p><strong x-text="t('uk_company_number') + ': '"></strong><span x-text="record.company_number || '—'"></span></p>
+                          <p><strong x-text="t('status') + ': '"></strong><span x-text="record.status || '—'"></span></p>
+                          <p><strong x-text="t('incorporation_date') + ': '"></strong><span x-text="record.incorporated_on || '—'"></span></p>
+                          <p><strong x-text="t('registered_address') + ': '"></strong><span x-text="record.registered_address || '—'"></span></p>
+                          <a x-show="record.source_url" :href="record.source_url" target="_blank" rel="noopener noreferrer"
+                             x-text="t('open_official_record')"></a>
+                        </article>
+                      </template>
+                      <p x-show="entityResult?.uk_results?.length === 0" class="text-muted" x-text="t('no_results')"></p>
+                    </div>
+                    <div>
+                      <h3 x-text="t('delaware_record')"></h3>
+                      <template x-if="entityResult?.delaware_record">
+                        <article class="card mb-3">
+                          <h4 x-text="entityResult.delaware_record.name || t('unknown_name')"></h4>
+                          <p><strong x-text="t('delaware_entity_number') + ': '"></strong><span x-text="entityResult.delaware_record.company_number || '—'"></span></p>
+                          <p><strong x-text="t('status') + ': '"></strong><span x-text="entityResult.delaware_record.status || '—'"></span></p>
+                          <p><strong x-text="t('incorporation_date') + ': '"></strong><span x-text="entityResult.delaware_record.incorporated_on || '—'"></span></p>
+                          <p><strong x-text="t('registered_address') + ': '"></strong><span x-text="entityResult.delaware_record.registered_address || '—'"></span></p>
+                          <a :href="entityResult.delaware_record.source_url" target="_blank" rel="noopener noreferrer"
+                             x-text="t('open_delaware_search')"></a>
+                        </article>
+                      </template>
+                      <p x-show="entityResult && !entityResult.delaware_record" class="text-muted">
+                        <a :href="entityResult?.delaware_search_url" target="_blank" rel="noopener noreferrer"
+                           x-text="t('open_delaware_search')"></a>
+                      </p>
+                    </div>
+                  </div>
+                  <template x-for="comparison in (entityResult?.comparisons || [])" :key="comparison.uk_company_number">
+                    <p class="badge badge-blue mt-2"
+                       x-text="t('name_similarity') + ': ' + comparison.name_similarity + '% — ' + comparison.interpretation"></p>
+                  </template>
+                </div>
+              </section>
+
+              <section x-show="activeTab === 'cases'" role="tabpanel">
+                <form class="card mb-4" @submit.prevent="searchCases()">
+                  <h2 class="card-title" x-text="t('court_cases')"></h2>
+                  <p class="text-muted mb-4" x-text="t('case_source_note')"></p>
+                  <div class="grid grid-2 gap-4">
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('company_or_case_query')"></label>
+                      <input class="form-input" x-model="caseForm.query" maxlength="200" required />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('result_limit')"></label>
+                      <select class="form-input" x-model.number="caseForm.limit">
+                        <option value="5">5</option><option value="10">10</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="mt-4">
+                    <button class="btn btn-primary" type="submit" :disabled="caseLoading">
+                      <span x-text="caseLoading ? t('loading') : t('search_cases')"></span>
+                    </button>
+                  </div>
+                  <div x-show="caseError" class="alert alert-error mt-4" x-text="caseError"></div>
+                </form>
+
+                <div x-show="caseResult" class="grid grid-2 gap-4">
+                  <section class="card">
+                    <h2 class="card-title" x-text="t('us_court_results')"></h2>
+                    <p x-show="caseResult?.source_status?.US?.error" class="alert alert-warning"
+                       x-text="caseResult?.source_status?.US?.error"></p>
+                    <template x-for="(record, index) in (caseResult?.results?.US || [])" :key="record.source_url || index">
+                      <article class="card mb-3">
+                        <h4>
+                          <a x-show="record.source_url" :href="record.source_url" target="_blank" rel="noopener noreferrer"
+                             x-text="record.case_name || t('unknown_name')"></a>
+                          <span x-show="!record.source_url" x-text="record.case_name || t('unknown_name')"></span>
+                        </h4>
+                        <p x-text="record.court || '—'"></p>
+                        <p><strong x-text="t('date') + ': '"></strong><span x-text="record.date || '—'"></span></p>
+                        <p><strong x-text="t('citations') + ': '"></strong><span x-text="(record.citations || []).join(', ') || '—'"></span></p>
+                        <p><strong x-text="t('docket_number') + ': '"></strong><span x-text="record.docket_number || '—'"></span></p>
+                        <p x-show="record.snippet" class="text-muted" x-text="record.snippet"></p>
+                      </article>
+                    </template>
+                    <p x-show="caseResult && !(caseResult?.results?.US || []).length" class="text-muted" x-text="t('no_results')"></p>
+                  </section>
+                  <section class="card">
+                    <h2 class="card-title" x-text="t('uk_court_results')"></h2>
+                    <p x-show="caseResult?.source_status?.GB?.error" class="alert alert-warning"
+                       x-text="caseResult?.source_status?.GB?.error"></p>
+                    <template x-for="(record, index) in (caseResult?.results?.GB || [])" :key="record.source_url || index">
+                      <article class="card mb-3">
+                        <h4>
+                          <a x-show="record.source_url" :href="record.source_url" target="_blank" rel="noopener noreferrer"
+                             x-text="record.case_name || t('unknown_name')"></a>
+                          <span x-show="!record.source_url" x-text="record.case_name || t('unknown_name')"></span>
+                        </h4>
+                        <p x-text="record.court || '—'"></p>
+                        <p><strong x-text="t('date') + ': '"></strong><span x-text="record.date || '—'"></span></p>
+                        <p><strong x-text="t('neutral_citation') + ': '"></strong><span x-text="record.neutral_citation || '—'"></span></p>
+                      </article>
+                    </template>
+                    <p x-show="caseResult && !(caseResult?.results?.GB || []).length" class="text-muted" x-text="t('no_results')"></p>
+                  </section>
+                  <div class="alert alert-warning" style="grid-column:1/-1" x-text="caseResult?.uk_licensing_notice"></div>
+                  <div class="alert alert-info" style="grid-column:1/-1" x-text="caseResult?.us_query_privacy_notice"></div>
+                </div>
+              </section>
+
+              <section x-show="activeTab === 'regulators'" role="tabpanel">
+                <form class="card mb-4" @submit.prevent="searchRegulators()">
+                  <h2 class="card-title" x-text="t('regulator_records')"></h2>
+                  <p class="text-muted mb-4" x-text="t('regulator_source_note')"></p>
+                  <div class="grid grid-2 gap-4">
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('company_or_case_query')"></label>
+                      <input class="form-input" x-model="regulatorForm.query" maxlength="200" required />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('result_limit')"></label>
+                      <select class="form-input" x-model.number="regulatorForm.limit">
+                        <option value="5">5</option><option value="10">10</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('fca_entity_name')"></label>
+                      <input class="form-input" x-model="regulatorForm.fca_entity_name" maxlength="200" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('fca_reference')"></label>
+                      <input class="form-input" x-model="regulatorForm.fca_reference" maxlength="100" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('fca_action_type')"></label>
+                      <input class="form-input" x-model="regulatorForm.fca_action_type" maxlength="100" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" x-text="t('fca_action_date')"></label>
+                      <input class="form-input" type="date" x-model="regulatorForm.fca_date" />
+                    </div>
+                    <div class="form-group" style="grid-column:1/-1;">
+                      <label class="form-label" x-text="t('fca_summary')"></label>
+                      <textarea class="form-input" x-model="regulatorForm.fca_summary" maxlength="1000" rows="3"></textarea>
+                    </div>
+                    <div class="form-group" style="grid-column:1/-1;">
+                      <label class="form-label" x-text="t('fca_source_url')"></label>
+                      <input class="form-input" type="url" x-model="regulatorForm.fca_source_url" maxlength="512"
+                             placeholder="https://www.fca.org.uk/..." />
+                    </div>
+                  </div>
+                  <div class="mt-4">
+                    <button class="btn btn-primary" type="submit" :disabled="regulatorLoading">
+                      <span x-text="regulatorLoading ? t('loading') : t('search_regulators')"></span>
+                    </button>
+                  </div>
+                  <div x-show="regulatorError" class="alert alert-error mt-4" x-text="regulatorError"></div>
+                </form>
+
+                <div x-show="regulatorResult" class="grid grid-2 gap-4">
+                  <section class="card">
+                    <h2 class="card-title" x-text="t('us_regulator_results')"></h2>
+                    <p x-show="regulatorResult?.source_status?.US?.error" class="alert alert-warning"
+                       x-text="regulatorResult?.source_status?.US?.error"></p>
+                    <template x-for="(record, index) in (regulatorResult?.results?.US || [])" :key="record.source_url || index">
+                      <article class="card mb-3">
+                        <h4>
+                          <a x-show="record.source_url" :href="record.source_url" target="_blank" rel="noopener noreferrer"
+                             x-text="record.title || t('unknown_name')"></a>
+                          <span x-show="!record.source_url" x-text="record.title || t('unknown_name')"></span>
+                        </h4>
+                        <p><strong x-text="t('date') + ': '"></strong><span x-text="record.date || '—'"></span></p>
+                        <p x-show="record.summary" class="text-muted" x-text="record.summary"></p>
+                      </article>
+                    </template>
+                    <p x-show="regulatorResult && !(regulatorResult?.results?.US || []).length" class="text-muted" x-text="t('no_results')"></p>
+                  </section>
+                  <section class="card">
+                    <h2 class="card-title" x-text="t('uk_regulator_results')"></h2>
+                    <template x-if="regulatorResult?.results?.GB">
+                      <article class="card mb-3">
+                        <h4 x-text="regulatorResult.results.GB.entity_name || t('unknown_name')"></h4>
+                        <p><strong x-text="t('fca_reference') + ': '"></strong><span x-text="regulatorResult.results.GB.reference || '—'"></span></p>
+                        <p><strong x-text="t('fca_action_type') + ': '"></strong><span x-text="regulatorResult.results.GB.record_type || '—'"></span></p>
+                        <p><strong x-text="t('date') + ': '"></strong><span x-text="regulatorResult.results.GB.date || '—'"></span></p>
+                        <p x-show="regulatorResult.results.GB.summary" class="text-muted" x-text="regulatorResult.results.GB.summary"></p>
+                        <a x-show="regulatorResult.results.GB.source_url" :href="regulatorResult.results.GB.source_url"
+                           target="_blank" rel="noopener noreferrer" x-text="t('open_official_record')"></a>
+                      </article>
+                    </template>
+                    <p x-show="!regulatorResult?.results?.GB" class="text-muted" x-text="regulatorResult?.fca_record_notice"></p>
+                    <a :href="regulatorResult?.source_status?.GB?.search_url" target="_blank" rel="noopener noreferrer"
+                       x-text="t('open_fca_search')"></a>
+                    <p x-show="regulatorResult?.results?.GB" class="alert alert-warning mt-3"
+                       x-text="regulatorResult?.fca_record_notice"></p>
+                  </section>
+                </div>
+              </section>
+            </div><!-- /legal-research -->
 
           </div><!-- /page-content (moved closing tag) -->
         </main>

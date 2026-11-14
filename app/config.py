@@ -256,6 +256,16 @@ class Settings(BaseSettings):
             "COMPANIES_HOUSE_API_KEY", "ZIRCON_COMPANIES_HOUSE_API_KEY"
         ),
     )
+    courtlistener_api_token: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "COURTLISTENER_API_TOKEN", "ZIRCON_COURTLISTENER_API_TOKEN"
+        ),
+    )
+    sec_user_agent: str = Field(
+        default="",
+        validation_alias=AliasChoices("SEC_USER_AGENT", "ZIRCON_SEC_USER_AGENT"),
+    )
     greynoise_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("GREYNOISE_API_KEY", "ZIRCON_GREYNOISE_API_KEY"),
