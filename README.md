@@ -68,6 +68,11 @@ Social Listening supports Reddit, Google News/RSS, paste sites, X, Telegram, Hab
 
 Use **Snapshots** on a mention to preserve the collected text, author, source link, publication time, capture time, and SHA-256 integrity fingerprint. Snapshots are append-only in the API; open the saved source link to compare the live post with its saved copy. This stores the collected post text, not a rendered-page screenshot or an automatic live-availability check.
 
+### Legal entity registry comparison (initial MVP)
+The authenticated `POST /api/v1/entity-registry/compare` endpoint searches the official Companies House API and can compare a result against Delaware entity details supplied by the user. Configure `COMPANIES_HOUSE_API_KEY` (or `ZIRCON_COMPANIES_HOUSE_API_KEY`) with a key from the [Companies House developer portal](https://developer.company-information.service.gov.uk/). The request accepts a UK company `query` or `uk_company_number`, plus optional `delaware_name`, `delaware_entity_number`, `delaware_status`, `delaware_incorporated_on`, and `delaware_registered_address` fields.
+
+Delaware search is not automated in this MVP: the response links to the official [Delaware Division of Corporations entity search](https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx), and any Delaware details included in the comparison are explicitly marked user-provided and unverified. Name similarity is a triage aid, not proof that two records represent the same legal entity.
+
 ### Docker runtime for vulnerability scanners
 `Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, `nuclei`, `nmap`, and **OWASP ZAP** (`zap-baseline.py`, plus a headless JRE to run it), and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.
 
