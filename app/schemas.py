@@ -210,6 +210,75 @@ class EntityRegistryCompareRequest(BaseModel):
         return self
 
 
+class CaseLawSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=200)
+    limit: int = Field(5, ge=1, le=10)
+
+    @field_validator("query")
+    @classmethod
+    def sanitize_case_law_query(cls, value: str) -> str:
+        from app.utils.sanitize import sanitize_search_query
+        query = sanitize_search_query(value.strip())
+        if not query:
+            raise ValueError("Query must not be blank")
+        return query
+
+
+class RegulatorSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=200)
+    limit: int = Field(5, ge=1, le=10)
+    fca_entity_name: Optional[str] = Field(None, max_length=200)
+    fca_reference: Optional[str] = Field(None, max_length=100)
+    fca_action_type: Optional[str] = Field(None, max_length=100)
+    fca_date: Optional[str] = Field(None, max_length=32)
+    fca_summary: Optional[str] = Field(None, max_length=1000)
+    fca_source_url: Optional[str] = Field(None, max_length=512)
+
+    @field_validator("query")
+    @classmethod
+    def sanitize_regulator_query(cls, value: str) -> str:
+        sanitized = _sanitize(value.strip(), max_length=200)
+        if not sanitized:
+            raise ValueError("Query must not be blank")
+        return sanitized
+
+    @field_validator(
+        "fca_entity_name", "fca_reference", "fca_action_type", "fca_date", "fca_summary",
+    )
+    @classmethod
+    def sanitize_fca_fields(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        sanitized = _sanitize(value.strip(), max_length=1000)
+        return sanitized or None
+
+    @field_validator("fca_source_url")
+    @classmethod
+    def validate_fca_source_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        parsed = urlsplit(value)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("FCA source URL must use an official FCA HTTPS host") from exc
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in {
+            "www.fca.org.uk",
+            "register.fca.org.uk",
+            }
+            or port not in (None, 443)
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError("FCA source URL must use an official FCA HTTPS host")
+        return value
+
+
 class SearchTemplateCreate(BaseModel):
     name: str
     query: str

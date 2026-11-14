@@ -121,7 +121,7 @@ document.addEventListener('alpine:init', () => {
     // Notifications badge
     unreadCount: 0,
 
-    t(key) { return t(key); },
+    t(key) { return t(key, this.lang); },
 
     async init() {
       window._lang = this.lang;
