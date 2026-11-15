@@ -371,6 +371,38 @@ class Notification(Base):
     created_at = Column(DateTime, default=_utcnow)
 
 
+class NazkWatch(Base):
+    __tablename__ = "nazk_watches"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "declarant_id"),
+        UniqueConstraint("owner_id", "workplace_edrpou"),
+    )
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    declarant_id = Column(Integer, nullable=True)
+    workplace_edrpou = Column(String(8), nullable=True)
+    label = Column(String(255), nullable=False)
+    last_attempt = Column(DateTime, nullable=True)
+    last_success = Column(DateTime, nullable=True)
+    last_status = Column(String(20), nullable=False, default="pending")
+    last_error = Column(Text, nullable=True)
+    baseline_complete = Column(Boolean, nullable=False, default=False)
+    lease_until = Column(DateTime, nullable=True)
+    lease_token = Column(String(32), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    documents = relationship("NazkWatchDocument", cascade="all, delete-orphan")
+
+
+class NazkWatchDocument(Base):
+    __tablename__ = "nazk_watch_documents"
+    __table_args__ = (UniqueConstraint("watch_id", "document_id"),)
+    id = Column(Integer, primary_key=True)
+    watch_id = Column(Integer, ForeignKey("nazk_watches.id"), nullable=False, index=True)
+    document_id = Column(String(36), nullable=False)
+    first_seen = Column(DateTime, default=_utcnow)
+    discovered_after_baseline = Column(Boolean, nullable=False, default=False)
+
+
 class WatchedFolder(Base):
     __tablename__ = "watched_folders"
     id = Column(Integer, primary_key=True)

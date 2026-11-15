@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources, social_listening, logo_misuse, infra_intel, lookalike, vulnscan, cti, entity_registry, case_law, regulators
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources, social_listening, logo_misuse, infra_intel, lookalike, vulnscan, cti, entity_registry, case_law, regulators, nazk
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
 _SPA_HTML_CACHE: str = ""
@@ -158,6 +158,7 @@ app.include_router(cti.router, prefix="/api/v1/cti", tags=["cti"])
 app.include_router(entity_registry.router, prefix="/api/v1/entity-registry", tags=["entity-registry"])
 app.include_router(case_law.router, prefix="/api/v1/case-law", tags=["case-law"])
 app.include_router(regulators.router, prefix="/api/v1/regulators", tags=["regulators"])
+app.include_router(nazk.router, prefix="/api/v1/nazk", tags=["nazk"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)

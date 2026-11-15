@@ -224,6 +224,52 @@ class CaseLawSearchRequest(BaseModel):
         return query
 
 
+class NazkSearchRequest(BaseModel):
+    query: Optional[str] = Field(None, max_length=255)
+    workplace_edrpou: Optional[str] = Field(None, pattern=r"^[0-9]{8}$")
+    declarant_id: Optional[int] = Field(None, ge=1, le=10000000)
+    page: int = Field(1, ge=1, le=100)
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def validate_query(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            if len(value) < 3:
+                raise ValueError("Name must contain at least 3 characters")
+        return value
+
+    @model_validator(mode="after")
+    def require_search_filter(self):
+        if not self.query and not self.workplace_edrpou and not self.declarant_id:
+            raise ValueError("Provide a name, declarant ID or workplace EDRPOU code")
+        return self
+
+
+class NazkWatchCreate(BaseModel):
+    declarant_id: Optional[int] = Field(None, ge=1, le=10000000)
+    workplace_edrpou: Optional[str] = Field(None, pattern=r"^[0-9]{8}$")
+    label: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Label must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        if bool(self.declarant_id) == bool(self.workplace_edrpou):
+            raise ValueError("Choose exactly one declarant or workplace")
+        return self
+
+
 class RegulatorSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=200)
     limit: int = Field(5, ge=1, le=10)

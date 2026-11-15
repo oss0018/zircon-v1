@@ -8150,7 +8150,7 @@
                 </div>
               </div>
 
-              <div class="flex gap-2 mb-4" role="tablist">
+              <div class="flex gap-2 mb-4" style="flex-wrap:wrap" role="tablist">
                 <button class="btn btn-sm" :class="activeTab === 'entities' ? 'btn-primary' : 'btn-secondary'"
                         role="tab" :aria-selected="activeTab === 'entities'" @click="activeTab = 'entities'"
                         x-text="t('legal_entities')"></button>
@@ -8160,6 +8160,9 @@
                 <button class="btn btn-sm" :class="activeTab === 'regulators' ? 'btn-primary' : 'btn-secondary'"
                         role="tab" :aria-selected="activeTab === 'regulators'" @click="activeTab = 'regulators'"
                         x-text="t('regulator_records')"></button>
+                <button class="btn btn-sm" :class="activeTab === 'nazk' ? 'btn-primary' : 'btn-secondary'"
+                        role="tab" :aria-selected="activeTab === 'nazk'" @click="activeTab = 'nazk'; loadNazkWatches()"
+                        x-text="t('nazk_tab')"></button>
               </div>
 
               <section x-show="activeTab === 'entities'" role="tabpanel">
@@ -8405,6 +8408,95 @@
                     <p x-show="regulatorResult?.results?.GB" class="alert alert-warning mt-3"
                        x-text="regulatorResult?.fca_record_notice"></p>
                   </section>
+                </div>
+              </section>
+              <section x-show="activeTab === 'nazk'" role="tabpanel">
+                <form class="card mb-4" @submit.prevent="searchNazk()">
+                  <h2 class="card-title" x-text="t('nazk_tab')"></h2>
+                  <p class="text-muted mb-4" x-text="t('nazk_note')"></p>
+                  <div class="grid grid-2 gap-4">
+                    <div class="form-group">
+                      <label class="form-label" for="nazk-name" x-text="t('nazk_name')"></label>
+                      <input id="nazk-name" class="form-input" x-model="nazkForm.query" maxlength="255" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" for="nazk-edrpou" x-text="t('nazk_edrpou')"></label>
+                      <input id="nazk-edrpou" class="form-input" x-model="nazkForm.workplace_edrpou"
+                             inputmode="numeric" maxlength="8" />
+                    </div>
+                  </div>
+                  <button class="btn btn-primary mt-4" type="submit" :disabled="nazkLoading"
+                          x-text="nazkLoading ? t('loading') : t('nazk_search')"></button>
+                  <button class="btn btn-secondary mt-4" type="button"
+                          :disabled="!/^[0-9]{8}$/.test(nazkForm.workplace_edrpou.trim())"
+                          @click="createNazkWatch({workplace_edrpou: nazkForm.workplace_edrpou.trim(), label: nazkForm.workplace_edrpou.trim()})"
+                          x-text="t('nazk_watch_workplace')"></button>
+                  <div x-show="nazkError" class="alert alert-error mt-4" role="alert" x-text="nazkError"></div>
+                </form>
+                <div class="card mb-4">
+                  <h2 class="card-title" x-text="t('nazk_watches')"></h2>
+                  <p class="text-muted" x-text="t('nazk_watch_note')"></p>
+                  <p x-show="nazkWatchError" class="alert alert-error" role="alert" x-text="nazkWatchError"></p>
+                  <p x-show="nazkWatchMessage" class="alert alert-info" x-text="nazkWatchMessage"></p>
+                  <p x-show="!nazkWatches.length" class="text-muted" x-text="t('nazk_no_watches')"></p>
+                  <template x-for="watch in nazkWatches" :key="watch.id">
+                    <article class="card mb-3">
+                      <h4 x-text="watch.label"></h4>
+                      <p x-text="(watch.declarant_id ? t('nazk_declarant_id') + ': ' + watch.declarant_id : t('nazk_edrpou') + ': ' + watch.workplace_edrpou)"></p>
+                      <p x-text="t('nazk_watch_status') + ': ' + (watch.last_status === 'success' ? t('nazk_success') : watch.last_status === 'failed' ? t('nazk_failed') : watch.last_status === 'running' ? t('nazk_running') : t('nazk_pending'))"></p>
+                      <p x-show="watch.last_attempt" x-text="t('nazk_last_attempt') + ': ' + (watch.last_attempt || '')"></p>
+                      <p x-show="watch.last_success" x-text="t('nazk_last_success') + ': ' + (watch.last_success || '')"></p>
+                      <p x-show="watch.last_error" class="alert alert-warning" x-text="watch.last_error"></p>
+                      <p x-text="t('nazk_changes_count') + ': ' + watch.new_count"></p>
+                      <button type="button" class="btn btn-secondary btn-sm" @click="viewNazkWatch(watch)" x-text="t('nazk_view_watch')"></button>
+                      <button type="button" class="btn btn-secondary btn-sm" :disabled="!watch.new_count || nazkChangesLoading"
+                              @click="viewNazkChanges(watch)" x-text="t('nazk_view_changes')"></button>
+                      <button type="button" class="btn btn-secondary btn-sm" @click="deleteNazkWatch(watch)" x-text="t('nazk_remove_watch')"></button>
+                      <template x-if="nazkChangesWatch === watch.id">
+                        <div class="mt-4">
+                          <template x-for="change in nazkChanges" :key="change.document_id">
+                            <p><a :href="change.source_url" target="_blank" rel="noopener noreferrer"
+                                  x-text="change.document_id"></a>
+                              <span x-text="' — ' + t('nazk_detected') + ': ' + change.detected_at"></span></p>
+                          </template>
+                          <button type="button" class="btn btn-secondary btn-sm" :disabled="nazkChangesOffset === 0 || nazkChangesLoading"
+                                  @click="viewNazkChanges(watch, nazkChangesOffset - 50)" x-text="t('nazk_previous')"></button>
+                          <button type="button" class="btn btn-secondary btn-sm"
+                                  :disabled="nazkChangesOffset + 50 >= watch.new_count || nazkChangesLoading"
+                                  @click="viewNazkChanges(watch, nazkChangesOffset + 50)" x-text="t('nazk_next')"></button>
+                        </div>
+                      </template>
+                    </article>
+                  </template>
+                </div>
+                <div x-show="nazkResult" class="card">
+                  <h2 class="card-title" x-text="t('results')"></h2>
+                  <p class="text-muted" x-text="t('nazk_total') + ': ' + (nazkResult?.count ?? 0)"></p>
+                  <p class="alert alert-info" x-text="t('nazk_verify')"></p>
+                  <template x-for="record in (nazkResult?.results || [])" :key="record.id">
+                    <article class="card mb-3">
+                      <h4 x-text="record.name || t('unknown_name')"></h4>
+                      <p><strong x-text="t('nazk_workplace') + ': '"></strong><span x-text="record.workplace || '—'"></span></p>
+                      <p><strong x-text="t('nazk_position') + ': '"></strong><span x-text="record.position || '—'"></span></p>
+                      <p><strong x-text="t('nazk_year') + ': '"></strong><span x-text="record.declaration_year ?? '—'"></span></p>
+                      <p><strong x-text="t('nazk_submitted') + ': '"></strong><span x-text="record.submitted_at || '—'"></span></p>
+                      <p><strong x-text="t('nazk_document_type') + ': '"></strong><span x-text="record.document_type === 1 ? t('nazk_type_declaration') : record.document_type === 2 ? t('nazk_type_changes') : record.document_type === 3 ? t('nazk_type_corrected') : (record.document_type ?? '—')"></span></p>
+                      <a :href="record.source_url" target="_blank" rel="noopener noreferrer" x-text="t('open_official_record')"></a>
+                      <button x-show="record.declarant_id" type="button" class="btn btn-secondary btn-sm"
+                              @click="createNazkWatch({declarant_id: record.declarant_id, label: record.name || String(record.declarant_id)})"
+                              x-text="t('nazk_watch_person')"></button>
+                    </article>
+                  </template>
+                  <p x-show="nazkResult?.results?.length === 0" x-text="t('no_results')"></p>
+                  <div class="flex gap-2 mt-4">
+                    <button type="button" class="btn btn-secondary btn-sm" :disabled="nazkLoading || !nazkResult || nazkResult.page <= 1"
+                            @click="searchNazk(nazkResult.page - 1, true)" x-text="t('nazk_previous')"></button>
+                    <span x-text="t('nazk_page') + ' ' + (nazkResult?.page ?? 1)"></span>
+                    <button type="button" class="btn btn-secondary btn-sm"
+                            :disabled="nazkLoading || !nazkResult || nazkResult.page >= 100 || nazkResult.page * 100 >= nazkResult.count"
+                            @click="searchNazk(nazkResult.page + 1, true)" x-text="t('nazk_next')"></button>
+                  </div>
+                  <p class="text-muted" x-show="nazkResult?.count > 10000" x-text="t('nazk_page_limit')"></p>
                 </div>
               </section>
             </div><!-- /legal-research -->
