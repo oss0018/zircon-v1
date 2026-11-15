@@ -37,6 +37,29 @@ class Base(DeclarativeBase):
     pass
 
 
+def _migrate_nazk_watch_documents(conn) -> None:
+    from sqlalchemy import inspect
+
+    inspector = inspect(conn)
+    if "nazk_watch_documents" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("nazk_watch_documents")}
+        if "discovered_after_baseline" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE nazk_watch_documents "
+                "ADD COLUMN discovered_after_baseline BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+
+
+def _migrate_nazk_watches(conn) -> None:
+    from sqlalchemy import inspect
+
+    inspector = inspect(conn)
+    if "nazk_watches" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("nazk_watches")}
+        if "lease_token" not in columns:
+            conn.exec_driver_sql("ALTER TABLE nazk_watches ADD COLUMN lease_token VARCHAR(32)")
+
+
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
@@ -529,6 +552,8 @@ async def init_db():
     from app import models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_migrate_nazk_watch_documents)
+        await conn.run_sync(_migrate_nazk_watches)
         # Add new columns to existing brand_alerts tables (non-destructive migration)
         await conn.run_sync(_migrate_brand_alerts)
         # Add brand_id to owned_domains if upgrading from older version

@@ -224,6 +224,15 @@ def start_scheduler():
         except Exception as exc:
             print(f"[scheduler] Monitoring scheduler error: {exc}")
 
+    async def _run_nazk_watches():
+        from app.database import AsyncSessionLocal
+        from app.services.nazk_monitoring import run_due_watches
+        try:
+            async with AsyncSessionLocal() as db:
+                await run_due_watches(db)
+        except Exception:
+            logger.exception("NACP watch scheduler failed")
+
     async def _run_social_listening_rules():
         """Run active social listening rules every 15 minutes."""
         try:
@@ -365,6 +374,14 @@ def start_scheduler():
         _run_scheduled_monitoring_jobs,
         IntervalTrigger(minutes=6),
         id="run_monitoring_jobs",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=60,
+    )
+    _scheduler.add_job(
+        _run_nazk_watches,
+        IntervalTrigger(minutes=15),
+        id="run_nazk_watches",
         replace_existing=True,
         max_instances=1,
         misfire_grace_time=60,
