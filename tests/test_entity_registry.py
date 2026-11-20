@@ -177,3 +177,24 @@ def test_compare_endpoint_requires_api_key_and_returns_registry_comparison(monke
     assert data["uk_results"][0]["company_number"] == "01234567"
     assert data["delaware_record"]["source_type"] == "user_supplied"
     assert data["comparisons"][0]["interpretation"] == "strong_textual_similarity"
+
+
+def test_cyprus_manual_record_is_unverified_and_does_not_require_uk_api_key(monkeypatch):
+    client = TestClient(app)
+    assert client.post("/api/v1/entity-registry/cyprus", json={"name": "Example"}).status_code == 401
+    app.dependency_overrides[get_current_user] = lambda: object()
+    monkeypatch.setattr(settings, "companies_house_api_key", "")
+    try:
+        assert client.post("/api/v1/entity-registry/cyprus", json={"status": "active"}).status_code == 422
+        response = client.post("/api/v1/entity-registry/cyprus", json={
+            "name": " Example Ltd ", "company_number": "HE 123", "status": "active",
+        })
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    record = response.json()["record"]
+    assert record["name"] == "Example Ltd"
+    assert record["source_type"] == "user_supplied"
+    assert record["retrieved_at"] is None
+    assert record["source_url"].startswith("https://efiling.drcor.mcit.gov.cy/")
+    assert "not been verified" in response.json()["notice"]
