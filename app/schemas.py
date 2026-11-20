@@ -210,6 +210,27 @@ class EntityRegistryCompareRequest(BaseModel):
         return self
 
 
+class CyprusRegistryRecord(BaseModel):
+    name: Optional[str] = Field(None, max_length=200)
+    company_number: Optional[str] = Field(None, max_length=64)
+    status: Optional[str] = Field(None, max_length=100)
+    incorporated_on: Optional[str] = Field(None, max_length=32)
+    registered_address: Optional[str] = Field(None, max_length=1000)
+
+    @field_validator("name", "company_number", "status", "incorporated_on", "registered_address")
+    @classmethod
+    def clean_fields(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return _sanitize(value.strip(), max_length=1000) or None
+
+    @model_validator(mode="after")
+    def require_identity(self):
+        if not self.name and not self.company_number:
+            raise ValueError("Provide a Cyprus company name or registration number")
+        return self
+
+
 class CaseLawSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=200)
     limit: int = Field(5, ge=1, le=10)

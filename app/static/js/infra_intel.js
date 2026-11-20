@@ -20,12 +20,156 @@ document.addEventListener('alpine:init', () => {
     investigationLoading: false,
     findings: [],
     summaryData: null,
+    evidenceFindingIds: [],
+    evidenceLoading: false,
+
+    async downloadEvidence() {
+      if (!this.selectedInvestigation || !this.evidenceFindingIds.length || this.evidenceFindingIds.length > 200) {
+        showToast('Select 1–200 findings', 'error');
+        return;
+      }
+      this.evidenceLoading = true;
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (api._token()) headers.Authorization = `Bearer ${api._token()}`;
+        const response = await fetch('/api/v1/evidence/infrastructure', {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            investigation_id: this.selectedInvestigation.id,
+            finding_ids: this.evidenceFindingIds.map(Number),
+          }),
+        });
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(typeof error.detail === 'string' ? error.detail : 'Evidence export failed');
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `infrastructure-evidence-${this.selectedInvestigation.id}.zip`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.evidenceLoading = false;
+      }
+    },
 
     // UI state
     activeTab: 'list',         // 'list' | 'new' | 'detail'
     activeDetailTab: 'all',    // 'all' | 'dns' | 'network' | 'cert' | 'cloud'
     submitLoading: false,
     pollingTimer: null,
+    graphCompanies: [
+      { name: '', investigationIds: [] },
+      { name: '', investigationIds: [] },
+    ],
+    graphInvestigations: [],
+    graphResult: null,
+    graphLoading: false,
+    walletWatches: [],
+    walletChain: 'btc',
+    walletAddress: '',
+    walletLabel: '',
+    walletChanges: null,
+    walletChangesOffset: 0,
+    walletSelectedId: null,
+
+    async openWalletWatches() {
+      this.activeTab = 'wallets';
+      try {
+        this.walletWatches = await api.get('/wallet-monitoring/watches');
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    },
+
+    async createWalletWatch() {
+      if (!this.walletAddress.trim() || !this.walletLabel.trim()) {
+        showToast('Enter a label and wallet address', 'error');
+        return;
+      }
+      try {
+        await api.post('/wallet-monitoring/watches', {
+          chain: this.walletChain, address: this.walletAddress.trim(), label: this.walletLabel.trim(),
+        });
+        this.walletAddress = '';
+        this.walletLabel = '';
+        await this.openWalletWatches();
+        showToast('Wallet watch saved', 'success');
+      } catch (e) {
+        showToast(e.message === '[object Object]' ? 'Check the address format for the selected network' : e.message, 'error');
+      }
+    },
+
+    async showWalletChanges(id, offset = 0) {
+      try {
+        this.walletChanges = await api.get(`/wallet-monitoring/watches/${id}/changes?offset=${offset}`);
+        this.walletSelectedId = id;
+        this.walletChangesOffset = offset;
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    },
+
+    async deleteWalletWatch(id) {
+      if (!confirm(t('confirm_delete'))) return;
+      try {
+        await api.delete(`/wallet-monitoring/watches/${id}`);
+        if (this.walletSelectedId === id) this.walletChanges = null;
+        await this.openWalletWatches();
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    },
+
+    async openConnections() {
+      this.activeTab = 'connections';
+      this.graphInvestigations = [];
+      try {
+        let offset = 0;
+        let page;
+        do {
+          page = await api.get(`/infra/investigations?limit=200&offset=${offset}`);
+          this.graphInvestigations.push(...page.filter(inv => inv.status === 'completed'));
+          offset += page.length;
+        } while (page.length === 200);
+      } catch (e) {
+        this.graphInvestigations = [];
+        showToast(e.message, 'error');
+      }
+    },
+
+    async buildConnections() {
+      this.graphResult = null;
+      const names = this.graphCompanies.map(company => company.name.trim().toLowerCase());
+      if (names.some(name => !name) || new Set(names).size !== names.length) {
+        showToast('Enter a distinct name for each company', 'error');
+        return;
+      }
+      if (this.graphCompanies.some(company => !company.investigationIds.length || company.investigationIds.length > 50)) {
+        showToast('Select 1–50 investigations per company', 'error');
+        return;
+      }
+      if (new Set(this.graphCompanies.flatMap(company => company.investigationIds)).size > 100) {
+        showToast('Select at most 100 distinct investigations', 'error');
+        return;
+      }
+      this.graphLoading = true;
+      try {
+        this.graphResult = await api.post('/company-connections/graph', {
+          companies: this.graphCompanies.map(company => ({
+            name: company.name.trim(),
+            investigation_ids: company.investigationIds.map(Number),
+          })),
+        });
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.graphLoading = false;
+      }
+    },
 
     async init() {
       await this.loadInvestigations();
@@ -96,6 +240,7 @@ document.addEventListener('alpine:init', () => {
           ...detail,
         };
         this.findings = detail.findings || [];
+        this.evidenceFindingIds = [];
         this.activeDetailTab = 'all';
         this.activeTab = 'detail';
         if (detail.status === 'running' || detail.status === 'pending') {

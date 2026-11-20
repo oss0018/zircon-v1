@@ -13,6 +13,10 @@ document.addEventListener('alpine:init', () => {
     entityResult: null,
     entityLoading: false,
     entityError: '',
+    cyprusForm: { name: '', company_number: '', status: '', incorporated_on: '', registered_address: '' },
+    cyprusResult: null,
+    cyprusLoading: false,
+    cyprusError: '',
     caseForm: { query: '', limit: 5 },
     caseResult: null,
     caseLoading: false,
@@ -44,6 +48,26 @@ document.addEventListener('alpine:init', () => {
     nazkChangesLoading: false,
 
     init() {},
+
+    async prepareCyprusRecord() {
+      const body = Object.fromEntries(Object.entries(this.cyprusForm).map(
+        ([key, value]) => [key, value.trim() || null],
+      ));
+      if (!body.name && !body.company_number) {
+        this.cyprusError = t('cyprus_identity_required');
+        return;
+      }
+      this.cyprusLoading = true;
+      this.cyprusResult = null;
+      this.cyprusError = '';
+      try {
+        this.cyprusResult = await api.post('/entity-registry/cyprus', body);
+      } catch (error) {
+        this.cyprusError = error.message || t('request_failed');
+      } finally {
+        this.cyprusLoading = false;
+      }
+    },
 
     async compareEntities() {
       const body = Object.fromEntries(

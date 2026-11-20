@@ -6658,7 +6658,98 @@
                       <button class="btn btn-sm"
                               :class="activeTab === 'list' ? 'btn-primary' : 'btn-secondary'"
                               @click="activeTab = 'list'; loadInvestigations()">Investigations</button>
+                      <button class="btn btn-sm"
+                              :class="activeTab === 'connections' ? 'btn-primary' : 'btn-secondary'"
+                              @click="openConnections()">Company connections</button>
+                      <button class="btn btn-sm"
+                              :class="activeTab === 'wallets' ? 'btn-primary' : 'btn-secondary'"
+                              @click="openWalletWatches()">Wallet watches</button>
                     </div>
+                  </div>
+
+                  <div x-show="activeTab === 'connections'" class="card mb-4">
+                    <div class="card-title">Company connection graph</div>
+                    <p class="text-sm">Assign completed infrastructure investigations to each company. Assignments are not verified and are not saved.</p>
+                    <template x-for="(company, index) in graphCompanies" :key="index">
+                      <div class="form-group">
+                        <label class="form-label" :for="'graph-name-' + index" x-text="'Company ' + (index + 1)"></label>
+                        <input class="form-input" :id="'graph-name-' + index" x-model="company.name" @input="graphResult = null" maxlength="200" placeholder="Company name" />
+                        <label class="form-label" :for="'graph-investigations-' + index">Completed investigations (select one or more)</label>
+                        <select class="form-select" :id="'graph-investigations-' + index" x-model="company.investigationIds" @change="graphResult = null" multiple size="5">
+                          <template x-for="inv in graphInvestigations" :key="inv.id">
+                            <option :value="String(inv.id)" x-text="'#' + inv.id + ' — ' + inv.target + ' (' + inv.target_type + ')'"></option>
+                          </template>
+                        </select>
+                        <button class="btn btn-sm btn-secondary" x-show="graphCompanies.length > 2" @click="graphCompanies.splice(index, 1); graphResult = null">Remove company</button>
+                      </div>
+                    </template>
+                    <div class="flex gap-2">
+                      <button class="btn btn-sm btn-secondary" :disabled="graphCompanies.length >= 20" @click="graphCompanies.push({ name: '', investigationIds: [] }); graphResult = null">Add company</button>
+                      <button class="btn btn-sm btn-primary" :disabled="graphLoading" @click="buildConnections()" x-text="graphLoading ? 'Building…' : 'Build graph'"></button>
+                    </div>
+                    <template x-if="graphResult">
+                      <div class="mt-4">
+                        <p class="text-sm" x-text="graphResult.notice"></p>
+                        <p class="text-sm" x-show="graphResult.shared_indicators.length === 0">No shared indicators found in the selected investigations.</p>
+                        <template x-for="indicator in graphResult.shared_indicators" :key="indicator.type + ':' + indicator.value">
+                          <div class="card mb-4">
+                            <strong x-text="indicator.type + ': ' + indicator.value"></strong>
+                            <template x-for="connection in indicator.companies" :key="connection.company_index">
+                              <div style="margin-top:8px;">
+                                <span aria-hidden="true">↳ </span><strong x-text="graphResult.companies[connection.company_index].name"></strong>
+                                <template x-for="(item, evidenceIndex) in connection.evidence" :key="evidenceIndex">
+                                  <div class="text-sm" style="margin-left:20px;">
+                                    <button class="btn btn-sm btn-secondary" @click="loadInvestigationDetail(item.investigation_id)" x-text="'Investigation #' + item.investigation_id"></button>
+                                    <span x-text="(item.finding_id ? 'finding #' + item.finding_id : 'assigned target') + ' · ' + item.finding_type + ' · ' + (item.source || 'unknown source') + ' · recorded ' + (item.recorded_at || 'unknown time')"></span>
+                                  </div>
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div x-show="activeTab === 'wallets'" class="card mb-4">
+                    <div class="card-title">Wallet watches</div>
+                    <p class="text-sm">Addresses are sent to Blockstream (BTC) or TronGrid (USDT TRC-20). Daily checks use confirmed transactions; the first complete check is a baseline without alerts. Notifications are shared but do not include wallet details.</p>
+                    <div class="form-group">
+                      <label class="form-label" for="wallet-label">Label</label>
+                      <input id="wallet-label" class="form-input" x-model="walletLabel" maxlength="255" />
+                      <label class="form-label" for="wallet-chain">Network</label>
+                      <select id="wallet-chain" class="form-select" x-model="walletChain">
+                        <option value="btc">Bitcoin</option>
+                        <option value="usdt_trc20">USDT on TRON</option>
+                      </select>
+                      <label class="form-label" for="wallet-address">Address</label>
+                      <input id="wallet-address" class="form-input" x-model="walletAddress" maxlength="100" />
+                      <button class="btn btn-sm btn-primary" @click="createWalletWatch()">Add watch</button>
+                    </div>
+                    <template x-for="watch in walletWatches" :key="watch.id">
+                      <div class="card mb-4">
+                        <strong x-text="watch.label"></strong>
+                        <span class="text-sm" x-text="watch.chain + ' · ' + watch.address"></span>
+                        <div class="text-sm" x-text="'Status: ' + watch.last_status + (watch.last_error ? ' — ' + watch.last_error : '')"></div>
+                        <div class="text-sm" x-text="'Last successful check: ' + (watch.last_success || 'none')"></div>
+                        <button class="btn btn-sm btn-secondary" @click="showWalletChanges(watch.id)">View new transactions</button>
+                        <button class="btn btn-sm btn-secondary" @click="deleteWalletWatch(watch.id)">Remove</button>
+                      </div>
+                    </template>
+                    <template x-if="walletChanges !== null">
+                      <div>
+                        <div class="card-title">Transactions detected after baseline</div>
+                        <p x-show="walletChanges.length === 0" class="text-sm">No transactions on this page.</p>
+                        <template x-for="tx in walletChanges" :key="tx.transaction_id">
+                          <div class="text-sm">
+                            <a :href="tx.source_url" target="_blank" rel="noopener noreferrer" x-text="tx.transaction_id"></a>
+                            <span x-text="' · detected ' + tx.detected_at"></span>
+                          </div>
+                        </template>
+                        <button class="btn btn-sm btn-secondary" :disabled="walletChangesOffset === 0" @click="showWalletChanges(walletSelectedId, Math.max(0, walletChangesOffset - 50))">Previous</button>
+                        <button class="btn btn-sm btn-secondary" :disabled="walletChanges.length < 50" @click="showWalletChanges(walletSelectedId, walletChangesOffset + 50)">Next</button>
+                      </div>
+                    </template>
                   </div>
 
                   <div x-show="activeTab === 'new'" class="card mb-4">
@@ -6815,10 +6906,17 @@
                   </div>
 
                   <div class="card" style="padding:0;">
+                    <div style="padding:16px;">
+                      <p class="text-sm">Select findings to export platform records and a SHA-256 manifest. The unsigned export does not establish authenticity, chain of custody or legal admissibility.</p>
+                      <button class="btn btn-sm btn-secondary" :disabled="evidenceLoading || !evidenceFindingIds.length || evidenceFindingIds.length > 200" @click="downloadEvidence()">
+                        Export selected evidence (<span x-text="evidenceFindingIds.length"></span>)
+                      </button>
+                    </div>
                     <div class="table-wrapper">
                       <table>
                         <thead>
                           <tr>
+                            <th>Export</th>
                             <th>Severity</th>
                             <th>Module</th>
                             <th>Type</th>
@@ -6830,13 +6928,14 @@
                         </thead>
                         <tbody>
                           <template x-if="investigationLoading">
-                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
+                            <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted);">Loading...</td></tr>
                           </template>
                           <template x-if="!investigationLoading && filteredFindings().length === 0">
-                            <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr>
+                            <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted);">No findings.</td></tr>
                           </template>
                           <template x-for="finding in filteredFindings()" :key="finding.id">
                             <tr>
+                              <td><input type="checkbox" :value="String(finding.id)" x-model="evidenceFindingIds" :aria-label="'Select finding ' + finding.id" /></td>
                               <td>
                                 <span class="badge"
                                       :class="severityClass(finding.severity)"
@@ -8252,6 +8351,45 @@
                        x-text="t('name_similarity') + ': ' + comparison.name_similarity + '% — ' + comparison.interpretation"></p>
                   </template>
                 </div>
+                <form class="card mt-4" @submit.prevent="prepareCyprusRecord()">
+                  <h2 class="card-title" x-text="t('cyprus_registry')"></h2>
+                  <p class="text-muted" x-text="t('cyprus_note')"></p>
+                  <a href="https://efiling.drcor.mcit.gov.cy/DrcorPublic/SearchForm.aspx?sc=0&amp;cultureInfo=en-AU" target="_blank" rel="noopener noreferrer" x-text="t('cyprus_search')"></a>
+                  <div class="grid grid-2 gap-4 mt-4">
+                    <div class="form-group">
+                      <label class="form-label" for="cyprus-name" x-text="t('cyprus_name')"></label>
+                      <input id="cyprus-name" class="form-input" x-model="cyprusForm.name" @input="cyprusResult = null" maxlength="200" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" for="cyprus-number" x-text="t('cyprus_number')"></label>
+                      <input id="cyprus-number" class="form-input" x-model="cyprusForm.company_number" @input="cyprusResult = null" maxlength="64" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" for="cyprus-status" x-text="t('status')"></label>
+                      <input id="cyprus-status" class="form-input" x-model="cyprusForm.status" @input="cyprusResult = null" maxlength="100" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" for="cyprus-date" x-text="t('incorporation_date')"></label>
+                      <input id="cyprus-date" class="form-input" type="date" x-model="cyprusForm.incorporated_on" @input="cyprusResult = null" />
+                    </div>
+                    <div class="form-group" style="grid-column:1/-1">
+                      <label class="form-label" for="cyprus-address" x-text="t('registered_address')"></label>
+                      <input id="cyprus-address" class="form-input" x-model="cyprusForm.registered_address" @input="cyprusResult = null" maxlength="1000" />
+                    </div>
+                  </div>
+                  <button class="btn btn-primary" type="submit" :disabled="cyprusLoading" x-text="t('cyprus_prepare')"></button>
+                  <div x-show="cyprusError" class="alert alert-error mt-4" x-text="cyprusError"></div>
+                  <template x-if="cyprusResult">
+                    <div class="mt-4">
+                      <p class="alert alert-warning" x-text="t('cyprus_unverified')"></p>
+                      <p><strong x-text="t('cyprus_name') + ': '"></strong><span x-text="cyprusResult.record.name || '—'"></span></p>
+                      <p><strong x-text="t('cyprus_number') + ': '"></strong><span x-text="cyprusResult.record.company_number || '—'"></span></p>
+                      <p><strong x-text="t('status') + ': '"></strong><span x-text="cyprusResult.record.status || '—'"></span></p>
+                      <p><strong x-text="t('incorporation_date') + ': '"></strong><span x-text="cyprusResult.record.incorporated_on || '—'"></span></p>
+                      <p><strong x-text="t('registered_address') + ': '"></strong><span x-text="cyprusResult.record.registered_address || '—'"></span></p>
+                    </div>
+                  </template>
+                </form>
               </section>
 
               <section x-show="activeTab === 'cases'" role="tabpanel">
