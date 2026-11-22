@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.config import settings
 from app.database import init_db
-from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources, social_listening, logo_misuse, infra_intel, lookalike, vulnscan, cti, entity_registry, case_law, regulators, nazk
+from app.api import auth, files, search, integrations, monitoring, brand_protection, watchlist, dashboard, cve, deep_search, threat_intel, ti_dashboards, impersonation, storage_sources, social_listening, logo_misuse, infra_intel, lookalike, vulnscan, cti, entity_registry, case_law, regulators, nazk, ukraine_registry
 from app.api import company_connections, infrastructure_evidence, wallet_monitoring
 from app.middleware.security_headers import SecurityHeadersMiddleware
 
@@ -27,14 +27,15 @@ async def create_default_admin():
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).where(User.username == "admin"))
         if not result.scalar_one_or_none():
+            initial_password = settings.initial_admin_password or "zircon2026"
             admin = User(
                 username="admin",
-                password_hash=hash_password("zircon2026"),
+                password_hash=hash_password(initial_password),
                 role="admin",
             )
             db.add(admin)
             await db.commit()
-            print("[init] Default admin user created: admin / zircon2026")
+            print("[init] Admin user created")
 
 
 def start_http_redirect(http_port: int, https_port: int):
@@ -83,7 +84,8 @@ async def lifespan(app: FastAPI):
     from app.services.scheduler import start_scheduler
     start_scheduler()
 
-    start_http_redirect(settings.http_port, settings.https_port)
+    if settings.http_port:
+        start_http_redirect(settings.http_port, settings.https_port)
 
     # Auto-register leaked_accounts as watched folder
     from app.models import WatchedFolder
@@ -163,6 +165,7 @@ app.include_router(entity_registry.router, prefix="/api/v1/entity-registry", tag
 app.include_router(case_law.router, prefix="/api/v1/case-law", tags=["case-law"])
 app.include_router(regulators.router, prefix="/api/v1/regulators", tags=["regulators"])
 app.include_router(nazk.router, prefix="/api/v1/nazk", tags=["nazk"])
+app.include_router(ukraine_registry.router, prefix="/api/v1/ukraine-registry", tags=["ukraine-registry"])
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)

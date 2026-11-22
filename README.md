@@ -29,7 +29,20 @@ cd zircon-v1
 python start.py
 ```
 
-The launcher will:
+### Local-network test deployment
+
+The source package can run on a Windows or Linux server with Python 3.11 or 3.12 and internet access to install the dependencies. Linux also needs the system `libmagic` library. This is a test deployment, not a hardened internet-facing service.
+
+1. Extract the package on the server, open a terminal in its root, and create a virtual environment with `python -m venv .venv` (on Linux use `python3` if necessary).
+2. Activate it (`.venv\Scripts\Activate.ps1` on PowerShell, or `source .venv/bin/activate` on Linux), then run `python -m pip install -r requirements.txt`.
+3. Run `python deploy/local_server.py --bind 192.168.1.10`, replacing the example with the server's actual private IP. Use `127.0.0.1` for access only on the server. Allow TCP port 8443 only from trusted local devices in the server firewall. The server runs until stopped with Ctrl+C.
+4. Open `https://<server-ip>:8443` and sign in as `admin`. The initial password is stored in `local-data/initial-admin-password.txt` on the server; change it under **Settings → Profile**. The file remains the initial password, not the current password after a change.
+
+On first start, the launcher creates a self-signed certificate for that bind address and private, persistent keys and data under `local-data`. A browser will warn because the certificate is not trusted. For sensitive data or real API credentials, install a certificate trusted by your devices for that address in `local-data/cert.pem` and its matching private key in `local-data/key.pem`; do not bypass certificate warnings. If the IP changes, install a certificate covering the new address before restarting. Protect the directory with OS file permissions, especially if using an existing data directory. Back up `local-data` securely with the server stopped; keep its keys protected separately from other backups. It contains credentials and must not be included in a source package.
+
+The Ukrainian company source starts empty: an administrator must import an official snapshot under **Legal & Regulatory → Ukrainian companies**. This package does not connect the NAIS API or implement addresses, automatic API polling, or the paid-request cap. Data imported into a temporary preview is not included.
+
+The `start.py` launcher will:
 1. Create a virtual environment
 2. Install all dependencies
 3. Generate a self-signed SSL certificate
@@ -100,6 +113,21 @@ The authenticated `POST /api/v1/regulators/search` endpoint searches matching re
 In **Legal & Regulatory → Ukraine declarations**, search the [NACP public declaration register](https://public.nazk.gov.ua/public_api) by declarant name and/or the workplace's eight-digit EDRPOU code. The authenticated `POST /api/v1/nazk/search` accepts `query`, `workplace_edrpou`, `declarant_id`, and `page` (1–100). Results provide limited metadata and a link to the original document; Zircon does not store the declarations. Queries are sent to NACP and should not contain confidential information. NACP may restrict access or coverage, and names are not unique: verify identity and context in the source before drawing conclusions.
 
 Save a watch from a declarant result or workplace code for daily checks. The first successful complete check stores a baseline of document IDs without notifications; later newly seen IDs create an in-app notification and appear as links under the relevant watch. These counts are cumulative since the baseline, not unread alerts. Watches are owner-specific, but in-app notifications are shared across users and intentionally omit watch details. Checks requiring more than 100 pages, detected incomplete or changing results, timeouts, and source errors are reported as failed without advancing the baseline. NACP results can change during pagination without being detected. Daily polling and NACP availability mean this is not real-time or a guarantee of complete coverage; inspect the last successful check and verify matches in the original source.
+
+### Ukrainian company snapshots
+An administrator can import a ZIP containing the official UO company XML, or the company XML alone, through **Legal & Regulatory → Ukrainian companies**, and enable or disable that source. Search matches names or exact identifiers. The uploaded file and its date are user-supplied and not independently verified; results may be outdated. The current official company XML does not contain addresses. Imports replace the prior snapshot atomically and require a newer date; allow substantial database and temporary storage, a sufficiently long request timeout, and keep the page open until import finishes. A long import can block other database writes. The compressed file upload is limited to 2 GiB and the UO member to 12 GiB.
+
+Users can watch a company selected from search. Each successful newer import compares its name, short name, status and signatories to the immediately preceding snapshot and records differences in the owner's watch. Shared notifications omit watch details. Missing companies are shown as missing, not deregistered; changes cannot be compared across snapshots where the company is absent. Monitoring happens on import, not continuously, and depends on snapshots being complete and authentic. An independently switchable live API source is not implemented yet.
+
+The official file can contain records without an EDRPOU, nonstandard identifiers, and multiple different records with the same EDRPOU. These records remain searchable; the import response and source status count missing and nonstandard identifiers. Watches require a unique eight-digit EDRPOU; comparisons are skipped when the code is missing or ambiguous in either snapshot. Identifiers are retained as supplied, not padded or corrected.
+
+[NAIS publishes the snapshot](https://nais.gov.ua/m/ediniy-derjavniy-reestr-yuridichnih-osib-fizichnih-osib-pidpriemtsiv-ta-gromadskih-formuvan) periodically. Its separate [official EDR API](https://nais.gov.ua/p/ediniy-derjavniy-reestr-yuridichnih-osib-fizichnih-osib-pidpriemtsiv-ta-gromadskih-formuvan) documents an optional address in detailed records, but requires registration and an API token; detailed requests are subject to subscription charges and limits. It is not connected to this module. The requested API monitoring policy is daily checks with a maximum of 100 automatic detail requests per day; that policy is not yet implemented.
+
+Administrators can store or remove a NAIS API host and token under **Settings → NAIS EDR API**. This only saves configuration: it does not test or connect the API or start monitoring. The default host is the NAIS test environment; enter the production host supplied by NAIS when appropriate. Token storage requires a valid, persistent `ZIRCON_ENCRYPTION_KEY` Fernet key; keep it unchanged across restarts and back up the key separately from the database.
+
+For a later server deployment, the repository provides a Docker Compose stack, but it is not a zero-configuration production deployment. Prepare the host and `.env`, set unique persistent application and encryption keys, change the default administrator password, restrict network exposure, and configure trusted HTTPS before entering real credentials. Back up the database volume and encryption key separately, and plan storage and request timeouts for large imports. The current company changes must also be published to the deployment source before a remote host can run them.
+
+An isolated SQLite import of the 16 November 2026 NAIS archive retained 2,023,312 UO records, including 150 without identifiers and 25 with nonstandard identifiers. That archive contained 25,070 groups of duplicate identifiers. A second import of the same archive with a simulated newer date retained all records and produced no false watch alert. Each import took about seven minutes and used approximately 1.1 GB for the resulting database on the test machine, excluding upload and transaction storage; production requirements and timings will vary.
 
 ### Docker runtime for vulnerability scanners
 `Dockerfile` is now the root image used by `docker-compose.yml`. It installs `testssl.sh`, `nikto`, `nuclei`, `nmap`, and **OWASP ZAP** (`zap-baseline.py`, plus a headless JRE to run it), and bootstraps Nuclei templates into `/opt/nuclei-templates` on first container start. The compose stack shares that templates directory through the `nuclei_templates` volume so the app and Celery workers reuse the same template cache.

@@ -6,3 +6,4 @@ key.pem
 .venv/
 data/db/
 data/index/
+local-data/

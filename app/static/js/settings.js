@@ -35,6 +35,10 @@ document.addEventListener('alpine:init', () => {
     telegramTokenConfigured: false,
     notifLoading: false,
     notifSaveLoading: false,
+    naisApi: { base_url: '', token: '', token_configured: false },
+    naisApiLoaded: false,
+    naisApiBusy: false,
+    naisApiError: '',
 
     // System
     systemInfo: null,
@@ -43,7 +47,7 @@ document.addEventListener('alpine:init', () => {
     clearCacheLoading: false,
 
     isAdmin() {
-      return window._currentUser?.role === 'admin';
+      return this.currentUser?.role === 'admin';
     },
 
     async init() {
@@ -55,6 +59,54 @@ document.addEventListener('alpine:init', () => {
       if (tab === 'users' && this.isAdmin()) await this.loadUsers();
       if (tab === 'watched_folders') await this.loadFolders();
       if (tab === 'system') await this.loadSystemInfo();
+      if (tab === 'nais_api' && this.isAdmin()) await this.loadNaisApiSettings();
+    },
+
+    async loadNaisApiSettings() {
+      this.naisApiBusy = true;
+      this.naisApiError = '';
+      try {
+        const data = await api.get('/ukraine-registry/api-settings');
+        this.naisApi = { base_url: data.base_url, token: '', token_configured: data.token_configured };
+        this.naisApiLoaded = true;
+      } catch (e) {
+        this.naisApiLoaded = false;
+        this.naisApiError = e.message || t('request_failed');
+      } finally {
+        this.naisApiBusy = false;
+      }
+    },
+
+    async saveNaisApiSettings() {
+      if (this.naisApiBusy || !this.naisApiLoaded) return;
+      this.naisApiBusy = true;
+      this.naisApiError = '';
+      try {
+        const payload = { base_url: this.naisApi.base_url };
+        if (this.naisApi.token) payload.token = this.naisApi.token;
+        const data = await api.put('/ukraine-registry/api-settings', payload);
+        this.naisApi = { base_url: data.base_url, token: '', token_configured: data.token_configured };
+        showToast(t('success'), 'success');
+      } catch (e) {
+        this.naisApiError = e.message || t('request_failed');
+      } finally {
+        this.naisApiBusy = false;
+      }
+    },
+
+    async removeNaisApiSettings() {
+      if (this.naisApiBusy || !confirm(t('confirm_delete'))) return;
+      this.naisApiBusy = true;
+      this.naisApiError = '';
+      try {
+        await api.delete('/ukraine-registry/api-settings');
+        this.naisApi = { base_url: 'https://edr-api.edu.nais.gov.ua', token: '', token_configured: false };
+        showToast(t('success'), 'success');
+      } catch (e) {
+        this.naisApiError = e.message || t('request_failed');
+      } finally {
+        this.naisApiBusy = false;
+      }
     },
 
     // ── Profile ───────────────────────────────────────────────────────────

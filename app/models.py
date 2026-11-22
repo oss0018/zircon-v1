@@ -371,6 +371,54 @@ class Notification(Base):
     created_at = Column(DateTime, default=_utcnow)
 
 
+class UkraineRegistryState(Base):
+    __tablename__ = "ukraine_registry_state"
+    id = Column(Integer, primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    snapshot_date = Column(String(10), nullable=True)
+    imported_at = Column(DateTime, nullable=True)
+    company_count = Column(Integer, nullable=False, default=0)
+    missing_edrpou_count = Column(Integer, nullable=False, default=0)
+    invalid_edrpou_count = Column(Integer, nullable=False, default=0)
+
+
+class UkraineRegistryApiSettings(Base):
+    __tablename__ = "ukraine_registry_api_settings"
+    id = Column(Integer, primary_key=True)
+    base_url = Column(String(512), nullable=False)
+    token_encrypted = Column(Text, nullable=False)
+
+
+class UkraineRegistryCompany(Base):
+    __tablename__ = "ukraine_registry_company_records"
+    id = Column(Integer, primary_key=True)
+    edrpou = Column(Text, nullable=True, index=True)
+    name = Column(Text, nullable=False)
+    short_name = Column(Text, nullable=False)
+    name_search = Column(Text, nullable=False)
+    status = Column(Text, nullable=False)
+    signatories_json = Column(Text, nullable=False)
+
+
+class UkraineCompanyWatch(Base):
+    __tablename__ = "ukraine_company_watches"
+    __table_args__ = (UniqueConstraint("owner_id", "edrpou"),)
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    edrpou = Column(String(8), nullable=False, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    changes = relationship("UkraineCompanyChange", cascade="all, delete-orphan")
+
+
+class UkraineCompanyChange(Base):
+    __tablename__ = "ukraine_company_changes"
+    id = Column(Integer, primary_key=True)
+    watch_id = Column(Integer, ForeignKey("ukraine_company_watches.id"), nullable=False, index=True)
+    snapshot_date = Column(String(10), nullable=False)
+    fields_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class NazkWatch(Base):
     __tablename__ = "nazk_watches"
     __table_args__ = (

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     app_name: str = "Zircon FRT"
     secret_key: str = "change-me-in-production-min-32-chars!!"
+    initial_admin_password: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
 
