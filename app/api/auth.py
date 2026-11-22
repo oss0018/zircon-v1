@@ -5,11 +5,11 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 import bcrypt
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.config import settings
 from app.database import get_db
-from app.models import User
+from app.models import EvidenceArchive, User
 from app.schemas import Token, UserCreate, UserOut, LoginRequest
 
 router = APIRouter()
@@ -116,10 +116,18 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db),
         raise HTTPException(status_code=403, detail="Admin only")
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    locked = await db.execute(update(User).where(User.id == user_id).values(username=User.username)
+                              .execution_options(synchronize_session=False))
+    if not locked.rowcount:
+        raise HTTPException(status_code=404, detail="Not found")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Not found")
+    if (await db.execute(select(EvidenceArchive.id).where(
+        EvidenceArchive.owner_id == user_id,
+    ).limit(1))).scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Cannot delete an account that owns saved evidence packages")
     await db.delete(user)
     await db.commit()
     return {"ok": True}

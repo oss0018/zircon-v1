@@ -1,5 +1,6 @@
 from sqlalchemy import (
     JSON,
+    LargeBinary,
     Column,
     Integer,
     String,
@@ -478,6 +479,26 @@ class WalletWatchTransaction(Base):
     transaction_id = Column(String(64), nullable=False)
     first_seen = Column(DateTime, default=_utcnow)
     discovered_after_baseline = Column(Boolean, nullable=False, default=False)
+
+
+class EvidenceArchive(Base):
+    __tablename__ = "evidence_archives"
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    investigation_id = Column(Integer, nullable=False)
+    archive_bytes = Column(LargeBinary, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+
+class EvidenceCustodyEvent(Base):
+    __tablename__ = "evidence_custody_events"
+    id = Column(Integer, primary_key=True)
+    archive_id = Column(Integer, ForeignKey("evidence_archives.id"), nullable=False, index=True)
+    actor_id = Column(Integer, nullable=False)
+    actor_username = Column(String(50), nullable=False)
+    action = Column(String(32), nullable=False)
+    recorded_at = Column(DateTime, nullable=False, default=_utcnow)
 
 
 class WatchedFolder(Base):

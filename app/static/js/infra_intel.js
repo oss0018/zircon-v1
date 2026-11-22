@@ -22,6 +22,75 @@ document.addEventListener('alpine:init', () => {
     summaryData: null,
     evidenceFindingIds: [],
     evidenceLoading: false,
+    savedEvidence: [],
+    savedEvidenceOffset: 0,
+    evidenceEvents: null,
+    evidenceEventsOffset: 0,
+    evidenceEventsPackage: null,
+
+    async saveEvidence() {
+      if (!this.selectedInvestigation || !this.evidenceFindingIds.length || this.evidenceFindingIds.length > 200) {
+        showToast('Select 1–200 findings', 'error');
+        return;
+      }
+      this.evidenceLoading = true;
+      try {
+        await api.post('/evidence/packages', {
+          investigation_id: this.selectedInvestigation.id,
+          finding_ids: this.evidenceFindingIds.map(Number),
+        });
+        showToast('Evidence package saved', 'success');
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.evidenceLoading = false;
+      }
+    },
+
+    async openEvidencePackages(offset = 0) {
+      this.activeTab = 'evidence';
+      try {
+        this.savedEvidence = await api.get(`/evidence/packages?offset=${offset}`);
+        this.savedEvidenceOffset = offset;
+        this.evidenceEvents = null;
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    },
+
+    async loadEvidenceEvents(id, offset = 0) {
+      try {
+        this.evidenceEvents = await api.get(`/evidence/packages/${id}/events?offset=${offset}`);
+        this.evidenceEventsPackage = id;
+        this.evidenceEventsOffset = offset;
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    },
+
+    async downloadEvidenceFile(path, options, filename) {
+      const headers = { ...(options.headers || {}) };
+      if (api._token()) headers.Authorization = `Bearer ${api._token()}`;
+      const response = await fetch(path, { ...options, headers });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(typeof error.detail === 'string' ? error.detail : 'Evidence download failed');
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+
+    async downloadSavedEvidence(id) {
+      try {
+        await this.downloadEvidenceFile(`/api/v1/evidence/packages/${id}/download`, {}, `evidence-package-${id}.zip`);
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    },
 
     async downloadEvidence() {
       if (!this.selectedInvestigation || !this.evidenceFindingIds.length || this.evidenceFindingIds.length > 200) {
@@ -30,25 +99,13 @@ document.addEventListener('alpine:init', () => {
       }
       this.evidenceLoading = true;
       try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (api._token()) headers.Authorization = `Bearer ${api._token()}`;
-        const response = await fetch('/api/v1/evidence/infrastructure', {
-          method: 'POST', headers,
+        await this.downloadEvidenceFile('/api/v1/evidence/infrastructure', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             investigation_id: this.selectedInvestigation.id,
             finding_ids: this.evidenceFindingIds.map(Number),
           }),
-        });
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(typeof error.detail === 'string' ? error.detail : 'Evidence export failed');
-        }
-        const url = URL.createObjectURL(await response.blob());
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `infrastructure-evidence-${this.selectedInvestigation.id}.zip`;
-        link.click();
-        URL.revokeObjectURL(url);
+        }, `infrastructure-evidence-${this.selectedInvestigation.id}.zip`);
       } catch (e) {
         showToast(e.message, 'error');
       } finally {
@@ -62,8 +119,8 @@ document.addEventListener('alpine:init', () => {
     submitLoading: false,
     pollingTimer: null,
     graphCompanies: [
-      { name: '', investigationIds: [] },
-      { name: '', investigationIds: [] },
+      { name: '', investigationIds: [], btcWallets: '', tronWallets: '' },
+      { name: '', investigationIds: [], btcWallets: '', tronWallets: '' },
     ],
     graphInvestigations: [],
     graphResult: null,
@@ -75,6 +132,72 @@ document.addEventListener('alpine:init', () => {
     walletChanges: null,
     walletChangesOffset: 0,
     walletSelectedId: null,
+    walletCompareChain: 'btc',
+    walletCompareAddresses: '',
+    walletCompareResult: null,
+    walletCompareLoading: false,
+    walletTraceSource: '',
+    walletTraceDestination: '',
+    walletTraceResult: null,
+    walletTraceLoading: false,
+    trafficEvidence: '',
+    trafficResult: null,
+    trafficLoading: false,
+
+    async analyzeTraffic() {
+      this.trafficResult = null;
+      if (!this.trafficEvidence.trim() || this.trafficEvidence.length > 200000) {
+        showToast('Enter evidence of at most 200,000 characters', 'error');
+        return;
+      }
+      this.trafficLoading = true;
+      try {
+        this.trafficResult = await api.post('/infra/analyze-traffic-evidence', { text: this.trafficEvidence });
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        this.trafficLoading = false;
+      }
+    },
+
+    async traceWallets() {
+      const source = this.walletTraceSource.trim();
+      const destination = this.walletTraceDestination.trim();
+      this.walletTraceResult = null;
+      if (!source || !destination || source === destination) {
+        showToast('Enter two distinct TRON addresses', 'error');
+        return;
+      }
+      this.walletTraceLoading = true;
+      try {
+        this.walletTraceResult = await api.post('/wallet-monitoring/trace-usdt', {
+          source_address: source, destination_address: destination,
+        });
+      } catch (e) {
+        showToast(e.message === '[object Object]' ? 'Check both TRON address formats' : e.message, 'error');
+      } finally {
+        this.walletTraceLoading = false;
+      }
+    },
+
+    async compareWallets() {
+      const addresses = this.walletCompareAddresses.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+      this.walletCompareResult = null;
+      if (addresses.length < 2 || addresses.length > 10) {
+        showToast('Enter 2–10 distinct wallet addresses, one per line', 'error');
+        return;
+      }
+      this.walletCompareLoading = true;
+      try {
+        this.walletCompareResult = await api.post('/wallet-monitoring/compare', {
+          chain: this.walletCompareChain, addresses,
+        });
+      } catch (e) {
+        showToast(e.message === '[object Object]' ? 'Check that all addresses are distinct and valid for the selected network' : e.message, 'error');
+      } finally {
+        this.walletCompareLoading = false;
+      }
+    },
 
     async openWalletWatches() {
       this.activeTab = 'wallets';
@@ -148,8 +271,15 @@ document.addEventListener('alpine:init', () => {
         showToast('Enter a distinct name for each company', 'error');
         return;
       }
-      if (this.graphCompanies.some(company => !company.investigationIds.length || company.investigationIds.length > 50)) {
-        showToast('Select 1–50 investigations per company', 'error');
+      const wallets = this.graphCompanies.map(company => [
+        ...company.btcWallets.split(/\r?\n/).map(address => ({ chain: 'btc', address: address.trim() })),
+        ...company.tronWallets.split(/\r?\n/).map(address => ({ chain: 'usdt_trc20', address: address.trim() })),
+      ].filter(wallet => wallet.address));
+      if (this.graphCompanies.some((company, index) => (
+        (!company.investigationIds.length && !wallets[index].length) ||
+        company.investigationIds.length > 50 || wallets[index].length > 50
+      ))) {
+        showToast('Assign at least one investigation or wallet; maximum 50 of each per company', 'error');
         return;
       }
       if (new Set(this.graphCompanies.flatMap(company => company.investigationIds)).size > 100) {
@@ -159,13 +289,14 @@ document.addEventListener('alpine:init', () => {
       this.graphLoading = true;
       try {
         this.graphResult = await api.post('/company-connections/graph', {
-          companies: this.graphCompanies.map(company => ({
+          companies: this.graphCompanies.map((company, index) => ({
             name: company.name.trim(),
             investigation_ids: company.investigationIds.map(Number),
+            wallets: wallets[index],
           })),
         });
       } catch (e) {
-        showToast(e.message, 'error');
+        showToast(e.message === '[object Object]' ? 'Check wallet address formats and remove duplicate addresses' : e.message, 'error');
       } finally {
         this.graphLoading = false;
       }

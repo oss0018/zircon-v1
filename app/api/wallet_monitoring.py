@@ -1,5 +1,4 @@
 """Owner-scoped confirmed wallet transaction watches."""
-import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -11,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models import User, WalletWatch, WalletWatchTransaction
+from app.services.wallet_connections import WalletTraceLimitError, compare_wallets, trace_usdt_paths
+from app.services.wallet_monitoring import WalletSourceError, normalize_address
 
 router = APIRouter()
 
@@ -22,22 +23,58 @@ class WalletWatchCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_address(self):
-        self.address = self.address.strip()
         self.label = self.label.strip()
         if not self.label:
             raise ValueError("Label must not be blank")
-        base58 = r"[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]"
-        if self.chain == "btc":
-            if self.address.upper().startswith("BC1"):
-                if self.address != self.address.lower() and self.address != self.address.upper():
-                    raise ValueError("Invalid BTC address")
-                self.address = self.address.lower()
-            valid = re.fullmatch(rf"(?:[13]{base58}{{25,34}}|bc1[ac-hj-np-z02-9]{{11,87}})", self.address)
-        else:
-            valid = re.fullmatch(rf"T{base58}{{33}}", self.address)
-        if not valid:
-            raise ValueError("Invalid address format for selected chain")
+        self.address = normalize_address(self.chain, self.address)
         return self
+
+
+class WalletComparisonRequest(BaseModel):
+    chain: Literal["btc", "usdt_trc20"]
+    addresses: list[str] = Field(min_length=2, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_addresses(self):
+        self.addresses = [normalize_address(self.chain, address) for address in self.addresses]
+        if len(set(self.addresses)) != len(self.addresses):
+            raise ValueError("Addresses must be distinct")
+        return self
+
+
+class WalletTraceRequest(BaseModel):
+    source_address: str = Field(min_length=1, max_length=100)
+    destination_address: str = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_addresses(self):
+        self.source_address = normalize_address("usdt_trc20", self.source_address)
+        self.destination_address = normalize_address("usdt_trc20", self.destination_address)
+        if self.source_address == self.destination_address:
+            raise ValueError("Source and destination must be distinct")
+        return self
+
+
+@router.post("/compare")
+async def compare(request: WalletComparisonRequest, response: Response,
+                  _: User = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return await compare_wallets(request.chain, request.addresses)
+    except WalletSourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
+
+
+@router.post("/trace-usdt")
+async def trace(request: WalletTraceRequest, response: Response,
+                _: User = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return await trace_usdt_paths(request.source_address, request.destination_address)
+    except WalletSourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
+    except WalletTraceLimitError as exc:
+        raise HTTPException(status_code=422, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
 
 
 def _output(watch: WalletWatch) -> dict:
