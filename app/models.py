@@ -451,6 +451,35 @@ class NazkWatchDocument(Base):
     discovered_after_baseline = Column(Boolean, nullable=False, default=False)
 
 
+class WalletWatch(Base):
+    __tablename__ = "wallet_watches"
+    __table_args__ = (UniqueConstraint("owner_id", "chain", "address"),)
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    chain = Column(String(16), nullable=False)
+    address = Column(String(100), nullable=False)
+    label = Column(String(255), nullable=False)
+    last_attempt = Column(DateTime, nullable=True)
+    last_success = Column(DateTime, nullable=True)
+    last_status = Column(String(20), nullable=False, default="pending")
+    last_error = Column(Text, nullable=True)
+    baseline_complete = Column(Boolean, nullable=False, default=False)
+    lease_until = Column(DateTime, nullable=True)
+    lease_token = Column(String(32), nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    transactions = relationship("WalletWatchTransaction", cascade="all, delete-orphan")
+
+
+class WalletWatchTransaction(Base):
+    __tablename__ = "wallet_watch_transactions"
+    __table_args__ = (UniqueConstraint("watch_id", "transaction_id"),)
+    id = Column(Integer, primary_key=True)
+    watch_id = Column(Integer, ForeignKey("wallet_watches.id"), nullable=False, index=True)
+    transaction_id = Column(String(64), nullable=False)
+    first_seen = Column(DateTime, default=_utcnow)
+    discovered_after_baseline = Column(Boolean, nullable=False, default=False)
+
+
 class WatchedFolder(Base):
     __tablename__ = "watched_folders"
     id = Column(Integer, primary_key=True)

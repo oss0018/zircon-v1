@@ -86,6 +86,21 @@ The authenticated `POST /api/v1/entity-registry/compare` endpoint searches the o
 
 Delaware search is not automated in this MVP: the response links to the official [Delaware Division of Corporations entity search](https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx), and any Delaware details included in the comparison are explicitly marked user-provided and unverified. Name similarity is a triage aid, not proof that two records represent the same legal entity.
 
+The Cyprus workflow links to the [official registrar search](https://efiling.drcor.mcit.gov.cy/DrcorPublic/SearchForm.aspx?sc=0&cultureInfo=en-AU) and lets users review manually entered details independently of the UK lookup. The authenticated `POST /api/v1/entity-registry/cyprus` marks those details as user-supplied and unverified; it does not search the registry or save the record. The registrar may charge for detailed historical records.
+
+### Company connection graph
+In **Infrastructure Intelligence → Company connections**, assign completed investigations to at least two named companies and build a graph of shared domain and IP indicators. The authenticated `POST /api/v1/company-connections/graph` accepts `companies`, each with a `name` and `investigation_ids`. The graph compares investigation targets and DNS subdomain, reverse-IP and historical-DNS findings; it links each match to its investigation, finding, source and recorded time. Assignments and results are not saved, and no new external searches are performed.
+
+Assignments are user-provided, and shared infrastructure may be unrelated or shared hosting. Historical findings can be stale, source collection can be incomplete even for completed investigations, and an absent match does not establish that no connection exists. This is a lead for further investigation, not proof of ownership or a legally admissible evidence package.
+
+### Wallet watches
+In **Infrastructure Intelligence → Wallet watches**, create owner-specific watches for Bitcoin mainnet or USDT TRC-20 addresses. The address is sent to Blockstream or TronGrid respectively. Checks run at most once per day; the first successful complete confirmed-transaction history establishes a baseline without alerts, and later new transaction IDs create a shared in-app notification without wallet details. Watch details and changes are visible only to their owner. Transaction links open the relevant public explorer.
+
+Only confirmed transaction IDs are monitored, not balances, amounts, counterparties, wallet ownership or fund flows. Blockchain reorganizations, provider indexing delays or outages can affect results. Checks exceeding 100 pages, incomplete pagination, rate limits and provider errors fail without advancing the baseline; the error and last successful check are displayed. These watches are not a substitute for comprehensive tracing, reconciliation or licensed Crystal, Chainalysis or TRM analysis.
+
+### Infrastructure evidence export
+From a completed infrastructure investigation, select up to 200 findings and export a ZIP containing the platform's stored records and a SHA-256 manifest. The authenticated `POST /api/v1/evidence/infrastructure` accepts `investigation_id` and `finding_ids`. The manifest is unsigned and can detect changes only when checked against a separately trusted copy. The export does not necessarily include original source artifacts and does not establish authenticity, chain of custody or legal admissibility; preserve original evidence and seek legal review.
+
 ### Court case search (US + UK)
 The authenticated `POST /api/v1/case-law/search` endpoint searches US opinions through the [CourtListener API](https://www.courtlistener.com/help/api/rest/v4/search/) and UK published decisions through The National Archives' [Find Case Law Atom API](https://caselaw.nationalarchives.gov.uk/atom.xml). Supply a `query` and optional `limit` (1-10); each source reports its status independently, so a temporary failure from one does not hide results from the other. Configure `COURTLISTENER_API_TOKEN` (or `ZIRCON_COURTLISTENER_API_TOKEN`) to enable US search; without it, the UK search still runs and the US source reports that it is unavailable.
 

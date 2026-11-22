@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.auth import get_current_user
 from app.config import settings
 from app.models import User
-from app.schemas import EntityRegistryCompareRequest
+from app.schemas import CyprusRegistryRecord, EntityRegistryCompareRequest
 from app.services.entity_registry import (
     CompaniesHouseClient,
     RegistryLookupError,
@@ -12,6 +12,20 @@ from app.services.entity_registry import (
 )
 
 router = APIRouter()
+
+CYPRUS_SEARCH_URL = "https://efiling.drcor.mcit.gov.cy/DrcorPublic/SearchForm.aspx?sc=0&cultureInfo=en-AU"
+
+
+@router.post("/cyprus")
+async def cyprus_record(request: CyprusRegistryRecord, _: User = Depends(get_current_user)):
+    return {
+        "record": {
+            **request.model_dump(), "jurisdiction": "CY",
+            "source": "Cyprus Registrar of Companies", "source_type": "user_supplied",
+            "source_url": CYPRUS_SEARCH_URL, "retrieved_at": None,
+        },
+        "notice": "Cyprus details are user-provided and have not been verified against the registry.",
+    }
 
 
 @router.post("/compare")
