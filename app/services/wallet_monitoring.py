@@ -21,7 +21,25 @@ class WalletSourceError(Exception):
     pass
 
 
-async def _snapshot(chain: str, address: str) -> set[str]:
+def normalize_address(chain: str, address: str) -> str:
+    address = address.strip()
+    base58 = r"[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]"
+    if chain == "btc":
+        if address.upper().startswith("BC1"):
+            if address != address.lower() and address != address.upper():
+                raise ValueError("Invalid BTC address")
+            address = address.lower()
+        valid = re.fullmatch(rf"(?:[13]{base58}{{25,34}}|bc1[ac-hj-np-z02-9]{{11,87}})", address)
+    elif chain == "usdt_trc20":
+        valid = re.fullmatch(rf"T{base58}{{33}}", address)
+    else:
+        raise ValueError("Unsupported chain")
+    if not valid:
+        raise ValueError("Invalid address format for selected chain")
+    return address
+
+
+async def _history(chain: str, address: str) -> list[dict]:
     async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
         async def fetch(cursor):
             try:
@@ -47,10 +65,12 @@ async def _snapshot(chain: str, address: str) -> set[str]:
             if chain == "btc":
                 if not isinstance(data, list) or len(data) > 25:
                     raise WalletSourceError("Blockstream returned an invalid transaction page")
-                if any(not isinstance(item, dict) or item.get("status", {}).get("confirmed") is not True
+                if any(not isinstance(item, dict) or not isinstance(item.get("status"), dict)
+                       or item["status"].get("confirmed") is not True
                        for item in data):
                     raise WalletSourceError("Blockstream returned an invalid confirmed transaction")
-                ids = [item.get("txid") for item in data]
+                records = data
+                ids = [item.get("txid") for item in records]
                 next_cursor = ids[-1] if len(ids) == 25 else None
             else:
                 if not isinstance(data, dict) or data.get("success") is not True or not isinstance(data.get("data"), list) or not isinstance(data.get("meta"), dict):
@@ -67,33 +87,40 @@ async def _snapshot(chain: str, address: str) -> set[str]:
                 if any(address not in (item.get("from"), item.get("to")) for item in transfers):
                     raise WalletSourceError("TronGrid returned a transfer for another account")
                 ids = [item.get("transaction_id") for item in transfers]
+                records = transfers
                 next_cursor = data["meta"].get("fingerprint")
                 if next_cursor is not None and (not isinstance(next_cursor, str) or not next_cursor or len(next_cursor) > 2048):
                     raise WalletSourceError("TronGrid returned an invalid pagination cursor")
-                if len(records) >= 200 and not next_cursor:
+                if len(data["data"]) >= 200 and not next_cursor:
                     raise WalletSourceError("TronGrid returned a full page without a pagination cursor")
             if any(not isinstance(txid, str) or not TXID.fullmatch(txid) for txid in ids):
                 raise WalletSourceError("Provider returned an invalid transaction ID")
-            return ids, next_cursor
+            return records, next_cursor
 
-        seen = set()
+        history = []
         cursors = set()
         cursor = None
         first = None
         for _ in range(MAX_PAGES):
-            ids, next_cursor = await fetch(cursor)
+            records, next_cursor = await fetch(cursor)
             if first is None:
-                first = (ids, next_cursor)
-            seen.update(ids)
+                first = (records, next_cursor)
+            history.extend(records)
             if not next_cursor:
                 if cursor is not None and await fetch(None) != first:
                     raise WalletSourceError("Provider results changed during pagination")
-                return seen
+                return history
             if next_cursor in cursors:
                 raise WalletSourceError("Provider returned a repeated pagination cursor")
             cursors.add(next_cursor)
             cursor = next_cursor
-        raise WalletSourceError(f"History exceeds the {MAX_PAGES}-page limit; baseline was not updated")
+        raise WalletSourceError(f"History exceeds the {MAX_PAGES}-page limit")
+
+
+async def _snapshot(chain: str, address: str) -> set[str]:
+    records = await _history(chain, address)
+    key = "txid" if chain == "btc" else "transaction_id"
+    return {record[key] for record in records}
 
 
 async def run_watch(db: AsyncSession, watch_id: int) -> bool:

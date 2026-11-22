@@ -210,7 +210,7 @@ class EntityRegistryCompareRequest(BaseModel):
         return self
 
 
-class CyprusRegistryRecord(BaseModel):
+class ManualRegistryRecord(BaseModel):
     name: Optional[str] = Field(None, max_length=200)
     company_number: Optional[str] = Field(None, max_length=64)
     status: Optional[str] = Field(None, max_length=100)
@@ -227,8 +227,16 @@ class CyprusRegistryRecord(BaseModel):
     @model_validator(mode="after")
     def require_identity(self):
         if not self.name and not self.company_number:
-            raise ValueError("Provide a Cyprus company name or registration number")
+            raise ValueError("Provide a company name or registration number")
         return self
+
+
+class CyprusRegistryRecord(ManualRegistryRecord):
+    pass
+
+
+class CuracaoRegistryRecord(ManualRegistryRecord):
+    pass
 
 
 class CaseLawSearchRequest(BaseModel):

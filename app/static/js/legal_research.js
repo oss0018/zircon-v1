@@ -13,10 +13,20 @@ document.addEventListener('alpine:init', () => {
     entityResult: null,
     entityLoading: false,
     entityError: '',
-    cyprusForm: { name: '', company_number: '', status: '', incorporated_on: '', registered_address: '' },
-    cyprusResult: null,
-    cyprusLoading: false,
-    cyprusError: '',
+    manualRegistries: [
+      {
+        code: 'cyprus',
+        url: 'https://efiling.drcor.mcit.gov.cy/DrcorPublic/SearchForm.aspx?sc=0&cultureInfo=en-AU',
+        form: { name: '', company_number: '', status: '', incorporated_on: '', registered_address: '' },
+        result: null, loading: false, error: '',
+      },
+      {
+        code: 'curacao',
+        url: 'https://www.curacaochamberofcommerce.com/registry-services/registry-search/',
+        form: { name: '', company_number: '', status: '', incorporated_on: '', registered_address: '' },
+        result: null, loading: false, error: '',
+      },
+    ],
     caseForm: { query: '', limit: 5 },
     caseResult: null,
     caseLoading: false,
@@ -49,23 +59,23 @@ document.addEventListener('alpine:init', () => {
 
     init() {},
 
-    async prepareCyprusRecord() {
-      const body = Object.fromEntries(Object.entries(this.cyprusForm).map(
+    async prepareManualRecord(registry) {
+      const body = Object.fromEntries(Object.entries(registry.form).map(
         ([key, value]) => [key, value.trim() || null],
       ));
       if (!body.name && !body.company_number) {
-        this.cyprusError = t('cyprus_identity_required');
+        registry.error = t(registry.code + '_identity_required');
         return;
       }
-      this.cyprusLoading = true;
-      this.cyprusResult = null;
-      this.cyprusError = '';
+      registry.loading = true;
+      registry.result = null;
+      registry.error = '';
       try {
-        this.cyprusResult = await api.post('/entity-registry/cyprus', body);
+        registry.result = await api.post('/entity-registry/' + registry.code, body);
       } catch (error) {
-        this.cyprusError = error.message || t('request_failed');
+        registry.error = error.message || t('request_failed');
       } finally {
-        this.cyprusLoading = false;
+        registry.loading = false;
       }
     },
 

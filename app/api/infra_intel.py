@@ -5,8 +5,8 @@ import json
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.api.auth import get_current_user
 from app.database import get_db, AsyncSessionLocal
 from app.models import InfraFinding, InfraInvestigation, User
 from app.services.infrastructure_intelligence import InfraOrchestrator
+from app.services.infrastructure_intelligence.traffic_evidence import TrafficEvidenceError, analyze_traffic_evidence
 
 router = APIRouter()
 
@@ -39,6 +40,34 @@ class InvestigateResponse(BaseModel):
     target_type: str
     status: str
     message: str
+
+
+class TrafficEvidenceRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200000)
+
+    @field_validator("text")
+    @classmethod
+    def require_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Evidence must not be blank")
+        return value
+
+
+@router.post("/analyze-traffic-evidence")
+async def analyze_traffic(request: Request, response: Response,
+                          _: User = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        body = TrafficEvidenceRequest.model_validate(await request.json())
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail="Supply nonblank evidence text of at most 200,000 characters",
+            headers={"Cache-Control": "no-store"},
+        )
+    try:
+        return analyze_traffic_evidence(body.text)
+    except TrafficEvidenceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
 
 
 # ── Background task wrapper ───────────────────────────────────────────────────

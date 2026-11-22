@@ -198,3 +198,25 @@ def test_cyprus_manual_record_is_unverified_and_does_not_require_uk_api_key(monk
     assert record["retrieved_at"] is None
     assert record["source_url"].startswith("https://efiling.drcor.mcit.gov.cy/")
     assert "not been verified" in response.json()["notice"]
+
+
+def test_curacao_manual_record_uses_official_search_and_is_unverified(monkeypatch):
+    client = TestClient(app)
+    assert client.post("/api/v1/entity-registry/curacao", json={"name": "Example"}).status_code == 401
+    app.dependency_overrides[get_current_user] = lambda: object()
+    monkeypatch.setattr(settings, "companies_house_api_key", "")
+    try:
+        assert client.post("/api/v1/entity-registry/curacao", json={"status": "active"}).status_code == 422
+        response = client.post("/api/v1/entity-registry/curacao", json={
+            "name": " Example ", "company_number": "12345", "status": "active",
+        })
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    record = response.json()["record"]
+    assert record["name"] == "Example"
+    assert record["jurisdiction"] == "CW"
+    assert record["source_type"] == "user_supplied"
+    assert record["retrieved_at"] is None
+    assert record["source_url"] == "https://www.curacaochamberofcommerce.com/registry-services/registry-search/"
+    assert "not been verified" in response.json()["notice"]

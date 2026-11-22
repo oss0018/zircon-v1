@@ -6651,7 +6651,7 @@
               <template x-if="activeTab !== 'detail'">
                 <div>
                   <div class="card mb-4" style="padding:12px;">
-                    <div class="flex gap-2">
+                    <div class="flex gap-2" style="flex-wrap:wrap;">
                       <button class="btn btn-sm"
                               :class="activeTab === 'new' ? 'btn-primary' : 'btn-secondary'"
                               @click="activeTab = 'new'">New Investigation</button>
@@ -6664,33 +6664,76 @@
                       <button class="btn btn-sm"
                               :class="activeTab === 'wallets' ? 'btn-primary' : 'btn-secondary'"
                               @click="openWalletWatches()">Wallet watches</button>
+                      <button class="btn btn-sm"
+                              :class="activeTab === 'evidence' ? 'btn-primary' : 'btn-secondary'"
+                              @click="openEvidencePackages()">Saved evidence</button>
+                      <button class="btn btn-sm"
+                              :class="activeTab === 'traffic' ? 'btn-primary' : 'btn-secondary'"
+                              @click="activeTab = 'traffic'">Traffic evidence</button>
                     </div>
+                  </div>
+
+                  <div x-show="activeTab === 'traffic'" class="card mb-4">
+                    <div class="card-title">Traffic-tracker evidence</div>
+                    <p class="text-sm">Paste page source or redirect headers. The text is sent to this application for analysis; no supplied URLs are fetched and the text is not saved. Remove any secrets you do not want to submit.</p>
+                    <label class="form-label" for="traffic-evidence">Page source or redirect headers</label>
+                    <textarea id="traffic-evidence" class="form-input" rows="8" maxlength="200000" x-model="trafficEvidence" @input="trafficResult = null" :disabled="trafficLoading"></textarea>
+                    <button class="btn btn-sm btn-primary" @click="analyzeTraffic()" :disabled="trafficLoading" x-text="trafficLoading ? 'Analyzing…' : 'Analyze evidence'"></button>
+                    <template x-if="trafficResult">
+                      <div class="mt-4" aria-live="polite">
+                        <p class="text-sm" x-text="trafficResult.notice"></p>
+                        <p class="text-sm" x-show="trafficResult.signals.length === 0">No supported tracker indicators found in the supplied text.</p>
+                        <p class="text-sm" x-show="trafficResult.signals_truncated">Additional indicators were omitted at the 100-result limit.</p>
+                        <template x-for="(signal, index) in trafficResult.signals" :key="index">
+                          <div class="card mb-4">
+                            <strong x-text="signal.platform + ' possible indicator — line ' + signal.line"></strong>
+                            <p class="text-sm" x-text="signal.explanation"></p>
+                            <p class="text-sm" x-show="signal.hostname" x-text="signal.hostname ? 'Supplied URL host: ' + signal.hostname : ''"></p>
+                            <a :href="signal.documentation_url" target="_blank" rel="noopener noreferrer">Vendor documentation</a>
+                          </div>
+                        </template>
+                        <div x-show="trafficResult.location_headers.length">
+                          <strong>Supplied Location headers (not a verified chain)</strong>
+                          <template x-for="(header, index) in trafficResult.location_headers" :key="index">
+                            <div class="text-sm" x-text="'Line ' + header.line + ': ' + (header.hostname || (header.relative ? 'relative target' : 'host unavailable')) + (header.has_query ? ' (query omitted)' : '')"></div>
+                          </template>
+                          <p class="text-sm" x-show="trafficResult.location_headers_truncated">Additional headers were omitted at the 100-result limit.</p>
+                        </div>
+                      </div>
+                    </template>
                   </div>
 
                   <div x-show="activeTab === 'connections'" class="card mb-4">
                     <div class="card-title">Company connection graph</div>
-                    <p class="text-sm">Assign completed infrastructure investigations to each company. Assignments are not verified and are not saved.</p>
+                    <p class="text-sm">Assign completed infrastructure investigations or wallet addresses to each company. Assignments are not verified or saved. Wallets are compared locally without querying a blockchain.</p>
                     <template x-for="(company, index) in graphCompanies" :key="index">
                       <div class="form-group">
                         <label class="form-label" :for="'graph-name-' + index" x-text="'Company ' + (index + 1)"></label>
                         <input class="form-input" :id="'graph-name-' + index" x-model="company.name" @input="graphResult = null" maxlength="200" placeholder="Company name" />
-                        <label class="form-label" :for="'graph-investigations-' + index">Completed investigations (select one or more)</label>
+                        <label class="form-label" :for="'graph-investigations-' + index">Completed investigations (optional)</label>
                         <select class="form-select" :id="'graph-investigations-' + index" x-model="company.investigationIds" @change="graphResult = null" multiple size="5">
                           <template x-for="inv in graphInvestigations" :key="inv.id">
                             <option :value="String(inv.id)" x-text="'#' + inv.id + ' — ' + inv.target + ' (' + inv.target_type + ')'"></option>
                           </template>
                         </select>
+                        <label class="form-label" :for="'graph-btc-' + index">BTC addresses (optional, one per line)</label>
+                        <textarea class="form-input" :id="'graph-btc-' + index" x-model="company.btcWallets" @input="graphResult = null" rows="2"></textarea>
+                        <label class="form-label" :for="'graph-tron-' + index">USDT TRC-20 addresses (optional, one per line)</label>
+                        <textarea class="form-input" :id="'graph-tron-' + index" x-model="company.tronWallets" @input="graphResult = null" rows="2"></textarea>
                         <button class="btn btn-sm btn-secondary" x-show="graphCompanies.length > 2" @click="graphCompanies.splice(index, 1); graphResult = null">Remove company</button>
                       </div>
                     </template>
                     <div class="flex gap-2">
-                      <button class="btn btn-sm btn-secondary" :disabled="graphCompanies.length >= 20" @click="graphCompanies.push({ name: '', investigationIds: [] }); graphResult = null">Add company</button>
+                      <button class="btn btn-sm btn-secondary" :disabled="graphCompanies.length >= 20" @click="graphCompanies.push({ name: '', investigationIds: [], btcWallets: '', tronWallets: '' }); graphResult = null">Add company</button>
                       <button class="btn btn-sm btn-primary" :disabled="graphLoading" @click="buildConnections()" x-text="graphLoading ? 'Building…' : 'Build graph'"></button>
                     </div>
                     <template x-if="graphResult">
                       <div class="mt-4">
                         <p class="text-sm" x-text="graphResult.notice"></p>
-                        <p class="text-sm" x-show="graphResult.shared_indicators.length === 0">No shared indicators found in the selected investigations.</p>
+                        <p class="text-sm" x-text="'TLS certificate findings: ' + graphResult.certificate_coverage.tls_findings + '; usable SHA-256 fingerprints: ' + graphResult.certificate_coverage.available + '; missing: ' + graphResult.certificate_coverage.missing + '; malformed records: ' + graphResult.certificate_coverage.malformed + '; invalid fingerprints: ' + graphResult.certificate_coverage.invalid + '. CT-log findings are not compared.'"></p>
+                        <p class="text-sm" x-text="'TLS endpoint IPs: ' + graphResult.tls_endpoint_coverage.available + ' usable; ' + graphResult.tls_endpoint_coverage.missing + ' missing; ' + graphResult.tls_endpoint_coverage.malformed + ' malformed records; ' + graphResult.tls_endpoint_coverage.invalid + ' invalid IPs.'"></p>
+                        <p class="text-sm" x-text="'Network open-port findings: ' + graphResult.network_coverage.open_port_findings + '; usable IPs: ' + graphResult.network_coverage.available + '; missing: ' + graphResult.network_coverage.missing + '; malformed records: ' + graphResult.network_coverage.malformed + '; invalid IPs: ' + graphResult.network_coverage.invalid + '.'"></p>
+                        <p class="text-sm" x-show="graphResult.shared_indicators.length === 0">No shared indicators found in the supplied assignments.</p>
                         <template x-for="indicator in graphResult.shared_indicators" :key="indicator.type + ':' + indicator.value">
                           <div class="card mb-4">
                             <strong x-text="indicator.type + ': ' + indicator.value"></strong>
@@ -6699,8 +6742,13 @@
                                 <span aria-hidden="true">↳ </span><strong x-text="graphResult.companies[connection.company_index].name"></strong>
                                 <template x-for="(item, evidenceIndex) in connection.evidence" :key="evidenceIndex">
                                   <div class="text-sm" style="margin-left:20px;">
-                                    <button class="btn btn-sm btn-secondary" @click="loadInvestigationDetail(item.investigation_id)" x-text="'Investigation #' + item.investigation_id"></button>
-                                    <span x-text="(item.finding_id ? 'finding #' + item.finding_id : 'assigned target') + ' · ' + item.finding_type + ' · ' + (item.source || 'unknown source') + ' · recorded ' + (item.recorded_at || 'unknown time')"></span>
+                                    <template x-if="item.investigation_id">
+                                      <div>
+                                        <button class="btn btn-sm btn-secondary" @click="loadInvestigationDetail(item.investigation_id)" x-text="'Investigation #' + item.investigation_id"></button>
+                                        <span x-text="(item.finding_id ? 'finding #' + item.finding_id : 'assigned target') + ' · ' + item.finding_type + (item.indicator_field ? ' · field: ' + item.indicator_field : '') + ' · ' + (item.source || 'unknown source') + ' · recorded ' + (item.recorded_at || 'unknown time')"></span>
+                                      </div>
+                                    </template>
+                                    <span x-show="item.source === 'user_assigned_wallet'">User-assigned wallet (unverified)</span>
                                   </div>
                                 </template>
                               </div>
@@ -6714,6 +6762,76 @@
                   <div x-show="activeTab === 'wallets'" class="card mb-4">
                     <div class="card-title">Wallet watches</div>
                     <p class="text-sm">Addresses are sent to Blockstream (BTC) or TronGrid (USDT TRC-20). Daily checks use confirmed transactions; the first complete check is a baseline without alerts. Notifications are shared but do not include wallet details.</p>
+                    <div class="card mb-4">
+                      <div class="card-title">USDT transfer paths</div>
+                      <p class="text-sm">Find direct or two-hop confirmed USDT transfer sequences between two TRON addresses. Both addresses are sent to TronGrid; results are not saved. A sequence does not prove that the same funds moved between transfers.</p>
+                      <label class="form-label" for="wallet-trace-source">Source TRON address</label>
+                      <input id="wallet-trace-source" class="form-input" x-model="walletTraceSource" @input="walletTraceResult = null" :disabled="walletTraceLoading" maxlength="100" />
+                      <label class="form-label" for="wallet-trace-destination">Destination TRON address</label>
+                      <input id="wallet-trace-destination" class="form-input" x-model="walletTraceDestination" @input="walletTraceResult = null" :disabled="walletTraceLoading" maxlength="100" />
+                      <button class="btn btn-sm btn-primary" @click="traceWallets()" :disabled="walletTraceLoading" x-text="walletTraceLoading ? 'Searching…' : 'Find paths'"></button>
+                      <template x-if="walletTraceResult">
+                        <div class="mt-4">
+                          <p class="text-sm" x-text="walletTraceResult.notice"></p>
+                          <p class="text-sm" x-show="walletTraceResult.paths.length === 0">No paths found in the returned histories.</p>
+                          <template x-for="(path, index) in walletTraceResult.paths" :key="index">
+                            <div class="card mb-4">
+                              <strong x-text="path.transfers.length + (path.transfers.length === 1 ? ' hop' : ' hops')"></strong>
+                              <p class="text-sm" x-show="path.same_timestamp_order_unknown">Transfers have the same timestamp; their order is unknown.</p>
+                              <template x-for="(leg, legIndex) in path.transfers" :key="legIndex">
+                                <div class="text-sm">
+                                  <div x-text="leg.from + ' → ' + leg.to"></div>
+                                  <div x-text="leg.amount_base_units + ' base units (6 decimals) · block timestamp (ms): ' + leg.block_timestamp_ms"></div>
+                                  <a :href="leg.source_url" target="_blank" rel="noopener noreferrer" x-text="leg.transaction_id"></a>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                    <div class="card mb-4">
+                      <div class="card-title">Compare wallet addresses</div>
+                      <p class="text-sm">Compare 2–10 addresses on one network. Their histories are sent to the selected public provider; results are not saved. Bitcoin matches show co-occurrence, not a proven transfer between specific addresses.</p>
+                      <label class="form-label" for="wallet-compare-chain">Network</label>
+                      <select id="wallet-compare-chain" class="form-select" x-model="walletCompareChain" @change="walletCompareResult = null" :disabled="walletCompareLoading">
+                        <option value="btc">Bitcoin</option>
+                        <option value="usdt_trc20">USDT on TRON</option>
+                      </select>
+                      <label class="form-label" for="wallet-compare-addresses">Addresses (one per line)</label>
+                      <textarea id="wallet-compare-addresses" class="form-input" rows="4" x-model="walletCompareAddresses" @input="walletCompareResult = null" :disabled="walletCompareLoading"></textarea>
+                      <button class="btn btn-sm btn-primary" @click="compareWallets()" :disabled="walletCompareLoading" x-text="walletCompareLoading ? 'Comparing…' : 'Compare addresses'"></button>
+                      <template x-if="walletCompareResult">
+                        <div class="mt-4">
+                          <p class="text-sm" x-text="walletCompareResult.notice"></p>
+                          <p class="text-sm" x-show="walletCompareResult.matches.length === 0">No matches found in the returned histories.</p>
+                          <template x-for="(match, index) in walletCompareResult.matches" :key="index">
+                            <div class="card mb-4">
+                              <a :href="match.source_url" target="_blank" rel="noopener noreferrer" x-text="match.transaction_id"></a>
+                              <template x-if="walletCompareResult.chain === 'btc'">
+                                <div>
+                                  <div class="text-sm">Selected inputs (satoshis):</div>
+                                  <template x-for="item in match.inputs" :key="item.address">
+                                    <div class="text-sm" x-text="item.address + ': ' + item.satoshis"></div>
+                                  </template>
+                                  <div class="text-sm">Selected outputs (satoshis):</div>
+                                  <template x-for="item in match.outputs" :key="item.address">
+                                    <div class="text-sm" x-text="item.address + ': ' + item.satoshis"></div>
+                                  </template>
+                                </div>
+                              </template>
+                              <template x-if="walletCompareResult.chain === 'usdt_trc20'">
+                                <div class="text-sm">
+                                  <div x-text="'From: ' + match.from"></div>
+                                  <div x-text="'To: ' + match.to"></div>
+                                  <div x-text="'Amount: ' + match.amount_base_units + ' base units (6 decimals)'"></div>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
                     <div class="form-group">
                       <label class="form-label" for="wallet-label">Label</label>
                       <input id="wallet-label" class="form-input" x-model="walletLabel" maxlength="255" />
@@ -6748,6 +6866,34 @@
                         </template>
                         <button class="btn btn-sm btn-secondary" :disabled="walletChangesOffset === 0" @click="showWalletChanges(walletSelectedId, Math.max(0, walletChangesOffset - 50))">Previous</button>
                         <button class="btn btn-sm btn-secondary" :disabled="walletChanges.length < 50" @click="showWalletChanges(walletSelectedId, walletChangesOffset + 50)">Next</button>
+                      </div>
+                    </template>
+                  </div>
+
+                  <div x-show="activeTab === 'evidence'" class="card mb-4">
+                    <div class="card-title">Saved evidence packages</div>
+                    <p class="text-sm">Only you can access your packages. Creation and download requests are recorded; a request does not prove delivery. Packages and events are not tamper-proof and do not establish legal admissibility. Accounts with saved packages cannot be deleted.</p>
+                    <p x-show="savedEvidence.length === 0" class="text-sm">No packages on this page.</p>
+                    <template x-for="item in savedEvidence" :key="item.id">
+                      <div class="card mb-4">
+                        <strong x-text="'Package #' + item.id + ' · investigation #' + item.investigation_id"></strong>
+                        <div class="text-sm" x-text="'Created: ' + item.created_at"></div>
+                        <div class="text-sm" style="word-break:break-all" x-text="'SHA-256: ' + item.sha256"></div>
+                        <button class="btn btn-sm btn-secondary" @click="downloadSavedEvidence(item.id)">Download</button>
+                        <button class="btn btn-sm btn-secondary" @click="loadEvidenceEvents(item.id)">Custody events</button>
+                      </div>
+                    </template>
+                    <button class="btn btn-sm btn-secondary" :disabled="savedEvidenceOffset === 0" @click="openEvidencePackages(Math.max(0, savedEvidenceOffset - 50))">Previous</button>
+                    <button class="btn btn-sm btn-secondary" :disabled="savedEvidence.length < 50" @click="openEvidencePackages(savedEvidenceOffset + 50)">Next</button>
+                    <template x-if="evidenceEvents !== null">
+                      <div class="mt-4">
+                        <div class="card-title" x-text="'Custody events for package #' + evidenceEventsPackage"></div>
+                        <p x-show="evidenceEvents.length === 0" class="text-sm">No events on this page.</p>
+                        <template x-for="event in evidenceEvents" :key="event.id">
+                          <div class="text-sm" x-text="event.recorded_at + ' · ' + event.actor_username + ' · ' + event.action"></div>
+                        </template>
+                        <button class="btn btn-sm btn-secondary" :disabled="evidenceEventsOffset === 0" @click="loadEvidenceEvents(evidenceEventsPackage, Math.max(0, evidenceEventsOffset - 50))">Previous</button>
+                        <button class="btn btn-sm btn-secondary" :disabled="evidenceEvents.length < 50" @click="loadEvidenceEvents(evidenceEventsPackage, evidenceEventsOffset + 50)">Next</button>
                       </div>
                     </template>
                   </div>
@@ -6909,8 +7055,10 @@
                     <div style="padding:16px;">
                       <p class="text-sm">Select findings to export platform records and a SHA-256 manifest. The unsigned export does not establish authenticity, chain of custody or legal admissibility.</p>
                       <button class="btn btn-sm btn-secondary" :disabled="evidenceLoading || !evidenceFindingIds.length || evidenceFindingIds.length > 200" @click="downloadEvidence()">
-                        Export selected evidence (<span x-text="evidenceFindingIds.length"></span>)
+                        Download unsaved evidence (<span x-text="evidenceFindingIds.length"></span>)
                       </button>
+                      <button class="btn btn-sm btn-primary" :disabled="evidenceLoading || !evidenceFindingIds.length || evidenceFindingIds.length > 200" @click="saveEvidence()">Save selected evidence</button>
+                      <p class="text-sm">Only saved packages have custody events; unsaved downloads are not recorded.</p>
                     </div>
                     <div class="table-wrapper">
                       <table>
@@ -8351,45 +8499,47 @@
                        x-text="t('name_similarity') + ': ' + comparison.name_similarity + '% — ' + comparison.interpretation"></p>
                   </template>
                 </div>
-                <form class="card mt-4" @submit.prevent="prepareCyprusRecord()">
-                  <h2 class="card-title" x-text="t('cyprus_registry')"></h2>
-                  <p class="text-muted" x-text="t('cyprus_note')"></p>
-                  <a href="https://efiling.drcor.mcit.gov.cy/DrcorPublic/SearchForm.aspx?sc=0&amp;cultureInfo=en-AU" target="_blank" rel="noopener noreferrer" x-text="t('cyprus_search')"></a>
+                <template x-for="registry in manualRegistries" :key="registry.code">
+                <form class="card mt-4" @submit.prevent="prepareManualRecord(registry)">
+                  <h2 class="card-title" x-text="t(registry.code + '_registry')"></h2>
+                  <p class="text-muted" x-text="t(registry.code + '_note')"></p>
+                  <a :href="registry.url" target="_blank" rel="noopener noreferrer" x-text="t(registry.code + '_search')"></a>
                   <div class="grid grid-2 gap-4 mt-4">
                     <div class="form-group">
-                      <label class="form-label" for="cyprus-name" x-text="t('cyprus_name')"></label>
-                      <input id="cyprus-name" class="form-input" x-model="cyprusForm.name" @input="cyprusResult = null" maxlength="200" />
+                      <label class="form-label" :for="registry.code + '-name'" x-text="t(registry.code + '_name')"></label>
+                      <input :id="registry.code + '-name'" class="form-input" x-model="registry.form.name" @input="registry.result = null" :disabled="registry.loading" maxlength="200" />
                     </div>
                     <div class="form-group">
-                      <label class="form-label" for="cyprus-number" x-text="t('cyprus_number')"></label>
-                      <input id="cyprus-number" class="form-input" x-model="cyprusForm.company_number" @input="cyprusResult = null" maxlength="64" />
+                      <label class="form-label" :for="registry.code + '-number'" x-text="t(registry.code + '_number')"></label>
+                      <input :id="registry.code + '-number'" class="form-input" x-model="registry.form.company_number" @input="registry.result = null" :disabled="registry.loading" maxlength="64" />
                     </div>
                     <div class="form-group">
-                      <label class="form-label" for="cyprus-status" x-text="t('status')"></label>
-                      <input id="cyprus-status" class="form-input" x-model="cyprusForm.status" @input="cyprusResult = null" maxlength="100" />
+                      <label class="form-label" :for="registry.code + '-status'" x-text="t('status')"></label>
+                      <input :id="registry.code + '-status'" class="form-input" x-model="registry.form.status" @input="registry.result = null" :disabled="registry.loading" maxlength="100" />
                     </div>
                     <div class="form-group">
-                      <label class="form-label" for="cyprus-date" x-text="t('incorporation_date')"></label>
-                      <input id="cyprus-date" class="form-input" type="date" x-model="cyprusForm.incorporated_on" @input="cyprusResult = null" />
+                      <label class="form-label" :for="registry.code + '-date'" x-text="t('incorporation_date')"></label>
+                      <input :id="registry.code + '-date'" class="form-input" type="date" x-model="registry.form.incorporated_on" @input="registry.result = null" :disabled="registry.loading" />
                     </div>
                     <div class="form-group" style="grid-column:1/-1">
-                      <label class="form-label" for="cyprus-address" x-text="t('registered_address')"></label>
-                      <input id="cyprus-address" class="form-input" x-model="cyprusForm.registered_address" @input="cyprusResult = null" maxlength="1000" />
+                      <label class="form-label" :for="registry.code + '-address'" x-text="t('registered_address')"></label>
+                      <input :id="registry.code + '-address'" class="form-input" x-model="registry.form.registered_address" @input="registry.result = null" :disabled="registry.loading" maxlength="1000" />
                     </div>
                   </div>
-                  <button class="btn btn-primary" type="submit" :disabled="cyprusLoading" x-text="t('cyprus_prepare')"></button>
-                  <div x-show="cyprusError" class="alert alert-error mt-4" x-text="cyprusError"></div>
-                  <template x-if="cyprusResult">
+                  <button class="btn btn-primary" type="submit" :disabled="registry.loading" x-text="t(registry.code + '_prepare')"></button>
+                  <div x-show="registry.error" class="alert alert-error mt-4" x-text="registry.error"></div>
+                  <template x-if="registry.result">
                     <div class="mt-4">
-                      <p class="alert alert-warning" x-text="t('cyprus_unverified')"></p>
-                      <p><strong x-text="t('cyprus_name') + ': '"></strong><span x-text="cyprusResult.record.name || '—'"></span></p>
-                      <p><strong x-text="t('cyprus_number') + ': '"></strong><span x-text="cyprusResult.record.company_number || '—'"></span></p>
-                      <p><strong x-text="t('status') + ': '"></strong><span x-text="cyprusResult.record.status || '—'"></span></p>
-                      <p><strong x-text="t('incorporation_date') + ': '"></strong><span x-text="cyprusResult.record.incorporated_on || '—'"></span></p>
-                      <p><strong x-text="t('registered_address') + ': '"></strong><span x-text="cyprusResult.record.registered_address || '—'"></span></p>
+                      <p class="alert alert-warning" x-text="t(registry.code + '_unverified')"></p>
+                      <p><strong x-text="t(registry.code + '_name') + ': '"></strong><span x-text="registry.result.record.name || '—'"></span></p>
+                      <p><strong x-text="t(registry.code + '_number') + ': '"></strong><span x-text="registry.result.record.company_number || '—'"></span></p>
+                      <p><strong x-text="t('status') + ': '"></strong><span x-text="registry.result.record.status || '—'"></span></p>
+                      <p><strong x-text="t('incorporation_date') + ': '"></strong><span x-text="registry.result.record.incorporated_on || '—'"></span></p>
+                      <p><strong x-text="t('registered_address') + ': '"></strong><span x-text="registry.result.record.registered_address || '—'"></span></p>
                     </div>
                   </template>
                 </form>
+                </template>
               </section>
 
               <section x-show="activeTab === 'cases'" role="tabpanel">
