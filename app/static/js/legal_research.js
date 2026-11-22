@@ -42,6 +42,19 @@ document.addEventListener('alpine:init', () => {
     nazkChanges: [],
     nazkChangesOffset: 0,
     nazkChangesLoading: false,
+    uaCompanyQuery: '',
+    uaCompanyOffset: 0,
+    uaCompanySearchQuery: '',
+    uaCompanyResult: null,
+    uaCompanyStatus: null,
+    uaCompanyError: '',
+    uaCompanyBusy: false,
+    uaSnapshotDate: '',
+    uaSnapshotFile: null,
+    uaCompanyWatches: [],
+    uaWatchChanges: null,
+    uaWatchChangesId: null,
+    uaWatchChangesOffset: 0,
 
     init() {},
 
@@ -181,6 +194,102 @@ document.addEventListener('alpine:init', () => {
         this.nazkWatchError = error.message || this.t('request_failed');
       } finally {
         this.nazkChangesLoading = false;
+      }
+    },
+
+    async loadUaCompanyStatus() {
+      try {
+        this.uaCompanyStatus = await api.get('/ukraine-registry/status');
+        this.uaCompanyWatches = await api.get('/ukraine-registry/watches');
+      } catch (error) {
+        this.uaCompanyError = error.message || this.t('request_failed');
+      }
+    },
+
+    async watchUaCompany(company) {
+      try {
+        await api.post('/ukraine-registry/watches/' + company.edrpou);
+        this.uaCompanyError = '';
+        await this.loadUaCompanyStatus();
+      } catch (error) {
+        this.uaCompanyError = error.message || this.t('request_failed');
+      }
+    },
+
+    async removeUaWatch(watch) {
+      try {
+        await api.delete('/ukraine-registry/watches/' + watch.id);
+        if (this.uaWatchChangesId === watch.id) this.uaWatchChangesId = null;
+        this.uaCompanyError = '';
+        await this.loadUaCompanyStatus();
+      } catch (error) {
+        this.uaCompanyError = error.message || this.t('request_failed');
+      }
+    },
+
+    async viewUaChanges(watch, offset = 0) {
+      try {
+        this.uaWatchChanges = await api.get('/ukraine-registry/watches/' + watch.id + '/changes?offset=' + offset);
+        this.uaWatchChangesId = watch.id;
+        this.uaWatchChangesOffset = offset;
+        this.uaCompanyError = '';
+      } catch (error) {
+        this.uaCompanyError = error.message || this.t('request_failed');
+      }
+    },
+
+    uaChangeValue(value) {
+      return Array.isArray(value) ? value.join('; ') || '—' : value || '—';
+    },
+
+    async toggleUaSnapshot() {
+      this.uaCompanyError = '';
+      try {
+        await api.put('/ukraine-registry/enabled?enabled=' + !this.uaCompanyStatus.enabled);
+        this.uaCompanyResult = null;
+        await this.loadUaCompanyStatus();
+      } catch (error) {
+        this.uaCompanyError = error.message || this.t('request_failed');
+      }
+    },
+
+    async uploadUaSnapshot() {
+      if (!this.uaSnapshotFile || !this.uaSnapshotDate || this.uaCompanyBusy) return;
+      this.uaCompanyBusy = true;
+      this.uaCompanyError = '';
+      try {
+        const form = new FormData();
+        form.append('file', this.uaSnapshotFile);
+        form.append('snapshot_date', this.uaSnapshotDate);
+        await api.upload('/ukraine-registry/snapshot', form);
+        this.uaCompanyResult = null;
+        this.uaWatchChangesId = null;
+        await this.loadUaCompanyStatus();
+      } catch (error) {
+        this.uaCompanyError = error.message || this.t('request_failed');
+      } finally {
+        this.uaCompanyBusy = false;
+      }
+    },
+
+    async searchUaCompanies(offset = 0, useSaved = false) {
+      if (this.uaCompanyBusy) return;
+      if (!useSaved) this.uaCompanySearchQuery = this.uaCompanyQuery.trim();
+      if (this.uaCompanySearchQuery.length < 2) {
+        this.uaCompanyError = this.t('ua_company_query_error');
+        return;
+      }
+      this.uaCompanyError = '';
+      this.uaCompanyBusy = true;
+      try {
+        this.uaCompanyResult = await api.get('/ukraine-registry/companies?q=' +
+          encodeURIComponent(this.uaCompanySearchQuery) + '&offset=' + offset);
+        this.uaCompanyOffset = offset;
+      } catch (error) {
+        this.uaCompanyResult = null;
+        this.uaCompanyError = error.message || this.t('request_failed');
+      } finally {
+        this.uaCompanyBusy = false;
       }
     },
   }));

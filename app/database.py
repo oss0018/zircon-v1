@@ -60,6 +60,39 @@ def _migrate_nazk_watches(conn) -> None:
             conn.exec_driver_sql("ALTER TABLE nazk_watches ADD COLUMN lease_token VARCHAR(32)")
 
 
+def _migrate_ukraine_registry_state(conn) -> None:
+    from sqlalchemy import inspect
+
+    inspector = inspect(conn)
+    if "ukraine_registry_state" in inspector.get_table_names():
+        columns = {column["name"] for column in inspector.get_columns("ukraine_registry_state")}
+        if "missing_edrpou_count" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE ukraine_registry_state ADD COLUMN missing_edrpou_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "invalid_edrpou_count" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE ukraine_registry_state ADD COLUMN invalid_edrpou_count INTEGER NOT NULL DEFAULT 0"
+            )
+
+
+def _migrate_ukraine_registry_companies(conn) -> None:
+    from sqlalchemy import inspect
+
+    if "ukraine_registry_companies" not in inspect(conn).get_table_names():
+        return
+    existing = conn.exec_driver_sql("SELECT COUNT(*) FROM ukraine_registry_company_records").scalar_one()
+    if existing:
+        raise RuntimeError("Cannot migrate Ukrainian registry: both old and new company tables contain data")
+    conn.exec_driver_sql(
+        "INSERT INTO ukraine_registry_company_records "
+        "(edrpou, name, short_name, name_search, status, signatories_json) "
+        "SELECT edrpou, name, short_name, name_search, status, signatories_json "
+        "FROM ukraine_registry_companies"
+    )
+    conn.exec_driver_sql("DROP TABLE ukraine_registry_companies")
+
+
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
@@ -554,6 +587,8 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate_nazk_watch_documents)
         await conn.run_sync(_migrate_nazk_watches)
+        await conn.run_sync(_migrate_ukraine_registry_state)
+        await conn.run_sync(_migrate_ukraine_registry_companies)
         # Add new columns to existing brand_alerts tables (non-destructive migration)
         await conn.run_sync(_migrate_brand_alerts)
         # Add brand_id to owned_domains if upgrading from older version

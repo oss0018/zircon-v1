@@ -3604,8 +3604,34 @@
                         @click="switchTab('watched_folders')" x-text="t('watched_folders')"></button>
                 <button x-show="isAdmin()" class="btn btn-sm" :class="activeTab==='notifications'?'btn-primary':'btn-secondary'"
                         @click="switchTab('notifications')" x-text="t('notification_settings')"></button>
+                <button x-show="isAdmin()" class="btn btn-sm" :class="activeTab==='nais_api'?'btn-primary':'btn-secondary'"
+                        @click="switchTab('nais_api')" x-text="t('nais_settings')"></button>
                 <button class="btn btn-sm" :class="activeTab==='system'?'btn-primary':'btn-secondary'"
                         @click="switchTab('system')" x-text="t('system')"></button>
+              </div>
+
+              <div x-show="activeTab==='nais_api' && isAdmin()" class="card" style="max-width:640px;">
+                <h3 class="card-title" x-text="t('nais_settings')"></h3>
+                <p class="alert alert-warning" x-text="t('nais_not_connected')"></p>
+                <p class="text-muted" x-text="t('nais_key_hint')"></p>
+                <p x-show="naisApiError" class="alert alert-error" role="alert" x-text="naisApiError"></p>
+                <button x-show="!naisApiLoaded && !naisApiBusy" type="button" class="btn btn-secondary btn-sm"
+                        @click="loadNaisApiSettings()" x-text="t('retry')"></button>
+                <form x-show="naisApiLoaded" @submit.prevent="saveNaisApiSettings()">
+                  <div class="form-group">
+                    <label class="form-label" for="nais-api-url" x-text="t('nais_api_url')"></label>
+                    <input id="nais-api-url" class="form-input" type="url" x-model="naisApi.base_url" maxlength="512" required />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="nais-api-token" x-text="t('nais_api_token')"></label>
+                    <input id="nais-api-token" class="form-input" type="password" x-model="naisApi.token"
+                           maxlength="4096" autocomplete="new-password" :required="!naisApi.token_configured" />
+                    <p class="text-muted" x-text="t(naisApi.token_configured ? 'nais_token_saved' : 'nais_token_missing')"></p>
+                  </div>
+                  <button type="submit" class="btn btn-primary" :disabled="naisApiBusy" x-text="t('save')"></button>
+                  <button type="button" class="btn btn-secondary" x-show="naisApi.token_configured"
+                          :disabled="naisApiBusy" @click="removeNaisApiSettings()" x-text="t('nais_remove')"></button>
+                </form>
               </div>
 
               <!-- ── Profile Tab ── -->
@@ -8163,6 +8189,10 @@
                 <button class="btn btn-sm" :class="activeTab === 'nazk' ? 'btn-primary' : 'btn-secondary'"
                         role="tab" :aria-selected="activeTab === 'nazk'" @click="activeTab = 'nazk'; loadNazkWatches()"
                         x-text="t('nazk_tab')"></button>
+                <button class="btn btn-sm" :class="activeTab === 'ua-companies' ? 'btn-primary' : 'btn-secondary'"
+                        role="tab" :aria-selected="activeTab === 'ua-companies'"
+                        @click="activeTab = 'ua-companies'; loadUaCompanyStatus()"
+                        x-text="t('ua_companies')"></button>
               </div>
 
               <section x-show="activeTab === 'entities'" role="tabpanel">
@@ -8497,6 +8527,102 @@
                             @click="searchNazk(nazkResult.page + 1, true)" x-text="t('nazk_next')"></button>
                   </div>
                   <p class="text-muted" x-show="nazkResult?.count > 10000" x-text="t('nazk_page_limit')"></p>
+                </div>
+              </section>
+              <section x-show="activeTab === 'ua-companies'" role="tabpanel">
+                <div class="card mb-4">
+                  <h2 class="card-title" x-text="t('ua_companies')"></h2>
+                  <p class="text-muted" x-text="t('ua_company_note')"></p>
+                  <p x-text="t('ua_source_status') + ': ' + (uaCompanyStatus?.enabled ? t('ua_enabled') : t('ua_disabled'))"></p>
+                  <p x-show="uaCompanyStatus?.snapshot_date"
+                     x-text="t('ua_snapshot_date') + ': ' + uaCompanyStatus?.snapshot_date + ' — ' + t('ua_company_total') + ': ' + uaCompanyStatus?.company_count"></p>
+                  <p x-show="uaCompanyStatus?.missing_edrpou_count" class="alert alert-warning"
+                     x-text="t('ua_missing_codes') + ': ' + uaCompanyStatus?.missing_edrpou_count"></p>
+                  <p x-show="uaCompanyStatus?.invalid_edrpou_count" class="alert alert-warning"
+                     x-text="t('ua_invalid_codes') + ': ' + uaCompanyStatus?.invalid_edrpou_count"></p>
+                  <p class="text-muted" x-text="t('ua_api_unavailable')"></p>
+                  <div x-show="currentUser?.role === 'admin' && uaCompanyStatus">
+                    <button class="btn btn-secondary btn-sm" type="button" :disabled="uaCompanyBusy"
+                            @click="toggleUaSnapshot()" x-text="uaCompanyStatus?.enabled ? t('ua_disable') : t('ua_enable')"></button>
+                    <form x-show="uaCompanyStatus?.enabled" class="mt-4" @submit.prevent="uploadUaSnapshot()">
+                      <label class="form-label" for="ua-snapshot-file" x-text="t('ua_upload')"></label>
+                      <input id="ua-snapshot-file" type="file" accept=".zip,.xml" required
+                             @change="uaSnapshotFile = $event.target.files[0] || null" />
+                      <label class="form-label" for="ua-snapshot-date" x-text="t('ua_snapshot_date')"></label>
+                      <input id="ua-snapshot-date" type="date" x-model="uaSnapshotDate" required />
+                      <button class="btn btn-primary btn-sm" type="submit" :disabled="uaCompanyBusy"
+                              x-text="uaCompanyBusy ? t('ua_importing') : t('ua_import')"></button>
+                    </form>
+                  </div>
+                  <p x-show="uaCompanyError" class="alert alert-error mt-4" role="alert" x-text="uaCompanyError"></p>
+                </div>
+                <form class="card mb-4" @submit.prevent="searchUaCompanies()">
+                  <label class="form-label" for="ua-company-query" x-text="t('ua_company_query')"></label>
+                  <input id="ua-company-query" class="form-input" x-model="uaCompanyQuery" maxlength="255" required />
+                  <button class="btn btn-primary mt-4" type="submit" :disabled="uaCompanyBusy || !uaCompanyStatus?.enabled"
+                          x-text="t('search')"></button>
+                </form>
+                <div class="card mb-4">
+                  <h2 class="card-title" x-text="t('ua_watches')"></h2>
+                  <p class="text-muted" x-text="t('ua_watch_note')"></p>
+                  <p x-show="!uaCompanyWatches.length" x-text="t('ua_no_watches')"></p>
+                  <template x-for="watch in uaCompanyWatches" :key="watch.id">
+                    <article class="card mb-3">
+                      <h4 x-text="watch.company?.name || watch.edrpou"></h4>
+                      <p x-text="'ЄДРПОУ: ' + watch.edrpou"></p>
+                      <p x-show="watch.match_status === 'missing'" class="alert alert-warning" x-text="t('ua_watch_missing')"></p>
+                      <p x-show="watch.match_status === 'ambiguous'" class="alert alert-warning" x-text="t('ua_ambiguous')"></p>
+                      <div x-show="watch.company">
+                        <p x-text="t('ua_field_short_name') + ': ' + (watch.company?.short_name || '—')"></p>
+                        <p x-text="t('ua_field_status') + ': ' + (watch.company?.status || '—')"></p>
+                        <p x-text="t('ua_signatories') + ': ' + (watch.company?.signatories?.join('; ') || '—')"></p>
+                      </div>
+                      <button type="button" class="btn btn-secondary btn-sm" @click="viewUaChanges(watch)"
+                              x-text="t('ua_view_changes')"></button>
+                      <button type="button" class="btn btn-secondary btn-sm" @click="removeUaWatch(watch)"
+                              x-text="t('nazk_remove_watch')"></button>
+                      <template x-if="uaWatchChangesId === watch.id">
+                        <div class="mt-4">
+                          <p x-show="!uaWatchChanges?.results?.length" x-text="t('ua_no_changes')"></p>
+                          <template x-for="change in (uaWatchChanges?.results || [])" :key="change.snapshot_date">
+                            <div>
+                              <strong x-text="t('ua_snapshot_date') + ': ' + change.snapshot_date"></strong>
+                              <template x-for="field in Object.keys(change.fields)" :key="field">
+                                <p x-text="t('ua_field_' + field) + ': ' + uaChangeValue(change.fields[field].before) + ' → ' + uaChangeValue(change.fields[field].after)"></p>
+                              </template>
+                            </div>
+                          </template>
+                          <button type="button" class="btn btn-secondary btn-sm" :disabled="uaWatchChangesOffset === 0"
+                                  @click="viewUaChanges(watch, uaWatchChangesOffset - 50)" x-text="t('nazk_previous')"></button>
+                          <button type="button" class="btn btn-secondary btn-sm" :disabled="!uaWatchChanges?.has_more"
+                                  @click="viewUaChanges(watch, uaWatchChangesOffset + 50)" x-text="t('nazk_next')"></button>
+                        </div>
+                      </template>
+                    </article>
+                  </template>
+                </div>
+                <div class="card" x-show="uaCompanyResult">
+                  <p x-text="t('ua_snapshot_date') + ': ' + uaCompanyResult?.snapshot_date"></p>
+                  <p x-show="uaCompanyResult?.results?.length === 0" x-text="t('no_results')"></p>
+                  <template x-for="company in (uaCompanyResult?.results || [])" :key="company.id">
+                    <article class="card mb-3">
+                      <h4 x-text="company.name || company.short_name"></h4>
+                      <p x-text="'ЄДРПОУ: ' + (company.edrpou || t('ua_no_code'))"></p>
+                      <p x-show="!company.edrpou" class="alert alert-warning" x-text="t('ua_missing_code')"></p>
+                      <p x-show="company.ambiguous" class="alert alert-warning" x-text="t('ua_ambiguous')"></p>
+                      <p x-show="company.edrpou && !company.watchable && !company.ambiguous"
+                         class="alert alert-warning" x-text="t('ua_invalid_code')"></p>
+                      <p x-text="t('status') + ': ' + (company.status || '—')"></p>
+                      <p x-text="t('ua_signatories') + ': ' + (company.signatories.join('; ') || '—')"></p>
+                      <button type="button" class="btn btn-secondary btn-sm" @click="watchUaCompany(company)"
+                              :disabled="!company.watchable || uaCompanyWatches.some(watch => watch.edrpou === company.edrpou)"
+                              x-text="t(uaCompanyWatches.some(watch => watch.edrpou === company.edrpou) ? 'ua_watching_company' : 'ua_watch_company')"></button>
+                    </article>
+                  </template>
+                  <button type="button" class="btn btn-secondary btn-sm" :disabled="uaCompanyOffset === 0 || uaCompanyBusy"
+                          @click="searchUaCompanies(uaCompanyOffset - 50, true)" x-text="t('nazk_previous')"></button>
+                  <button type="button" class="btn btn-secondary btn-sm" :disabled="!uaCompanyResult?.has_more || uaCompanyBusy"
+                          @click="searchUaCompanies(uaCompanyOffset + 50, true)" x-text="t('nazk_next')"></button>
                 </div>
               </section>
             </div><!-- /legal-research -->
